@@ -3,325 +3,426 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RenderAI</title>
+    <title>RenderAI Studio</title>
     <meta
       name="description"
-      content="Workspace local para generar prompts de render y outlines de presentacion arquitectonica."
+      content="Plataforma arquitectonica para convertir referencias en imagenes render y presentaciones PDF con flujo humano, login demo y panel administrativo."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="topbar panel">
-        <div>
-          <p class="eyebrow">RenderAI</p>
-          <h1>Render y presentacion en un solo workspace local</h1>
+    <div class="page-glow"></div>
+    <div class="page-grid"></div>
+    <div id="toastRack" class="toast-rack" aria-live="polite"></div>
+
+    <section id="authScreen" class="auth-screen">
+      <div class="auth-art panel-surface">
+        <span class="eyebrow">RenderAI Studio</span>
+        <h1>Arquitectura, imagen y presentacion en una sola experiencia.</h1>
+        <p>
+          Carga referencias, deja que la app lea objetos, rotulos, vegetacion, materiales y entorno,
+          y convierte eso en una salida lista para uso humano: una imagen render o un PDF.
+        </p>
+        <div class="credential-grid">
+          <article class="credential-card">
+            <strong>Administrador</strong>
+            <span>usuario: <b>admin</b></span>
+            <span>password: <b>123</b></span>
+          </article>
+          <article class="credential-card">
+            <strong>Arquitecto</strong>
+            <span>usuario: <b>arquitecto</b></span>
+            <span>password: <b>123</b></span>
+          </article>
         </div>
-        <div class="status-row">
-          <span id="apiStatus" class="chip">API local verificando</span>
-          <span id="imageCountPill" class="chip">0 referencias</span>
+      </div>
+
+      <form id="loginForm" class="auth-card panel-surface">
+        <div>
+          <span class="eyebrow">Ingreso</span>
+          <h2>Entrar al estudio</h2>
+          <p>Acceso demo para validar experiencia de usuario, feedback y panel de administrador.</p>
+        </div>
+
+        <label class="field">
+          <span>Usuario</span>
+          <input id="loginUsername" type="text" autocomplete="username" placeholder="admin" required />
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="123" required />
+        </label>
+
+        <button type="submit" class="button button-primary full">Ingresar</button>
+        <p id="loginError" class="inline-error hidden">Usuario o password invalido.</p>
+      </form>
+    </section>
+
+    <div id="appShell" class="app-shell hidden">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark">RA</div>
+          <div>
+            <span class="eyebrow">RenderAI Studio</span>
+            <h2>Workflow arquitectonico asistido</h2>
+          </div>
+        </div>
+
+        <nav class="top-nav" aria-label="Secciones">
+          <button id="navWorkspaceBtn" type="button" class="nav-pill active">Workspace</button>
+          <button id="navFeedbackBtn" type="button" class="nav-pill">Feedback</button>
+          <button id="navAdminBtn" type="button" class="nav-pill hidden">Admin</button>
+        </nav>
+
+        <div class="topbar-actions">
+          <span id="apiHealthChip" class="status-chip">Servidor verificando</span>
+          <span id="sessionChip" class="status-chip status-soft">Sin sesion</span>
+          <button id="logoutBtn" type="button" class="button button-ghost">Salir</button>
         </div>
       </header>
 
-      <section class="hero panel">
-        <div class="hero-copy">
-          <p class="eyebrow">Arquitectura + IA local</p>
-          <h2>Selecciona el entregable, carga insumos y genera la salida final.</h2>
-          <p>
-            El modo <strong>Render</strong> usa una imagen como referencia bloqueada. El modo <strong>Presentacion</strong>
-            organiza el brief del proyecto y genera una estructura slide por slide.
-          </p>
-          <div class="hero-actions">
-            <button id="heroUploadBtn" type="button" class="button primary">Cargar referencias</button>
-            <button id="copyPresetBtn" type="button" class="button secondary">Copiar prompt base</button>
-          </div>
-        </div>
-        <aside class="mode-switch">
-          <button id="modeRenderBtn" type="button" class="mode-card active" aria-pressed="true">
-            <strong>Render de imagen</strong>
-            <span>Prompt detallado para archviz con geometria bloqueada.</span>
-          </button>
-          <button id="modePresentationBtn" type="button" class="mode-card" aria-pressed="false">
-            <strong>Presentacion PDF</strong>
-            <span>Outline ejecutivo para vender o explicar el proyecto.</span>
-          </button>
-        </aside>
-      </section>
-
-      <section class="workspace">
-        <section class="panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Insumos</p>
-              <h3>Carga base</h3>
+      <main class="studio-layout">
+        <section id="workspaceView" class="workspace-stack">
+          <section class="hero-card panel-surface">
+            <div class="hero-copy">
+              <span class="eyebrow">Entrega final</span>
+              <h3>Menos pasos, mas control humano y una salida lista para usar.</h3>
+              <p>
+                El prompt existe, pero queda interno. La experiencia visible se concentra en dos cosas:
+                generar una imagen render o construir un PDF con estructura comercial y tecnica.
+              </p>
             </div>
-          </div>
 
-          <input id="imageInput" class="hidden" type="file" accept="image/*" multiple />
-          <input id="documentInput" class="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.svg" multiple />
-
-          <button id="dropzone" type="button" class="dropzone">
-            <strong id="uploadTitle">Arrastra imagenes de referencia</strong>
-            <span id="uploadHint">Sube fotos o renders base para fijar composicion, materiales y atmosfera.</span>
-          </button>
-
-          <div id="thumbGrid" class="list"></div>
-          <div id="documentList" class="list hidden"></div>
-
-          <div class="section-head compact">
-            <div>
-              <p class="eyebrow">QA</p>
-              <h4>Checklist</h4>
+            <div class="hero-actions">
+              <button id="modeRenderBtn" type="button" class="mode-card active">
+                <strong>Imagen render</strong>
+                <span>Flujo visual con descomposicion de referencias y generacion de salida tipo imagen.</span>
+              </button>
+              <button id="modePresentationBtn" type="button" class="mode-card">
+                <strong>Presentacion PDF</strong>
+                <span>Deck arquitectonico con paginas, audiencia, tono, narrativa y soporte base.</span>
+              </button>
             </div>
-          </div>
-          <div id="qaChecklist" class="stack"></div>
+          </section>
+
+          <section class="main-grid">
+            <section class="panel-surface upload-panel">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Paso 1</span>
+                  <h3>Insumos y carga</h3>
+                </div>
+                <span id="assetCounter" class="status-chip status-soft">0 archivos</span>
+              </div>
+
+              <input id="imageInput" class="hidden" type="file" accept="image/*" multiple />
+              <input id="documentInput" class="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple />
+
+              <button id="uploadDropzone" type="button" class="upload-dropzone">
+                <strong id="dropzoneTitle">Arrastra o selecciona imagenes de referencia</strong>
+                <span id="dropzoneHint">Sube una o varias imagenes. Luego marcas una como principal y la app relaciona la lectura directamente con esa escena.</span>
+              </button>
+
+              <div id="imageGallery" class="asset-grid"></div>
+              <div id="documentGallery" class="asset-grid hidden"></div>
+            </section>
+
+            <section class="panel-surface intelligence-panel">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Paso 2</span>
+                  <h3>Descomposicion inteligente</h3>
+                </div>
+                <span id="analysisState" class="status-chip">Esperando imagen principal</span>
+              </div>
+
+              <div class="preview-shell">
+                <div id="previewEmpty" class="preview-empty">
+                  <strong>La imagen principal aparecera aqui</strong>
+                  <span>Cuando elijas una referencia principal veras detecciones, textos y lectura material sobre la misma imagen.</span>
+                </div>
+                <img id="mainPreview" class="preview-image hidden" alt="Referencia principal" />
+                <svg id="previewOverlay" class="preview-overlay hidden" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+              </div>
+
+              <div class="meta-strip">
+                <article class="mini-card"><span>Resolucion</span><strong id="metaResolution">-</strong></article>
+                <article class="mini-card"><span>Aspecto</span><strong id="metaAspect">-</strong></article>
+                <article class="mini-card"><span>Luz</span><strong id="metaLight">-</strong></article>
+                <article class="mini-card"><span>Entorno</span><strong id="metaEnvironment">-</strong></article>
+              </div>
+
+              <div class="intelligence-grid">
+                <article class="info-card">
+                  <span class="eyebrow">Objetos</span>
+                  <div id="objectsList" class="token-list"></div>
+                </article>
+                <article class="info-card">
+                  <span class="eyebrow">Rotulos y texto</span>
+                  <div id="textList" class="token-list"></div>
+                </article>
+                <article class="info-card">
+                  <span class="eyebrow">Materiales</span>
+                  <div id="materialsList" class="token-list"></div>
+                </article>
+                <article class="info-card">
+                  <span class="eyebrow">Entorno</span>
+                  <div id="environmentList" class="token-list"></div>
+                </article>
+                <article class="info-card info-card-wide">
+                  <span class="eyebrow">Paleta</span>
+                  <div id="paletteList" class="palette-list"></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="panel-surface controls-panel">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Paso 3</span>
+                  <h3>Decision humana</h3>
+                </div>
+              </div>
+
+              <div class="field-grid two">
+                <label class="field">
+                  <span>Nombre del proyecto</span>
+                  <input id="projectName" type="text" placeholder="Ej. Arenal Adventure Park" />
+                </label>
+                <label class="field">
+                  <span>Ubicacion</span>
+                  <input id="projectLocation" type="text" placeholder="Ej. La Fortuna, Costa Rica" />
+                </label>
+              </div>
+
+              <div class="field-grid two">
+                <label class="field">
+                  <span>Tipologia</span>
+                  <input id="projectTypology" type="text" placeholder="Hospitality, retail, vivienda, turismo..." />
+                </label>
+                <label class="field">
+                  <span>Programa</span>
+                  <input id="projectProgram" type="text" placeholder="Recepcion, cafeteria, tienda, terrazas..." />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Contexto o guia principal</span>
+                <textarea id="projectGuide" placeholder="Describe la intencion del proyecto, la atmosfera, el objetivo comercial o la expectativa del cliente."></textarea>
+              </label>
+
+              <div class="field-grid two render-only">
+                <label class="field">
+                  <span>Fidelidad</span>
+                  <select id="fidelitySelect"></select>
+                </label>
+                <label class="field">
+                  <span>Realismo</span>
+                  <select id="realismSelect"></select>
+                </label>
+              </div>
+
+              <div class="field-grid two render-only">
+                <label class="field">
+                  <span>Estilo de imagen</span>
+                  <select id="imageStyleSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Estilo de render</span>
+                  <select id="renderStyleSelect"></select>
+                </label>
+              </div>
+
+              <div class="field-grid two render-only">
+                <label class="field">
+                  <span>Hora del dia</span>
+                  <select id="timeOfDaySelect"></select>
+                </label>
+                <label class="field">
+                  <span>Tipo de luz</span>
+                  <select id="lightTypeSelect"></select>
+                </label>
+              </div>
+
+              <div class="field-grid two render-only">
+                <label class="field">
+                  <span>Angulo de la foto</span>
+                  <select id="cameraAngleSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Personas</span>
+                  <select id="peopleSelect"></select>
+                </label>
+              </div>
+
+              <div class="field-grid two render-only">
+                <label class="field">
+                  <span>Output esperado</span>
+                  <select id="renderOutputSelect"></select>
+                </label>
+                <label class="field">
+                  <span>Idioma interno</span>
+                  <select id="languageSelect"></select>
+                </label>
+              </div>
+
+              <div class="presentation-only hidden">
+                <div class="field-grid two">
+                  <label class="field">
+                    <span>Paginas</span>
+                    <select id="pdfPagesSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Audiencia</span>
+                    <select id="pdfAudienceSelect"></select>
+                  </label>
+                </div>
+
+                <div class="field-grid two">
+                  <label class="field">
+                    <span>Tono</span>
+                    <select id="pdfToneSelect"></select>
+                  </label>
+                  <label class="field">
+                    <span>Planos</span>
+                    <select id="plansSelect"></select>
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>Que debe incluir el PDF</span>
+                  <textarea id="pdfBrief" placeholder="Ej. Portada, oportunidad, sitio, programa, experiencia, materialidad, planos, fases, cierre comercial."></textarea>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel-surface output-panel">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Paso 4</span>
+                  <h3 id="outputHeading">Salida visible</h3>
+                </div>
+                <span id="outputState" class="status-chip">Lista para generar</span>
+              </div>
+
+              <div class="action-row">
+                <button id="generatePrimaryBtn" type="button" class="button button-primary">Generar salida</button>
+                <button id="exportPdfBtn" type="button" class="button button-secondary">Exportar PDF</button>
+                <button id="downloadImageBtn" type="button" class="button button-secondary">Descargar imagen</button>
+                <button id="toggleDebugBtn" type="button" class="button button-ghost hidden">Ver prompt interno</button>
+              </div>
+
+              <div id="renderOutputs" class="render-output-shell">
+                <div id="renderHero" class="render-hero empty-state">
+                  <strong>Aun no hay salida generada</strong>
+                  <span>La imagen final o la simulacion local aparecera aqui cuando ejecutes el flujo.</span>
+                </div>
+                <div id="renderGallery" class="render-gallery"></div>
+              </div>
+
+              <div id="pdfOutputs" class="pdf-output-shell hidden">
+                <div id="slidesBoard" class="slides-board empty-state">
+                  <strong>No hay deck preparado</strong>
+                  <span>Completa la guia del PDF y genera la estructura.</span>
+                </div>
+              </div>
+
+              <details id="debugPanel" class="debug-panel hidden">
+                <summary>Prompt interno de sistema</summary>
+                <textarea id="internalPrompt" readonly spellcheck="false"></textarea>
+              </details>
+            </section>
+          </section>
         </section>
 
-        <section class="panel main-panel">
-          <article id="renderStage">
+        <section id="feedbackView" class="support-grid hidden">
+          <section class="panel-surface">
             <div class="section-head">
               <div>
-                <p class="eyebrow">Vista principal</p>
-                <h3>Preview y analisis</h3>
-              </div>
-              <span id="analysisStatus" class="chip">Esperando imagen</span>
-            </div>
-
-            <div class="preview">
-              <div id="previewEmpty" class="preview-empty">
-                <strong>La imagen principal aparecera aqui</strong>
-                <span>Selecciona una referencia para leer brillo, bordes, proporcion y mood de luz.</span>
-              </div>
-              <img id="mainPreview" class="main-preview hidden" alt="" />
-              <div id="previewOverlay" class="overlay hidden">
-                <div><span>Resolucion</span><strong id="metaResolution">-</strong></div>
-                <div><span>Relacion</span><strong id="metaAspect">-</strong></div>
-                <div><span>Luz</span><strong id="metaLight">-</strong></div>
-                <div><span>Bordes</span><strong id="metaEdges">-</strong></div>
+                <span class="eyebrow">Feedback</span>
+                <h3>Decir que funciono y que no</h3>
               </div>
             </div>
 
-            <div id="renderInsights" class="analysis-grid">
-              <article class="card">
-                <p class="eyebrow">Perfil</p>
-                <h4 id="sceneProfile">Sin datos</h4>
-                <p id="sceneSummary">Carga una imagen para obtener una lectura automatica de escena.</p>
-              </article>
-              <article class="card">
-                <p class="eyebrow">Paleta</p>
-                <h4>Color dominante</h4>
-                <div id="paletteSwatches" class="swatches"></div>
-              </article>
-              <article class="card">
-                <p class="eyebrow">Riesgos</p>
-                <h4>Alertas</h4>
-                <div id="riskList" class="stack"></div>
-              </article>
-            </div>
-          </article>
+            <form id="feedbackForm" class="stack-form">
+              <div class="field-grid two">
+                <label class="field">
+                  <span>Categoria</span>
+                  <select id="feedbackCategory">
+                    <option value="ui">UI / UX</option>
+                    <option value="render">Salida render</option>
+                    <option value="pdf">Salida PDF</option>
+                    <option value="analysis">Descomposicion</option>
+                    <option value="bug">Bug</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Valoracion</span>
+                  <select id="feedbackRating">
+                    <option value="5">5 - Excelente</option>
+                    <option value="4">4 - Buena</option>
+                    <option value="3">3 - Mejorable</option>
+                    <option value="2">2 - Debil</option>
+                    <option value="1">1 - Mala</option>
+                  </select>
+                </label>
+              </div>
 
-          <article id="presentationStage" class="hidden">
+              <label class="field">
+                <span>Comentario</span>
+                <textarea id="feedbackMessage" placeholder="Cuenta que salio bien, que fallo o que deberiamos cambiar."></textarea>
+              </label>
+
+              <button type="submit" class="button button-primary">Enviar feedback</button>
+            </form>
+          </section>
+
+          <section class="panel-surface">
             <div class="section-head">
               <div>
-                <p class="eyebrow">Narrativa</p>
-                <h3>Resumen ejecutivo</h3>
+                <span class="eyebrow">Historial</span>
+                <h3>Tus comentarios</h3>
               </div>
-              <span class="chip">Modo presentacion</span>
             </div>
-
-            <div class="analysis-grid">
-              <article class="card card-wide">
-                <p class="eyebrow">Historia</p>
-                <h4>Enfoque del deck</h4>
-                <p id="presentationSummary">Todavia no hay contexto escrito.</p>
-              </article>
-              <article class="card">
-                <p class="eyebrow">Tipologia</p>
-                <h4 id="presentationTypology">Pendiente</h4>
-              </article>
-              <article class="card">
-                <p class="eyebrow">Ubicacion</p>
-                <h4 id="presentationLocation">Pendiente</h4>
-              </article>
-              <article class="card">
-                <p class="eyebrow">Slides</p>
-                <h4 id="presentationSlides">Pendiente</h4>
-              </article>
-              <article class="card">
-                <p class="eyebrow">Archivos base</p>
-                <h4 id="presentationDocsInfo">Sin adjuntos</h4>
-              </article>
-            </div>
-          </article>
+            <div id="feedbackHistory" class="feedback-list"></div>
+          </section>
         </section>
 
-        <section class="panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Controles</p>
-              <h3 id="controlsHeading">Parametros</h3>
+        <section id="adminView" class="support-grid hidden">
+          <section class="panel-surface">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Administrador</span>
+                <h3>Estado general</h3>
+              </div>
             </div>
-          </div>
+            <div class="admin-stats">
+              <article class="stat-card"><span>Feedback total</span><strong id="adminFeedbackCount">0</strong></article>
+              <article class="stat-card"><span>Pendientes</span><strong id="adminPendingCount">0</strong></article>
+              <article class="stat-card"><span>Imagenes generadas</span><strong id="adminRenderCount">0</strong></article>
+              <article class="stat-card"><span>PDFs preparados</span><strong id="adminPdfCount">0</strong></article>
+            </div>
+          </section>
 
-          <div id="renderControls" class="controls">
-            <label class="field">
-              <span>Contexto del proyecto</span>
-              <textarea id="projectContext" placeholder="Describe el proyecto, el cliente, la intencion espacial o comercial."></textarea>
-            </label>
-            <div class="field-grid">
-              <label class="field">
-                <span>Fidelidad</span>
-                <input id="fidelity" type="range" min="1" max="10" step="1" />
-                <small id="fidelityLabel"></small>
-              </label>
-              <label class="field">
-                <span>Realismo</span>
-                <input id="realism" type="range" min="1" max="10" step="1" />
-                <small id="realismLabel"></small>
-              </label>
+          <section class="panel-surface">
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">Bandeja</span>
+                <h3>Feedback recibido</h3>
+              </div>
             </div>
-            <div class="field-grid">
-              <label class="field">
-                <span>Image style</span>
-                <select id="imageStyle">
-                  <option value="ultra-photorealistic architectural photography">Ultra photorealistic architectural photography</option>
-                  <option value="editorial interior photography">Editorial interior photography</option>
-                  <option value="luxury hospitality visualization">Luxury hospitality visualization</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Render style</span>
-                <select id="renderStyle">
-                  <option value="V-Ray / Corona / physically based">V-Ray / Corona / physically based</option>
-                  <option value="soft editorial realism">Soft editorial realism</option>
-                  <option value="high-end hospitality realism">High-end hospitality realism</option>
-                </select>
-              </label>
-            </div>
-            <div class="field-grid">
-              <label class="field">
-                <span>Hora del dia</span>
-                <select id="timeOfDay">
-                  <option value="morning">Morning</option>
-                  <option value="golden hour">Golden hour</option>
-                  <option value="midday">Midday</option>
-                  <option value="night">Night</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Tipo de luz</span>
-                <select id="lightType">
-                  <option value="natural daylight">Natural daylight</option>
-                  <option value="soft diffuse skylight">Soft diffuse skylight</option>
-                  <option value="warm ambient architectural lighting">Warm ambient architectural lighting</option>
-                </select>
-              </label>
-            </div>
-            <div class="field-grid">
-              <label class="field">
-                <span>Angulo</span>
-                <select id="photoAngle">
-                  <option value="eye-level frontal">Eye-level frontal</option>
-                  <option value="slight three-quarter">Slight three-quarter</option>
-                  <option value="wide perspective">Wide perspective</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Personas</span>
-                <select id="peopleMode">
-                  <option value="subtle ambient people">Subtle ambient people</option>
-                  <option value="no people">No people</option>
-                  <option value="natural occupancy">Natural occupancy</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div id="presentationControls" class="controls hidden">
-            <label class="field">
-              <span>Contexto del proyecto</span>
-              <textarea id="presentationContext" placeholder="Que proyecto es, que oportunidad existe y que debe comunicar el deck."></textarea>
-            </label>
-            <div class="field-grid">
-              <label class="field">
-                <span>Tipologia</span>
-                <input id="projectTypology" type="text" placeholder="Hotel, retail, vivienda, masterplan..." />
-              </label>
-              <label class="field">
-                <span>Ubicacion</span>
-                <input id="projectLocation" type="text" placeholder="Ciudad, pais, costa, montana..." />
-              </label>
-            </div>
-            <label class="field">
-              <span>Programa arquitectonico</span>
-              <textarea id="projectProgram" placeholder="Usos, piezas clave, experiencia y prioridades funcionales."></textarea>
-            </label>
-            <div class="field-grid">
-              <label class="field">
-                <span>Tono comercial</span>
-                <select id="commercialTone">
-                  <option value="premium persuasive">Premium persuasive</option>
-                  <option value="institutional and confident">Institutional and confident</option>
-                  <option value="investor-ready">Investor-ready</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Necesita planos</span>
-                <select id="needsPlans">
-                  <option value="yes">Si</option>
-                  <option value="no">No</option>
-                </select>
-              </label>
-            </div>
-            <div class="field-grid">
-              <label class="field">
-                <span>Cantidad de slides</span>
-                <input id="slideCount" type="number" min="4" max="30" step="1" />
-              </label>
-              <label class="field">
-                <span>Objetivo principal</span>
-                <input id="presentationGoal" type="text" placeholder="Vender, aprobar, captar inversion, explicar..." />
-              </label>
-            </div>
-          </div>
-
-          <label class="field">
-            <span>Idioma de salida</span>
-            <select id="promptLanguage">
-              <option value="english">English</option>
-              <option value="spanish">Espanol</option>
-            </select>
-          </label>
+            <div id="adminFeedbackQueue" class="feedback-list"></div>
+          </section>
         </section>
-
-        <section class="panel output-panel">
-          <div class="section-head">
-            <div>
-              <p class="eyebrow">Salida</p>
-              <h3 id="outputHeading">Prompt final de render</h3>
-            </div>
-            <span id="promptConfidence" class="chip">Plantilla lista</span>
-          </div>
-          <div class="status-row">
-            <span id="promptLength" class="chip">0 caracteres</span>
-            <span id="promptMode" class="chip">Prompt en ingles</span>
-          </div>
-          <textarea id="promptOutput" readonly spellcheck="false"></textarea>
-          <div class="hero-actions">
-            <button id="generateOutputBtn" type="button" class="button secondary">Regenerar con backend</button>
-            <button id="exportPdfBtn" type="button" class="button secondary">Exportar PDF</button>
-            <button id="copyPromptBtn" type="button" class="button primary">Copiar salida</button>
-            <button id="downloadJsonBtn" type="button" class="button secondary">Descargar JSON</button>
-          </div>
-        </section>
-      </section>
-    </main>
+      </main>
+    </div>
 
     <script src="./app.js"></script>
   </body>
