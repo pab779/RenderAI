@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RenderAI</title>
+    <meta
+      name="description"
+      content="Workspace local para generar prompts de render y outlines de presentacion arquitectonica."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar panel">
+        <div>
+          <p class="eyebrow">RenderAI</p>
+          <h1>Render y presentacion en un solo workspace local</h1>
+        </div>
+        <div class="status-row">
+          <span id="apiStatus" class="chip">API local verificando</span>
+          <span id="imageCountPill" class="chip">0 referencias</span>
+        </div>
+      </header>
+
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Arquitectura + IA local</p>
+          <h2>Selecciona el entregable, carga insumos y genera la salida final.</h2>
+          <p>
+            El modo <strong>Render</strong> usa una imagen como referencia bloqueada. El modo <strong>Presentacion</strong>
+            organiza el brief del proyecto y genera una estructura slide por slide.
+          </p>
+          <div class="hero-actions">
+            <button id="heroUploadBtn" type="button" class="button primary">Cargar referencias</button>
+            <button id="copyPresetBtn" type="button" class="button secondary">Copiar prompt base</button>
+          </div>
+        </div>
+        <aside class="mode-switch">
+          <button id="modeRenderBtn" type="button" class="mode-card active" aria-pressed="true">
+            <strong>Render de imagen</strong>
+            <span>Prompt detallado para archviz con geometria bloqueada.</span>
+          </button>
+          <button id="modePresentationBtn" type="button" class="mode-card" aria-pressed="false">
+            <strong>Presentacion PDF</strong>
+            <span>Outline ejecutivo para vender o explicar el proyecto.</span>
+          </button>
+        </aside>
+      </section>
+
+      <section class="workspace">
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Insumos</p>
+              <h3>Carga base</h3>
+            </div>
+          </div>
+
+          <input id="imageInput" class="hidden" type="file" accept="image/*" multiple />
+          <input id="documentInput" class="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.svg" multiple />
+
+          <button id="dropzone" type="button" class="dropzone">
+            <strong id="uploadTitle">Arrastra imagenes de referencia</strong>
+            <span id="uploadHint">Sube fotos o renders base para fijar composicion, materiales y atmosfera.</span>
+          </button>
+
+          <div id="thumbGrid" class="list"></div>
+          <div id="documentList" class="list hidden"></div>
+
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">QA</p>
+              <h4>Checklist</h4>
+            </div>
+          </div>
+          <div id="qaChecklist" class="stack"></div>
+        </section>
+
+        <section class="panel main-panel">
+          <article id="renderStage">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Vista principal</p>
+                <h3>Preview y analisis</h3>
+              </div>
+              <span id="analysisStatus" class="chip">Esperando imagen</span>
+            </div>
+
+            <div class="preview">
+              <div id="previewEmpty" class="preview-empty">
+                <strong>La imagen principal aparecera aqui</strong>
+                <span>Selecciona una referencia para leer brillo, bordes, proporcion y mood de luz.</span>
+              </div>
+              <img id="mainPreview" class="main-preview hidden" alt="" />
+              <div id="previewOverlay" class="overlay hidden">
+                <div><span>Resolucion</span><strong id="metaResolution">-</strong></div>
+                <div><span>Relacion</span><strong id="metaAspect">-</strong></div>
+                <div><span>Luz</span><strong id="metaLight">-</strong></div>
+                <div><span>Bordes</span><strong id="metaEdges">-</strong></div>
+              </div>
+            </div>
+
+            <div id="renderInsights" class="analysis-grid">
+              <article class="card">
+                <p class="eyebrow">Perfil</p>
+                <h4 id="sceneProfile">Sin datos</h4>
+                <p id="sceneSummary">Carga una imagen para obtener una lectura automatica de escena.</p>
+              </article>
+              <article class="card">
+                <p class="eyebrow">Paleta</p>
+                <h4>Color dominante</h4>
+                <div id="paletteSwatches" class="swatches"></div>
+              </article>
+              <article class="card">
+                <p class="eyebrow">Riesgos</p>
+                <h4>Alertas</h4>
+                <div id="riskList" class="stack"></div>
+              </article>
+            </div>
+          </article>
+
+          <article id="presentationStage" class="hidden">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Narrativa</p>
+                <h3>Resumen ejecutivo</h3>
+              </div>
+              <span class="chip">Modo presentacion</span>
+            </div>
+
+            <div class="analysis-grid">
+              <article class="card card-wide">
+                <p class="eyebrow">Historia</p>
+                <h4>Enfoque del deck</h4>
+                <p id="presentationSummary">Todavia no hay contexto escrito.</p>
+              </article>
+              <article class="card">
+                <p class="eyebrow">Tipologia</p>
+                <h4 id="presentationTypology">Pendiente</h4>
+              </article>
+              <article class="card">
+                <p class="eyebrow">Ubicacion</p>
+                <h4 id="presentationLocation">Pendiente</h4>
+              </article>
+              <article class="card">
+                <p class="eyebrow">Slides</p>
+                <h4 id="presentationSlides">Pendiente</h4>
+              </article>
+              <article class="card">
+                <p class="eyebrow">Archivos base</p>
+                <h4 id="presentationDocsInfo">Sin adjuntos</h4>
+              </article>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Controles</p>
+              <h3 id="controlsHeading">Parametros</h3>
+            </div>
+          </div>
+
+          <div id="renderControls" class="controls">
+            <label class="field">
+              <span>Contexto del proyecto</span>
+              <textarea id="projectContext" placeholder="Describe el proyecto, el cliente, la intencion espacial o comercial."></textarea>
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span>Fidelidad</span>
+                <input id="fidelity" type="range" min="1" max="10" step="1" />
+                <small id="fidelityLabel"></small>
+              </label>
+              <label class="field">
+                <span>Realismo</span>
+                <input id="realism" type="range" min="1" max="10" step="1" />
+                <small id="realismLabel"></small>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span>Image style</span>
+                <select id="imageStyle">
+                  <option value="ultra-photorealistic architectural photography">Ultra photorealistic architectural photography</option>
+                  <option value="editorial interior photography">Editorial interior photography</option>
+                  <option value="luxury hospitality visualization">Luxury hospitality visualization</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Render style</span>
+                <select id="renderStyle">
+                  <option value="V-Ray / Corona / physically based">V-Ray / Corona / physically based</option>
+                  <option value="soft editorial realism">Soft editorial realism</option>
+                  <option value="high-end hospitality realism">High-end hospitality realism</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span>Hora del dia</span>
+                <select id="timeOfDay">
+                  <option value="morning">Morning</option>
+                  <option value="golden hour">Golden hour</option>
+                  <option value="midday">Midday</option>
+                  <option value="night">Night</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Tipo de luz</span>
+                <select id="lightType">
+                  <option value="natural daylight">Natural daylight</option>
+                  <option value="soft diffuse skylight">Soft diffuse skylight</option>
+                  <option value="warm ambient architectural lighting">Warm ambient architectural lighting</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span>Angulo</span>
+                <select id="photoAngle">
+                  <option value="eye-level frontal">Eye-level frontal</option>
+                  <option value="slight three-quarter">Slight three-quarter</option>
+                  <option value="wide perspective">Wide perspective</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Personas</span>
+                <select id="peopleMode">
+                  <option value="subtle ambient people">Subtle ambient people</option>
+                  <option value="no people">No people</option>
+                  <option value="natural occupancy">Natural occupancy</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div id="presentationControls" class="controls hidden">
+            <label class="field">
+              <span>Contexto del proyecto</span>
+              <textarea id="presentationContext" placeholder="Que proyecto es, que oportunidad existe y que debe comunicar el deck."></textarea>
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span>Tipologia</span>
+                <input id="projectTypology" type="text" placeholder="Hotel, retail, vivienda, masterplan..." />
+              </label>
+              <label class="field">
+                <span>Ubicacion</span>
+                <input id="projectLocation" type="text" placeholder="Ciudad, pais, costa, montana..." />
+              </label>
+            </div>
+            <label class="field">
+              <span>Programa arquitectonico</span>
+              <textarea id="projectProgram" placeholder="Usos, piezas clave, experiencia y prioridades funcionales."></textarea>
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span>Tono comercial</span>
+                <select id="commercialTone">
+                  <option value="premium persuasive">Premium persuasive</option>
+                  <option value="institutional and confident">Institutional and confident</option>
+                  <option value="investor-ready">Investor-ready</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Necesita planos</span>
+                <select id="needsPlans">
+                  <option value="yes">Si</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span>Cantidad de slides</span>
+                <input id="slideCount" type="number" min="4" max="30" step="1" />
+              </label>
+              <label class="field">
+                <span>Objetivo principal</span>
+                <input id="presentationGoal" type="text" placeholder="Vender, aprobar, captar inversion, explicar..." />
+              </label>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Idioma de salida</span>
+            <select id="promptLanguage">
+              <option value="english">English</option>
+              <option value="spanish">Espanol</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="panel output-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Salida</p>
+              <h3 id="outputHeading">Prompt final de render</h3>
+            </div>
+            <span id="promptConfidence" class="chip">Plantilla lista</span>
+          </div>
+          <div class="status-row">
+            <span id="promptLength" class="chip">0 caracteres</span>
+            <span id="promptMode" class="chip">Prompt en ingles</span>
+          </div>
+          <textarea id="promptOutput" readonly spellcheck="false"></textarea>
+          <div class="hero-actions">
+            <button id="generateOutputBtn" type="button" class="button secondary">Regenerar con backend</button>
+            <button id="exportPdfBtn" type="button" class="button secondary">Exportar PDF</button>
+            <button id="copyPromptBtn" type="button" class="button primary">Copiar salida</button>
+            <button id="downloadJsonBtn" type="button" class="button secondary">Descargar JSON</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
