@@ -1,0 +1,17 @@
+outputs/
+desktop-tutorial/
+node_modules/
+*.local
+.env
+.env.*
+last-openai-body.json
+tmp-*.json
+tmp-*.log
+tmp-*.py
+tmp-*.sh
+server-*.log
+server-*.out.log
+server-*.err.log
+*.key
+*.secret
+*.secure.txt

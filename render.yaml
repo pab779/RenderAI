@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: renderai-studio
+    env: docker
+    plan: free
+    autoDeploy: false
+    envVars:
+      - key: RENDERAI_PUBLIC_BIND
+        value: "1"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: RENDERAI_ADMIN_USER
+        value: admin
+      - key: RENDERAI_ADMIN_PASSWORD
+        sync: false
+      - key: RENDERAI_ARCHITECT_USER
+        value: arquitecto
+      - key: RENDERAI_ARCHITECT_PASSWORD
+        sync: false

@@ -1,0 +1,608 @@
+{
+  "name": "RenderAI Canva Local Brochure Template Library",
+  "version": "2026-04-14",
+  "count": 28,
+  "nativeCount": 0,
+  "pptReferenceCount": 0,
+  "canvaReferenceCount": 28,
+  "policy": "Only local Canva reference previews are exposed in the app. Legacy native/PPT layouts may remain as archival assets but are not part of the selectable production library.",
+  "templates": [
+    {
+      "value": "canva-EAGrLDwPJo0",
+      "baseStyle": "ivory-airy",
+      "label": "Canva · Minimal Portfolio",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio creativo negro y gris, composicion minima estilo Canva.",
+      "groups": [
+        "portfolio",
+        "dark",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "portfolio",
+        "minimal"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGrLDwPJo0.webp",
+      "canvaId": "EAGrLDwPJo0",
+      "canvaUrl": "https://www.canva.com/templates/EAGrLDwPJo0/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGr_RR-y1A",
+      "baseStyle": "folio-airy",
+      "label": "Canva · Brown Interior",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Interior design marron y minimalista moderno estilo Canva.",
+      "groups": [
+        "editorial",
+        "hospitality",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "interior",
+        "brown"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGr_RR-y1A.webp",
+      "canvaId": "EAGr_RR-y1A",
+      "canvaUrl": "https://www.canva.com/templates/EAGr_RR-y1A/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFw_orjpUY",
+      "baseStyle": "folio-spread",
+      "label": "Canva · Propuesta Interiorismo",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Propuesta de interiorismo minimalista, limpia y editorial.",
+      "groups": [
+        "editorial",
+        "hospitality"
+      ],
+      "tags": [
+        "canva",
+        "interior",
+        "propuesta"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFw_orjpUY.jpg",
+      "canvaId": "EAFw_orjpUY",
+      "canvaUrl": "https://www.canva.com/templates/EAFw_orjpUY/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFikiuuzhg",
+      "baseStyle": "mosaic-airy",
+      "label": "Canva · Furniture Design",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Presentacion moderna de diseno de muebles en tonos grises.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "furniture",
+        "gray"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFikiuuzhg.jpg",
+      "canvaId": "EAFikiuuzhg",
+      "canvaUrl": "https://www.canva.com/templates/EAFikiuuzhg/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFNfbb5KQs",
+      "baseStyle": "dune-airy",
+      "label": "Canva · Organic Green",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Negocio organico, paleta gris verde, calido y sereno.",
+      "groups": [
+        "hospitality",
+        "editorial",
+        "brand"
+      ],
+      "tags": [
+        "canva",
+        "organic",
+        "green"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFNfbb5KQs.jpg",
+      "canvaId": "EAFNfbb5KQs",
+      "canvaUrl": "https://www.canva.com/templates/EAFNfbb5KQs/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGn3Fr3fd4",
+      "baseStyle": "monolith-airy",
+      "label": "Canva · Grayscale Architecture",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura en blanco, gris y escala de grises.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "architecture",
+        "grayscale"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGn3Fr3fd4.webp",
+      "canvaId": "EAGn3Fr3fd4",
+      "canvaUrl": "https://www.canva.com/templates/EAGn3Fr3fd4/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAF2x8BSmSs",
+      "baseStyle": "folio-airy",
+      "label": "Canva · Beige Portfolio",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Guia de estilo y portafolio de arquitectura minimalista beige.",
+      "groups": [
+        "portfolio",
+        "editorial",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "beige",
+        "architecture"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAF2x8BSmSs.webp",
+      "canvaId": "EAF2x8BSmSs",
+      "canvaUrl": "https://www.canva.com/templates/EAF2x8BSmSs/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFPf0Mf_YI",
+      "baseStyle": "obsidian-spread",
+      "label": "Canva · Black Gold Luxe",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Negocio de lujo en negro y dorado, estilo alta gama.",
+      "groups": [
+        "dark",
+        "brand",
+        "editorial"
+      ],
+      "tags": [
+        "canva",
+        "luxury",
+        "gold"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFPf0Mf_YI.jpg",
+      "canvaId": "EAFPf0Mf_YI",
+      "canvaUrl": "https://www.canva.com/templates/EAFPf0Mf_YI/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGdcTUYU1s",
+      "baseStyle": "ivory-airy",
+      "label": "Canva · White Architecture",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Presentacion arquitectura blanca y limpia estilo Canva.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "white",
+        "architecture"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGdcTUYU1s.webp",
+      "canvaId": "EAGdcTUYU1s",
+      "canvaUrl": "https://www.canva.com/templates/EAGdcTUYU1s/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGtNZBHprc",
+      "baseStyle": "velvet-spread",
+      "label": "Canva · Brown Blue Modern",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura moderna marron y azul, paleta calida.",
+      "groups": [
+        "portfolio",
+        "editorial"
+      ],
+      "tags": [
+        "canva",
+        "brown",
+        "blue"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGtNZBHprc.jpg",
+      "canvaId": "EAGtNZBHprc",
+      "canvaUrl": "https://www.canva.com/templates/EAGtNZBHprc/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGTkH8WXi4",
+      "baseStyle": "poster-airy",
+      "label": "Canva · Orange Modern",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio arquitectura blanco y naranja, energia grafica.",
+      "groups": [
+        "portfolio",
+        "editorial"
+      ],
+      "tags": [
+        "canva",
+        "orange",
+        "bold"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGTkH8WXi4.jpg",
+      "canvaId": "EAGTkH8WXi4",
+      "canvaUrl": "https://www.canva.com/templates/EAGTkH8WXi4/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGsAh-OVLo",
+      "baseStyle": "dune-spread",
+      "label": "Canva · Brown Portfolio",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio arquitectura marron moderno y calido.",
+      "groups": [
+        "portfolio",
+        "hospitality"
+      ],
+      "tags": [
+        "canva",
+        "brown",
+        "portfolio"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGsAh-OVLo.webp",
+      "canvaId": "EAGsAh-OVLo",
+      "canvaUrl": "https://www.canva.com/templates/EAGsAh-OVLo/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGhhyrjjkg",
+      "baseStyle": "atelier-spread",
+      "label": "Canva · Brown Black Minimal",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura minimalista en tonos marron y negro.",
+      "groups": [
+        "portfolio",
+        "editorial",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "brown",
+        "minimal"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGhhyrjjkg.webp",
+      "canvaId": "EAGhhyrjjkg",
+      "canvaUrl": "https://www.canva.com/templates/EAGhhyrjjkg/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAHFf3kj4iA",
+      "baseStyle": "monolith-graphic",
+      "label": "Canva · BW Simple Modern",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura simple moderna en blanco y negro.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "bw",
+        "simple"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAHFf3kj4iA.jpg",
+      "canvaId": "EAHFf3kj4iA",
+      "canvaUrl": "https://www.canva.com/templates/EAHFf3kj4iA/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGRNMmnuaA",
+      "baseStyle": "ivory-stacked",
+      "label": "Canva · BW Modern II",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Segunda variacion BW arquitectura moderna simple.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "bw",
+        "modern"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGRNMmnuaA.jpg",
+      "canvaId": "EAGRNMmnuaA",
+      "canvaUrl": "https://www.canva.com/templates/EAGRNMmnuaA/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGhDLLD7O4",
+      "baseStyle": "slate-airy",
+      "label": "Canva · White Black Modern",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura moderna blanco y negro, tono sobrio.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "white",
+        "black"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGhDLLD7O4.jpg",
+      "canvaId": "EAGhDLLD7O4",
+      "canvaUrl": "https://www.canva.com/templates/EAGhDLLD7O4/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFLv0V_9Ho",
+      "baseStyle": "poster-graphic",
+      "label": "Canva · Portafolio Naranja",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio creativo minimalista en tonos naranjas.",
+      "groups": [
+        "editorial",
+        "portfolio"
+      ],
+      "tags": [
+        "canva",
+        "orange",
+        "creative"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFLv0V_9Ho.jpg",
+      "canvaId": "EAFLv0V_9Ho",
+      "canvaUrl": "https://www.canva.com/templates/EAFLv0V_9Ho/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGsW4hEJkw",
+      "baseStyle": "poster-spread",
+      "label": "Canva · Red Creative Brief",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Creative brief moderno en rojo y blanco, impactante.",
+      "groups": [
+        "pitch",
+        "editorial"
+      ],
+      "tags": [
+        "canva",
+        "red",
+        "brief"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGsW4hEJkw.jpg",
+      "canvaId": "EAGsW4hEJkw",
+      "canvaUrl": "https://www.canva.com/templates/EAGsW4hEJkw/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGTP-02p34",
+      "baseStyle": "magazine-graphic",
+      "label": "Canva · Marble Geometric",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura BW con textura marmol y geometria abstracta.",
+      "groups": [
+        "editorial",
+        "experimental"
+      ],
+      "tags": [
+        "canva",
+        "marble",
+        "abstract"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGTP-02p34.jpg",
+      "canvaId": "EAGTP-02p34",
+      "canvaUrl": "https://www.canva.com/templates/EAGTP-02p34/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFJITWQWWk",
+      "baseStyle": "folio-spread",
+      "label": "Canva · Beige Interior Guide",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Guia y recomendaciones de interiorismo beige minimalista.",
+      "groups": [
+        "editorial",
+        "hospitality",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "beige",
+        "interior"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFJITWQWWk.jpg",
+      "canvaId": "EAFJITWQWWk",
+      "canvaUrl": "https://www.canva.com/templates/EAFJITWQWWk/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGHvxr_154",
+      "baseStyle": "onyx-graphic",
+      "label": "Canva · Blue Gradient",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio graphic design en negro y gradiente azul.",
+      "groups": [
+        "pitch",
+        "dark",
+        "experimental"
+      ],
+      "tags": [
+        "canva",
+        "gradient",
+        "blue"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGHvxr_154.jpg",
+      "canvaId": "EAGHvxr_154",
+      "canvaUrl": "https://www.canva.com/templates/EAGHvxr_154/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGubEOQn8Y",
+      "baseStyle": "monolith-airy",
+      "label": "Canva · BW Portfolio",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio arquitectura minimalista blanco y negro.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "bw",
+        "portfolio"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGubEOQn8Y.jpg",
+      "canvaId": "EAGubEOQn8Y",
+      "canvaUrl": "https://www.canva.com/templates/EAGubEOQn8Y/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGV4SKvtkI",
+      "baseStyle": "slate-graphic",
+      "label": "Canva · BW Clean Minimal",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura minimal y limpia, BW clasico.",
+      "groups": [
+        "portfolio",
+        "minimal"
+      ],
+      "tags": [
+        "canva",
+        "clean",
+        "minimal"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGV4SKvtkI.jpg",
+      "canvaId": "EAGV4SKvtkI",
+      "canvaUrl": "https://www.canva.com/templates/EAGV4SKvtkI/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFy6z9zO0k",
+      "baseStyle": "obsidian-airy",
+      "label": "Canva · Black Elegant",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Diseno interior elegante en negro estilo luxury.",
+      "groups": [
+        "dark",
+        "editorial",
+        "hospitality"
+      ],
+      "tags": [
+        "canva",
+        "black",
+        "elegant"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFy6z9zO0k.jpg",
+      "canvaId": "EAFy6z9zO0k",
+      "canvaUrl": "https://www.canva.com/templates/EAFy6z9zO0k/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAFZccmrE1U",
+      "baseStyle": "velvet-stacked",
+      "label": "Canva · Corporate Green",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Catalogo corporativo en verde, lectura institucional.",
+      "groups": [
+        "brand",
+        "pitch"
+      ],
+      "tags": [
+        "canva",
+        "green",
+        "catalog"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAFZccmrE1U.jpg",
+      "canvaId": "EAFZccmrE1U",
+      "canvaUrl": "https://www.canva.com/templates/EAFZccmrE1U/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAG1o5cfZP0",
+      "baseStyle": "magazine-spread",
+      "label": "Canva · Black White Orange",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Arquitectura moderna tricolor BW + naranja, alto contraste.",
+      "groups": [
+        "editorial",
+        "portfolio"
+      ],
+      "tags": [
+        "canva",
+        "orange",
+        "modern"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAG1o5cfZP0.jpg",
+      "canvaId": "EAG1o5cfZP0",
+      "canvaUrl": "https://www.canva.com/templates/EAG1o5cfZP0/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGnoGixvFY",
+      "baseStyle": "prism-stacked",
+      "label": "Canva · Yellow Grey Creative",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio creativo amarillo y gris, energetico.",
+      "groups": [
+        "experimental",
+        "portfolio"
+      ],
+      "tags": [
+        "canva",
+        "yellow",
+        "grey"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGnoGixvFY.webp",
+      "canvaId": "EAGnoGixvFY",
+      "canvaUrl": "https://www.canva.com/templates/EAGnoGixvFY/",
+      "localAssetReady": true
+    },
+    {
+      "value": "canva-EAGnaH1PQ5c",
+      "baseStyle": "velvet-airy",
+      "label": "Canva · Black Pink Clean",
+      "source": "canva-reference-local",
+      "collection": "Canva reference",
+      "description": "Portafolio moderno y limpio en negro y rosa.",
+      "groups": [
+        "editorial",
+        "portfolio"
+      ],
+      "tags": [
+        "canva",
+        "pink",
+        "portfolio"
+      ],
+      "thumbnail": "assets/template-previews/canva/EAGnaH1PQ5c.webp",
+      "canvaId": "EAGnaH1PQ5c",
+      "canvaUrl": "https://www.canva.com/templates/EAGnaH1PQ5c/",
+      "localAssetReady": true
+    }
+  ]
+}
