@@ -415,6 +415,21 @@ const AMENITY_LIBRARY = [
 ];
 const MAX_AMENITY_COUNT = 8;
 
+function getSectionBaseId(sectionInstanceId) {
+  const raw = String(sectionInstanceId || "");
+  const idx = raw.indexOf("__");
+  return idx >= 0 ? raw.slice(0, idx) : raw;
+}
+
+function findPdfSectionDefinition(sectionInstanceId) {
+  const baseId = getSectionBaseId(sectionInstanceId);
+  return PDF_SECTION_LIBRARY.find((item) => item.id === baseId) || null;
+}
+
+function hasPdfSectionBase(baseId, list) {
+  return safeArray(list).some((id) => getSectionBaseId(id) === baseId);
+}
+
 const PDF_MOODBOARD_SOURCES = [
   { value: "project", label: "Imagenes del proyecto" },
   { value: "materials", label: "Materiales" },
@@ -1176,7 +1191,7 @@ function validateStep(step) {
       return false;
     }
     if (
-      state.settings.pdfSections.includes("amenities")
+      hasPdfSectionBase("amenities", state.settings.pdfSections)
       && Number(state.settings.amenityCount || 0) > 0
       && safeArray(state.settings.selectedAmenities).length < Number(state.settings.amenityCount || 0)
     ) {
@@ -1797,6 +1812,9 @@ function renderPdfSectionStudio() {
     return;
   }
 
+  renderPdfSectionStudioEditor();
+  return;
+
   ensurePdfBuilderDefaults();
   const analysis = getPdfDeckAnalysis();
   const blueprints = computePdfSlideBlueprints();
@@ -1826,6 +1844,11 @@ function renderPdfSectionStudio() {
   const isBoardSlide = isMoodBoardBlueprint(currentBlueprint, currentConfig);
   const moodBoardLayout = String(currentConfig.moodBoardLayout || inferMoodBoardLayout(currentBlueprint));
   const styleProfile = getBrochureStyleProfile(state.settings.brochureStyle);
+  const activeTemplateEntry = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const templateThumb = activeTemplateEntry?.thumbnail || "";
+  const slideLayoutOptions = getSlideLayoutVariantsForTemplate(activeTemplateEntry, currentBlueprint);
+  const activeSlideLayout = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[currentBlueprint.key]) || slideLayoutOptions[0]?.value;
+  const perImagePrompts = (state.settings.pdfPerImagePrompts && state.settings.pdfPerImagePrompts[currentBlueprint.key]) || {};
 
   elements.pdfSectionStudio.innerHTML = `
     <article class="pdf-section-shell">
@@ -1846,6 +1869,15 @@ function renderPdfSectionStudio() {
         `).join("")}
       </div>
 
+      <div class="slide-layout-picker" role="tablist" aria-label="Variantes de layout">
+        ${slideLayoutOptions.map((option) => `
+          <button type="button" class="slide-layout-chip ${activeSlideLayout === option.value ? "active" : ""}" data-slide-variant="${currentBlueprint.key}" data-slide-variant-value="${option.value}" title="${escapeHtml(option.label)}">
+            <span class="slide-layout-thumb slide-layout-thumb-${option.value}" aria-hidden="true"></span>
+            <span>${escapeHtml(option.label)}</span>
+          </button>
+        `).join("")}
+      </div>
+
       <div class="pdf-section-grid">
         <section class="pdf-section-card section-preview-card">
           <div class="mini-head">
@@ -1853,6 +1885,16 @@ function renderPdfSectionStudio() {
             <strong>${escapeHtml(currentBlueprint.title)}</strong>
           </div>
           <p class="builder-note">${escapeHtml(currentBlueprint.subtitle)}</p>
+
+          <div class="slide-template-canvas" ${templateThumb ? `style="--slide-template-thumb:url('${templateThumb}')"` : ""} data-slide-layout-variant="${activeSlideLayout || ""}">
+            <div class="slide-template-canvas-overlay">
+              <span class="slide-template-canvas-tag">Preview sin render · ${escapeHtml(activeTemplateEntry?.label || "Template")}</span>
+              <div class="slide-template-canvas-blocks">
+                <strong>${escapeHtml(currentConfig.customTitle || slideText.title || currentBlueprint.title)}</strong>
+                <span>${escapeHtml(currentConfig.customSubtitle || slideText.subtitle || currentBlueprint.subtitle)}</span>
+              </div>
+            </div>
+          </div>
 
           ${buildSlideLivePreview(currentBlueprint, currentConfig, slideText, isBoardSlide)}
 
@@ -2073,6 +2115,34 @@ function renderPdfSectionStudio() {
               <button type="button" class="button button-ghost" data-slide-select-all="${currentBlueprint.key}">Seleccionar todas las fotos</button>
             </div>
           ` : ""}
+
+          ${currentConfig.useProjectImages && selectedImages.length ? `
+            <div class="per-image-stylers">
+              <div class="mini-head compact">
+                <span class="eyebrow">Estilo por foto</span>
+                <strong>Dale a cada imagen su propia dirección creativa</strong>
+              </div>
+              ${selectedImages.map((imageId) => {
+                const image = state.images.find((img) => img.id === imageId);
+                if (!image) return "";
+                const perPrompt = perImagePrompts[imageId] || {};
+                return `
+                  <div class="per-image-card">
+                    <img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" />
+                    <div class="per-image-copy">
+                      <strong>${escapeHtml(image.name)}</strong>
+                      <div class="choice-inline wrap per-image-chips">
+                        ${["minimal-bw","warm-editorial","high-contrast","soft-film","vibrant"].map((chipVal) => `
+                          <button type="button" class="select-chip ${perPrompt.style === chipVal ? "active" : ""}" data-per-image-style="${currentBlueprint.key}" data-per-image-id="${imageId}" data-per-image-style-value="${chipVal}">${chipVal.replace("-", " ")}</button>
+                        `).join("")}
+                      </div>
+                      <textarea class="per-image-prompt" placeholder="Prompt específico para esta foto (ej: 'blanco y negro minimalista')" data-per-image-prompt="${currentBlueprint.key}" data-per-image-id="${imageId}">${escapeHtml(perPrompt.prompt || "")}</textarea>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : ""}
         </section>
 
         <section class="pdf-section-card">
@@ -2154,18 +2224,403 @@ function renderPdfSectionStudio() {
   `;
 }
 
+function renderPdfSectionStudioEditor() {
+  ensurePdfBuilderDefaults();
+  const analysis = getPdfDeckAnalysis();
+  const blueprints = computePdfSlideBlueprints();
+  const currentBlueprint = resolveCurrentPdfBlueprint(blueprints);
+  if (!currentBlueprint) {
+    elements.pdfSectionStudio.innerHTML = `<div class="empty-state compact-empty"><strong>Primero define las diapositivas del brochure</strong><span>En el paso 4 escoges cantidad, tipo, orden y amenidades.</span></div>`;
+    return;
+  }
+
+  const currentConfig = state.settings.pdfSlideConfigs[currentBlueprint.key] || {};
+  hydrateSlideConfigDefaults(currentBlueprint, currentConfig);
+  const slideText = getSlideTextDraft(currentBlueprint, analysis);
+  const currentIndex = blueprints.findIndex((entry) => entry.key === currentBlueprint.key);
+  const styleProfile = getBrochureStyleProfile(state.settings.brochureStyle);
+  const activeTemplateEntry = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const slideLayoutOptions = getSlideLayoutVariantsForTemplate(activeTemplateEntry, currentBlueprint);
+  const activeSlideLayout = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[currentBlueprint.key]) || slideLayoutOptions[0]?.value || currentConfig.layout || currentBlueprint.layout;
+  const selectedImages = safeArray(currentConfig.imageIds);
+  const imageCount = resolveSlideImageCount(currentConfig);
+  const activeImageId = resolveSlideActiveImageId(currentConfig);
+  const activeImage = state.images.find((image) => image.id === activeImageId) || null;
+  const palette = resolveEditorPalette(analysis);
+  const selectedMaterials = safeArray(currentConfig.materialHighlights);
+  const selectedObjects = safeArray(currentConfig.objectHighlights);
+  const isBoardSlide = isMoodBoardBlueprint(currentBlueprint, currentConfig);
+
+  elements.pdfSectionStudio.innerHTML = `
+    <article class="pdf-section-shell slide-studio-v2">
+      <div class="slide-studio-head">
+        <div>
+          <span class="eyebrow">Paso 5 · Canva + imagenes</span>
+          <strong>Editor visual del brochure</strong>
+        </div>
+        <div class="choice-inline wrap">
+          <button type="button" class="button button-ghost" data-slide-nav-shift="-1" ${currentIndex === 0 ? "disabled" : ""}>Anterior</button>
+          <span class="status-chip status-soft">${currentIndex + 1}/${blueprints.length}</span>
+          <button type="button" class="button button-ghost" data-slide-nav-shift="1" ${currentIndex >= blueprints.length - 1 ? "disabled" : ""}>Siguiente</button>
+        </div>
+      </div>
+
+      ${renderSlideFilmstrip(blueprints, currentBlueprint)}
+
+      <section class="slide-studio-stage">
+        <div class="slide-studio-main">
+          <div class="mini-head compact">
+            <span class="eyebrow">${escapeHtml(currentBlueprint.sectionLabel)}</span>
+            <strong>${escapeHtml(currentBlueprint.title)}</strong>
+          </div>
+          ${renderSlideLayoutStrip(slideLayoutOptions, activeSlideLayout, currentBlueprint.key)}
+          ${buildEditableSlideCanvas(currentBlueprint, currentConfig, slideText, activeSlideLayout, styleProfile, palette)}
+        </div>
+        ${renderSlidePaletteEditor(palette)}
+      </section>
+
+      <section class="slide-studio-split slide-image-workbench">
+        <div class="slide-studio-panel">
+          <div class="mini-head compact">
+            <span class="eyebrow">Imagenes</span>
+            <strong>Escoge cuantas fotos usa esta pagina</strong>
+          </div>
+          <label class="toggle-card compact-toggle">
+            <input type="checkbox" data-slide-use-project="${currentBlueprint.key}" ${Boolean(currentConfig.useProjectImages) ? "checked" : ""} ${currentBlueprint.allowProjectImages ? "" : "disabled"} />
+            <span>${currentBlueprint.allowProjectImages ? "Usar fotos del proyecto en esta diapositiva" : "Esta diapositiva usa recursos derivados / mood board"}</span>
+          </label>
+          ${renderSlideImageCountControls(currentBlueprint.key, imageCount)}
+          ${renderSlidePhotoSelector(currentBlueprint, currentConfig, activeImageId)}
+          ${isBoardSlide ? renderBoardCurationPanel(analysis, currentBlueprint, selectedMaterials, selectedObjects) : ""}
+        </div>
+
+        <div class="slide-studio-panel">
+          <div class="mini-head compact">
+            <span class="eyebrow">Editor de foto</span>
+            <strong>${activeImage ? escapeHtml(activeImage.name) : "Selecciona una foto"}</strong>
+          </div>
+          ${renderActivePhotoInspector(currentBlueprint, currentConfig, activeImage, activeImageId)}
+        </div>
+      </section>
+
+      <div class="slide-studio-footer">
+        <span class="status-chip status-soft">${escapeHtml(buildSectionConfigSummary(currentBlueprint, currentConfig))}</span>
+        <div class="choice-inline wrap">
+          <button type="button" class="button button-ghost" data-slide-reset-copy="${currentBlueprint.key}">Restaurar texto sugerido</button>
+          <button type="button" class="button button-primary" data-generate-result>Generar brochure</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function hydrateSlideConfigDefaults(blueprint, config) {
+  if (!config.layout) config.layout = blueprint.layout;
+  if (!config.imagePlacement) config.imagePlacement = inferImagePlacement(config.layout || blueprint.layout);
+  if (!config.imageAspect) config.imageAspect = inferImageAspect(config.layout || blueprint.layout);
+  if (!config.imageSourceMode) config.imageSourceMode = "inherit";
+  if (!config.imageSize) config.imageSize = inferImageSize(config.layout || blueprint.layout);
+  if (!config.imageZone) config.imageZone = inferImageZone(config.layout || blueprint.layout, config.imagePlacement);
+  if (!config.imageFraming) config.imageFraming = inferImageFraming(config.layout || blueprint.layout);
+  if (!config.imageArrangement) config.imageArrangement = inferImageArrangement(config.layout || blueprint.layout);
+  if (!config.renderTreatment) config.renderTreatment = "master";
+  if (!config.imageRepresentation) config.imageRepresentation = "inherit";
+  if (!config.imageFinish) config.imageFinish = "inherit";
+  if (!config.imageOccupancy) config.imageOccupancy = "inherit";
+  if (!config.slideBackground) config.slideBackground = "inherit";
+  if (!config.moodBoardLayout) config.moodBoardLayout = inferMoodBoardLayout(blueprint);
+  if (!Array.isArray(config.imageIds)) config.imageIds = [];
+  if (!config.imageCount) config.imageCount = String(Math.max(1, config.imageIds.length || 1));
+  if (!config.activeImageId || !state.images.some((image) => image.id === config.activeImageId)) {
+    config.activeImageId = config.imageIds.find((id) => state.images.some((image) => image.id === id)) || config.imageIds[0] || state.mainId || state.images[0]?.id || "";
+  }
+}
+
+function renderSlideFilmstrip(blueprints, currentBlueprint) {
+  return `
+    <nav class="canva-slide-nav studio-filmstrip" aria-label="Diapositivas del brochure">
+      ${blueprints.map((blueprint, index) => {
+        const config = state.settings.pdfSlideConfigs[blueprint.key] || {};
+        const previewImage = resolveSlidePreviewImages(config)[0];
+        const layoutVariant = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[blueprint.key]) || config.layout || blueprint.layout;
+        return `
+          <button type="button" class="canva-slide-nav-chip ${blueprint.key === currentBlueprint.key ? "active" : ""}" data-slide-nav="${blueprint.key}">
+            <span>${index + 1} · ${escapeHtml(blueprint.sectionLabel)}</span>
+            <span class="canva-slide-nav-thumb canva-slide-nav-thumb-${escapeHtml(layoutVariant)}" ${previewImage?.url ? `style="--thumb-url:url('${escapeHtml(previewImage.url)}')"` : ""}></span>
+            <strong>${escapeHtml(blueprint.title)}</strong>
+          </button>
+        `;
+      }).join("")}
+    </nav>
+  `;
+}
+
+function renderSlideLayoutStrip(layoutOptions, activeLayout, slideKey) {
+  return `
+    <div class="slide-layout-picker studio-layout-strip" role="tablist" aria-label="Layouts disponibles para esta diapositiva">
+      ${safeArray(layoutOptions).map((option) => `
+        <button type="button" class="slide-layout-chip ${String(activeLayout) === option.value ? "active" : ""}" data-slide-variant="${slideKey}" data-slide-variant-value="${option.value}" title="${escapeHtml(option.label)}">
+          <span class="slide-layout-thumb slide-layout-thumb-${option.value}" aria-hidden="true"></span>
+          <span>${escapeHtml(option.label)}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function buildEditableSlideCanvas(blueprint, config, slideText, activeLayout, styleProfile, palette) {
+  const title = sanitizeVisibleDeckText(config.customTitle || slideText.title || blueprint.title, blueprint.title);
+  const subtitle = sanitizeVisibleDeckText(config.customSubtitle || slideText.subtitle || blueprint.subtitle, blueprint.subtitle || "");
+  const bullets = normalizeDeckBullets((config.customBullets || "").split("\n")).length
+    ? normalizeDeckBullets((config.customBullets || "").split("\n"))
+    : normalizeDeckBullets(slideText.bullets);
+  const images = resolveSlidePreviewImages(config).slice(0, resolveSlideImageCount(config));
+  const background = String(config.slideBackground || "inherit");
+  const sourceMode = resolveSlideImageSourceMode(config);
+  const treatment = optionLabel(SLIDE_RENDER_TREATMENT_OPTIONS, config.renderTreatment || "master");
+  const paletteColors = safeArray(palette).slice(0, 5);
+  const paper = paletteColors[2] || styleProfile.paper || "#f6efe5";
+  const ink = styleProfile.ink || "#211812";
+  const accent = paletteColors[0] || styleProfile.accent || "#8b6547";
+  const accent2 = paletteColors[1] || colorMixHex(accent, "#ffffff", 0.38);
+  const mediaStyle = buildEditorMediaStyle(config, activeLayout);
+  const textStyle = buildEditorTextStyle(config, activeLayout);
+  const canvasStyle = [
+    `--slide-edit-paper:${paper}`,
+    `--slide-edit-ink:${ink}`,
+    `--slide-edit-accent:${accent}`,
+    `--slide-edit-accent-2:${accent2}`,
+  ].join(";");
+  const imageSlots = images.length ? images : [{ id: "empty", name: "Sin foto seleccionada", url: "" }];
+
+  return `
+    <div class="slide-edit-canvas studio-live-canvas live-bg-${background}" data-layout-variant="${escapeHtml(activeLayout)}" style="${canvasStyle}">
+      <div class="slide-edit-canvas-media" data-count="${Math.min(Math.max(imageSlots.length, 1), 6)}" data-arrangement="${escapeHtml(config.imageArrangement || "single")}" data-framing="${escapeHtml(config.imageFraming || "clean")}" style="${mediaStyle}">
+        ${imageSlots.map((image) => image.url
+          ? `<img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" />`
+          : `<span class="slide-edit-media-empty">Selecciona una imagen del proyecto</span>`).join("")}
+      </div>
+      <div class="slide-edit-canvas-overlay" style="${textStyle}">
+        <small contenteditable="false">${escapeHtml(blueprint.sectionLabel)}</small>
+        <strong class="ce-title" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customTitle">${escapeHtml(title)}</strong>
+        <em class="ce-subtitle" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customSubtitle">${escapeHtml(subtitle)}</em>
+        <div class="ce-bullets" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customBullets">${bullets.slice(0, 4).map((bullet) => escapeHtml(bullet)).join("<br>")}</div>
+      </div>
+      <span class="slide-edit-canvas-badge">${sourceMode === "raw" ? "foto cruda" : "render"} · ${escapeHtml(treatment)}</span>
+    </div>
+  `;
+}
+
+function buildEditorMediaStyle(config, activeLayout) {
+  const placement = String(config.imagePlacement || inferImagePlacement(config.layout || activeLayout));
+  const size = String(config.imageSize || "large");
+  const full = placement === "full" || size === "full-page" || activeLayout === "cover";
+  if (full) return "inset:0;";
+  const width = size === "small" ? 32 : size === "medium" ? 44 : size === "giant" ? 78 : 58;
+  const height = size === "small" ? 42 : size === "medium" ? 58 : size === "giant" ? 74 : 66;
+  const left = placement === "left" ? 4 : placement === "center" ? (100 - width) / 2 : placement === "top" || placement === "bottom" ? 8 : 38;
+  const top = placement === "top" ? 6 : placement === "bottom" ? 48 : 15;
+  return `right:auto;bottom:auto;left:${left}%;top:${top}%;width:${placement === "top" || placement === "bottom" ? 84 : width}%;height:${placement === "top" || placement === "bottom" ? 38 : height}%;`;
+}
+
+function buildEditorTextStyle(config, activeLayout) {
+  const placement = String(config.imagePlacement || inferImagePlacement(config.layout || activeLayout));
+  if (placement === "left") return "left:auto;right:5%;top:14%;bottom:auto;width:34%;align-content:start;background:linear-gradient(90deg, rgba(255,255,255,0.82), rgba(255,255,255,0.54));color:var(--slide-edit-ink);";
+  if (placement === "right") return "left:5%;top:14%;bottom:auto;width:34%;align-content:start;background:linear-gradient(90deg, rgba(255,255,255,0.82), rgba(255,255,255,0.54));color:var(--slide-edit-ink);";
+  if (placement === "top") return "top:auto;bottom:0;width:56%;background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.62));";
+  return "";
+}
+
+function resolveEditorPalette(analysis) {
+  const selected = safeArray(state.settings.selectedPalette).filter(Boolean);
+  if (selected.length) return selected;
+  return getSuggestedPalette(analysis).slice(0, 6);
+}
+
+function renderSlidePaletteEditor(palette) {
+  const suggested = getSuggestedPalette(getPdfDeckAnalysis()).slice(0, 6);
+  const selected = resolveEditorPalette(getPdfDeckAnalysis()).slice(0, 6);
+  return `
+    <aside class="slide-studio-palette">
+      <div class="mini-head compact">
+        <span class="eyebrow">Color en vivo</span>
+        <strong>Prueba la paleta sobre esta presentacion</strong>
+      </div>
+      <div class="palette-toolbar compact-palette-toolbar">
+        <button type="button" class="button ${state.settings.colorMode === "suggested" ? "button-primary" : "button-secondary"}" data-color-mode="suggested">Sugerida</button>
+        <button type="button" class="button ${state.settings.colorMode === "manual" ? "button-primary" : "button-secondary"}" data-color-mode="manual">Manual</button>
+      </div>
+      <div class="slide-palette-strip">
+        <span class="palette-strip-label">Sugeridos</span>
+        ${suggested.map((color) => `
+          <button type="button" class="slide-palette-chip ${selected.includes(color) ? "active" : ""}" data-palette-color="${color}">
+            <span class="slide-palette-swatches"><span style="background:${color}"></span></span>
+            <strong>${escapeHtml(color.toUpperCase())}</strong>
+          </button>
+        `).join("")}
+      </div>
+      <div class="custom-color-grid">
+        ${[0, 1, 2, 3].map((index) => {
+          const color = selected[index] || palette[index] || suggested[index] || "#d7c2a5";
+          return `
+            <label class="custom-color-card">
+              <span>${["Primario", "Secundario", "Fondo", "Acento"][index]}</span>
+              <input type="color" value="${escapeHtml(color)}" data-palette-custom="${index}" />
+              <strong>${escapeHtml(color.toUpperCase())}</strong>
+            </label>
+          `;
+        }).join("")}
+      </div>
+    </aside>
+  `;
+}
+
+function resolveSlideImageCount(config) {
+  const count = Number(config.imageCount || safeArray(config.imageIds).length || 1);
+  return clamp(Number.isFinite(count) ? count : 1, 1, 6);
+}
+
+function resolveSlideActiveImageId(config) {
+  const ids = safeArray(config.imageIds);
+  if (config.activeImageId && state.images.some((image) => image.id === config.activeImageId)) return config.activeImageId;
+  return ids.find((id) => state.images.some((image) => image.id === id)) || state.mainId || state.images[0]?.id || "";
+}
+
+function renderSlideImageCountControls(slideKey, imageCount) {
+  return `
+    <div class="slide-image-count-row">
+      <span class="field-label">Cantidad</span>
+      ${[1, 2, 3, 4, 5, 6].map((count) => `
+        <button type="button" class="quick-editor-chip ${Number(imageCount) === count ? "active" : ""}" data-slide-image-count="${slideKey}" data-slide-image-count-value="${count}">${count}</button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderSlidePhotoSelector(blueprint, config, activeImageId) {
+  const selected = safeArray(config.imageIds);
+  if (!state.images.length) {
+    return `<div class="empty-state compact-empty"><strong>Sin fotos cargadas</strong><span>Sube imagenes en el paso 1 para escogerlas aqui.</span></div>`;
+  }
+  return `
+    <div class="slide-image-grid studio-photo-grid ${config.useProjectImages ? "" : "is-disabled"}">
+      ${state.images.map((image) => `
+        <button type="button" class="slide-image-card ${selected.includes(image.id) ? "active" : ""} ${activeImageId === image.id ? "is-current" : ""}" data-slide-active-image="${blueprint.key}" data-slide-image-id="${image.id}" ${config.useProjectImages ? "" : "disabled"}>
+          <img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" />
+          <div class="slide-image-copy">
+            <strong>${escapeHtml(image.name)}</strong>
+            <span>${image.id === state.mainId ? "Principal" : "Referencia"}</span>
+          </div>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderActivePhotoInspector(blueprint, config, activeImage, activeImageId) {
+  const key = blueprint.key;
+  const perImagePrompts = (state.settings.pdfPerImagePrompts && state.settings.pdfPerImagePrompts[key]) || {};
+  const perPrompt = perImagePrompts[activeImageId] || {};
+  const selected = safeArray(config.imageIds);
+  return `
+    <div class="active-image-preview">
+      <div class="active-image-frame">
+        ${activeImage ? `<img src="${activeImage.url}" alt="${escapeHtml(activeImage.name)}" loading="lazy" />` : `<span class="empty-active-image">Selecciona una imagen para editarla</span>`}
+      </div>
+      ${activeImage ? `
+        <div class="choice-inline wrap">
+          <button type="button" class="button button-ghost" data-slide-image-toggle="${key}" data-slide-image-id="${activeImage.id}">${selected.includes(activeImage.id) ? "Quitar de esta slide" : "Usar en esta slide"}</button>
+          <span class="status-chip status-soft">${activeImage.id === state.mainId ? "Imagen principal" : "Foto de apoyo"}</span>
+        </div>
+      ` : ""}
+    </div>
+    ${renderSlideQuickEditor(blueprint, {
+      imageSourceMode: config.imageSourceMode || "inherit",
+      imagePlacement: config.imagePlacement || inferImagePlacement(config.layout || blueprint.layout),
+      imageSize: config.imageSize || inferImageSize(config.layout || blueprint.layout),
+      imageAspect: config.imageAspect || inferImageAspect(config.layout || blueprint.layout),
+      imageArrangement: config.imageArrangement || inferImageArrangement(config.layout || blueprint.layout),
+      imageFraming: config.imageFraming || inferImageFraming(config.layout || blueprint.layout),
+      renderTreatment: config.renderTreatment || "master",
+      slideBackground: config.slideBackground || "inherit",
+      imageRepresentation: config.imageRepresentation || "inherit",
+      imageFinish: config.imageFinish || "inherit",
+    })}
+    <div class="decision-group compact-decision">
+      <div class="decision-group-head">
+        <strong>Tratamiento creativo de esta foto</strong>
+        <p>Se aplica solo si esta imagen se renderiza para esta diapositiva.</p>
+      </div>
+      <div class="choice-inline wrap per-image-chips">
+        ${["minimal-bw","warm-editorial","high-contrast","soft-film","vibrant"].map((chipVal) => `
+          <button type="button" class="select-chip ${perPrompt.style === chipVal ? "active" : ""}" data-per-image-style="${key}" data-per-image-id="${activeImageId}" data-per-image-style-value="${chipVal}" ${activeImage ? "" : "disabled"}>${chipVal.replace("-", " ")}</button>
+        `).join("")}
+      </div>
+      <textarea class="per-image-prompt" placeholder="Cambio especifico para esta foto. Ej: mantener geometria, hacerla nocturna calida, sin personas." data-per-image-prompt="${key}" data-per-image-id="${activeImageId}" ${activeImage ? "" : "disabled"}>${escapeHtml(perPrompt.prompt || "")}</textarea>
+    </div>
+  `;
+}
+
+function renderBoardCurationPanel(analysis, blueprint, selectedMaterials, selectedObjects) {
+  return `
+    <details class="board-curation compact-details">
+      <summary>Materiales y objetos para mood board</summary>
+      <div class="field">
+        <span>Materiales</span>
+        <div class="curation-chip-grid">
+          ${safeArray(analysis.materials).map((material) => `
+            <button type="button" class="amenity-chip ${selectedMaterials.includes(material) ? "active" : ""}" data-slide-material-toggle="${blueprint.key}" data-slide-material-value="${escapeHtml(material)}">${escapeHtml(material)}</button>
+          `).join("") || `<span class="builder-note">No hay materiales leidos aun.</span>`}
+        </div>
+      </div>
+      <div class="field">
+        <span>Objetos</span>
+        <div class="curation-chip-grid">
+          ${safeArray(analysis.objects).map((object) => `
+            <button type="button" class="amenity-chip ${selectedObjects.includes(object) ? "active" : ""}" data-slide-object-toggle="${blueprint.key}" data-slide-object-value="${escapeHtml(object)}">${escapeHtml(object)}</button>
+          `).join("") || `<span class="builder-note">No hay objetos leidos aun.</span>`}
+        </div>
+      </div>
+      <div class="choice-grid mood-layout-grid">
+        ${MOOD_BOARD_LAYOUT_OPTIONS.map((option) => `
+          <button type="button" class="choice-card mood-layout-card ${String((state.settings.pdfSlideConfigs[blueprint.key] || {}).moodBoardLayout || inferMoodBoardLayout(blueprint)) === option.value ? "active" : ""}" data-slide-mood-layout="${blueprint.key}" data-slide-mood-layout-value="${option.value}">
+            <span class="mood-layout-preview mood-layout-${option.value}" aria-hidden="true"></span>
+            <strong>${escapeHtml(option.label)}</strong>
+            <p>${escapeHtml(option.description)}</p>
+          </button>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function normalizeInlineEditableText(value) {
+  return String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 1200);
+}
+
 function renderPdfDeckBuilder() {
   ensurePdfBuilderDefaults();
   const analysis = getMainImage()?.analysis || buildAnalysisFallback();
-  const availableSections = PDF_SECTION_LIBRARY.filter((item) => !state.settings.pdfSections.includes(item.id));
+  const availableSections = PDF_SECTION_LIBRARY;
   const selectedSections = state.settings.pdfSections
-    .map((id) => PDF_SECTION_LIBRARY.find((item) => item.id === id))
+    .map((instanceId) => {
+      const def = findPdfSectionDefinition(instanceId);
+      return def ? { ...def, instanceId } : null;
+    })
     .filter(Boolean);
   const palette = getSuggestedPalette(analysis);
   const amenityCount = Number(state.settings.amenityCount || 0);
   const amenityOptions = unique([...AMENITY_LIBRARY, ...safeArray(state.settings.customAmenities), ...safeArray(state.settings.selectedAmenities)]).filter(Boolean);
   const selectedAmenities = safeArray(state.settings.selectedAmenities).slice(0, amenityCount);
   const amenitiesSectionActive = selectedSections.some((item) => item.id === "amenities");
+  const amenitiesInstance = selectedSections.find((item) => item.id === "amenities");
   const amenityShortfall = Math.max(0, amenityCount - selectedAmenities.length);
   const amenitySummaryLabel = amenityCount === 0
     ? "Cantidad actual: ninguna."
@@ -2212,33 +2667,79 @@ function renderPdfDeckBuilder() {
       `).join("")
     : `<div class="empty-state compact-empty"><strong>No hay templates con ese filtro</strong><span>Prueba otra categoria o limpia la busqueda.</span></div>`;
 
+  const selectedSectionCounts = selectedSections.reduce((acc, item) => {
+    acc[item.id] = (acc[item.id] || 0) + 1;
+    return acc;
+  }, {});
+
   const availableSectionMarkup = availableSections.length
-    ? availableSections.map((item) => `
-        <button type="button" class="section-option-card" data-section-add="${item.id}">
+    ? availableSections.map((item) => {
+        const count = selectedSectionCounts[item.id] || 0;
+        return `
+        <button type="button" class="section-option-card ${count ? "has-added" : ""}" data-section-add="${item.id}">
           <div class="section-option-copy">
             <strong>${escapeHtml(item.label)}</strong>
             <span>${escapeHtml(item.description)}</span>
+            ${count ? `<span class="section-option-count">Ya agregada · ${count}</span>` : ""}
           </div>
-          <span class="section-option-action">Agregar</span>
+          <span class="section-option-action">+ Agregar</span>
         </button>
-      `).join("")
+      `;
+      }).join("")
     : `<div class="empty-state compact-empty"><strong>No quedan secciones disponibles</strong><span>Ya agregaste todas las secciones base al deck.</span></div>`;
 
+  const sectionDuplicateIndex = {};
   const selectedSectionMarkup = selectedSections.length
-    ? selectedSections.map((item, index) => `
+    ? selectedSections.map((item, index) => {
+        sectionDuplicateIndex[item.id] = (sectionDuplicateIndex[item.id] || 0) + 1;
+        const totalOfKind = selectedSectionCounts[item.id] || 1;
+        const dupSuffix = totalOfKind > 1 ? ` · ${sectionDuplicateIndex[item.id]}` : "";
+        const instanceId = item.instanceId;
+        const isAmenities = item.id === "amenities";
+        const amenityInlineMarkup = isAmenities ? `
+          <div class="section-amenity-inline">
+            <div class="section-amenity-inline-head">
+              <span class="field-label">Cantidad de amenidades</span>
+              <span class="section-amenity-status">${escapeHtml(amenitySummaryLabel)}</span>
+            </div>
+            <div class="choice-inline wrap">
+              ${Array.from({ length: MAX_AMENITY_COUNT + 1 }, (_, count) => count).map((count) => `
+                <button type="button" class="select-chip ${amenityCount === count ? "active" : ""}" data-amenity-count="${count}">
+                  ${count === 0 ? "Ninguna" : `${count}`}
+                </button>
+              `).join("")}
+            </div>
+            ${amenityCount > 0 ? `
+              <div class="amenity-chip-grid">
+                ${amenityOptions.map((amenity) => `
+                  <button type="button" class="amenity-chip ${state.settings.selectedAmenities.includes(amenity) ? "active" : ""}" data-amenity-value="${escapeHtml(amenity)}">
+                    ${escapeHtml(amenity)}
+                  </button>
+                `).join("")}
+              </div>
+              <div class="amenity-custom-row">
+                <input type="text" data-amenity-custom-input placeholder="Agregar amenidad especifica..." />
+                <button type="button" class="button button-secondary" data-amenity-custom-add>Agregar</button>
+              </div>
+            ` : ""}
+          </div>
+        ` : "";
+        return `
         <article class="selected-section-card">
           <div class="selected-section-order">${index + 1}</div>
           <div class="selected-section-copy">
-            <strong>${escapeHtml(item.label)}</strong>
-            <span>${escapeHtml(item.id === "amenities" ? amenitySummaryLabel : item.description)}</span>
+            <strong>${escapeHtml(item.label)}${dupSuffix}</strong>
+            <span>${escapeHtml(isAmenities ? "Slides individuales por cada amenidad seleccionada." : item.description)}</span>
+            ${amenityInlineMarkup}
           </div>
           <div class="selected-section-actions">
-            <button type="button" class="button button-ghost" data-section-move="${item.id}" data-section-direction="-1" ${index === 0 ? "disabled" : ""}>↑</button>
-            <button type="button" class="button button-ghost" data-section-move="${item.id}" data-section-direction="1" ${index === selectedSections.length - 1 ? "disabled" : ""}>↓</button>
-            <button type="button" class="button button-secondary" data-section-remove="${item.id}">Quitar</button>
+            <button type="button" class="button button-ghost" data-section-move="${instanceId}" data-section-direction="-1" ${index === 0 ? "disabled" : ""}>↑</button>
+            <button type="button" class="button button-ghost" data-section-move="${instanceId}" data-section-direction="1" ${index === selectedSections.length - 1 ? "disabled" : ""}>↓</button>
+            <button type="button" class="button button-secondary" data-section-remove="${instanceId}">Quitar</button>
           </div>
         </article>
-      `).join("")
+      `;
+      }).join("")
     : `<div class="empty-state compact-empty"><strong>Aun no escoges secciones</strong><span>Agrega una o varias paginas base para construir la narrativa del brochure.</span></div>`;
 
   const strategyBlocks = [
@@ -2303,103 +2804,39 @@ function renderPdfDeckBuilder() {
     </section>
   `;
 
-  const amenityPlannerMarkup = `
-    <section class="pdf-builder-card pdf-builder-card-wide">
-      <div class="mini-head">
-        <span class="eyebrow">Amenidades</span>
-        <strong>Si agregas amenidades, define cuantas y exactamente cuales seran sus diapositivas</strong>
-      </div>
-      <div class="amenity-toolbar">
-        <div class="amenity-planner-head">
-          <div class="mini-head">
-            <span class="eyebrow">Control de paginas</span>
-            <strong>La cantidad seleccionada crea slides individuales de amenidad.</strong>
-          </div>
-          <div class="amenity-planner-status ${amenitiesSectionActive ? "active" : ""}">
-            <strong>${amenitiesSectionActive ? "Seccion Amenidades activa" : "Agrega la seccion Amenidades arriba"}</strong>
-            <span>${escapeHtml(amenitySummaryLabel)}</span>
-          </div>
-        </div>
-        <div class="field">
-          <span>Cantidad</span>
-          <div class="choice-inline wrap">
-            ${Array.from({ length: MAX_AMENITY_COUNT + 1 }, (_, count) => count).map((count) => `
-              <button type="button" class="select-chip ${amenityCount === count ? "active" : ""}" data-amenity-count="${count}">
-                ${count === 0 ? "Ninguna" : `${count} slide${count === 1 ? "" : "s"}`}
-              </button>
-            `).join("")}
-          </div>
-        </div>
-        ${amenityCount > 0 ? `
-          <div class="field">
-            <span>Escoge ${amenityCount} amenidad${amenityCount > 1 ? "es" : ""}</span>
-            <div class="amenity-chip-grid">
-              ${amenityOptions.map((amenity) => `
-                <button type="button" class="amenity-chip ${state.settings.selectedAmenities.includes(amenity) ? "active" : ""}" data-amenity-value="${escapeHtml(amenity)}">
-                  ${escapeHtml(amenity)}
-                </button>
-              `).join("")}
-            </div>
-            <div class="amenity-custom-row">
-              <input type="text" data-amenity-custom-input placeholder="Agregar amenidad especifica: canopy, spa termal, mirador..." />
-              <button type="button" class="button button-secondary" data-amenity-custom-add>Agregar amenidad</button>
-            </div>
-            <div class="amenity-selection-summary">
-              <strong>${selectedAmenities.length}/${amenityCount} seleccionada${amenityCount > 1 ? "s" : ""}</strong>
-              <span>${selectedAmenities.length ? escapeHtml(selectedAmenities.join(" · ")) : "Todavia no has marcado cuales amenidades quieres abrir como diapositivas."}</span>
-              ${selectedAmenities.length ? `
-                <div class="choice-inline wrap">
-                  ${selectedAmenities.map((amenity) => `
-                    <button type="button" class="select-chip active" data-amenity-remove="${escapeHtml(amenity)}">${escapeHtml(amenity)} ×</button>
-                  `).join("")}
-                </div>
-              ` : ""}
-            </div>
-          </div>
-        ` : ""}
-      </div>
-    </section>
-  `;
-
   if (state.currentStep === 4) {
     return `
       <article class="pdf-builder-shell template-market-shell slide-plan-shell">
         <div class="mini-head">
           <span class="eyebrow">Paso 4 · Mapa del brochure</span>
-          <strong>Define cantidad, tipo y orden de diapositivas antes de abrir el editor pagina por pagina</strong>
+          <strong>Arma la secuencia de diapositivas</strong>
         </div>
         <div class="slide-plan-summary">
           <span class="status-chip status-soft">Template · ${escapeHtml(activeTemplate.label)}</span>
-          <span class="status-chip status-soft">${blueprints.length} pagina${blueprints.length === 1 ? "" : "s"} proyectada${blueprints.length === 1 ? "" : "s"}</span>
-          <span class="status-chip status-soft">Paso siguiente · editar cada diapositiva</span>
+          <span class="status-chip status-soft">${blueprints.length} pagina${blueprints.length === 1 ? "" : "s"}</span>
         </div>
-        <div class="pdf-builder-grid pdf-builder-grid-market slide-plan-grid">
+        <div class="slide-plan-grid-simple">
           ${sectionsPlannerMarkup}
-          ${amenityPlannerMarkup}
         </div>
       </article>
     `;
   }
 
   return `
-    <article class="pdf-builder-shell template-market-shell">
+    <article class="pdf-builder-shell template-market-shell pdf-step3-shell">
       <div class="mini-head">
-        <span class="eyebrow">Paso 3 · Estrategia editorial</span>
-        <strong>Escoge template, tono editorial, idioma, tipografias y paleta sin decidir aun cada diapositiva</strong>
+        <span class="eyebrow">Paso 3 · Diseño base</span>
+        <strong>Escoge el template visual que definirá el brochure</strong>
       </div>
 
       <div class="template-browser-card pdf-builder-card">
           <div class="template-browser-head">
-            <div class="mini-head">
-              <span class="eyebrow">Biblioteca de brochures</span>
-              <strong>Que se sienta como escoger un template de portada, no como escoger una configuracion tecnica</strong>
+            <div class="mini-head compact">
+              <span class="eyebrow">Template</span>
+              <strong>${escapeHtml(activeTemplate.label)}</strong>
+              <small class="template-browser-meta">${escapeHtml(activeTemplate.collection || activeStyle.family)}</small>
             </div>
-          <div class="template-browser-selection">
-            <span class="status-chip status-soft">Seleccion actual · ${escapeHtml(activeTemplate.label)}</span>
-            <span class="template-browser-meta">${escapeHtml(activeTemplate.collection || activeStyle.family)} · ${escapeHtml(activeStyle.variant)}</span>
-            <span class="template-browser-count">${templateCounts.canva} layouts Canva locales · cero layouts antiguos en uso</span>
           </div>
-        </div>
 
         <div class="template-browser-toolbar">
           <div class="template-filter-row">
@@ -2496,6 +2933,12 @@ function ensurePdfBuilderDefaults() {
   if (!state.settings.pdfSlideConfigs || typeof state.settings.pdfSlideConfigs !== "object") {
     state.settings.pdfSlideConfigs = {};
   }
+  if (!state.settings.pdfSlideLayouts || typeof state.settings.pdfSlideLayouts !== "object") {
+    state.settings.pdfSlideLayouts = {};
+  }
+  if (!state.settings.pdfPerImagePrompts || typeof state.settings.pdfPerImagePrompts !== "object") {
+    state.settings.pdfPerImagePrompts = {};
+  }
   if (!PDF_IMAGE_MODE_OPTIONS.some((option) => option.value === state.settings.pdfImageMode)) {
     state.settings.pdfImageMode = DEFAULT_SETTINGS.pdfImageMode;
   }
@@ -2521,22 +2964,51 @@ function getSuggestedPalette(analysis) {
   return unique([...(palette || []), ...fallback]).slice(0, 6);
 }
 
+function getSlideLayoutVariantsForTemplate(templateEntry, blueprint) {
+  // Derive PPT-like layout variants from the template token / blueprint
+  const baseVariants = [
+    { value: "cover", label: "Portada" },
+    { value: "spread", label: "Doble página" },
+    { value: "mosaic", label: "Mosaico" },
+    { value: "feature", label: "Feature" },
+    { value: "gallery", label: "Galería" },
+    { value: "split", label: "Split" },
+  ];
+  const tokenHint = String(templateEntry?.template || templateEntry?.value || "").toLowerCase();
+  if (tokenHint.includes("mosaic") || tokenHint.includes("gallery")) {
+    return [baseVariants[0], baseVariants[2], baseVariants[4], baseVariants[3]];
+  }
+  if (tokenHint.includes("folio") || tokenHint.includes("ivory") || tokenHint.includes("monolith")) {
+    return [baseVariants[0], baseVariants[5], baseVariants[3], baseVariants[1]];
+  }
+  if (blueprint?.visualRole === "moodboard" || blueprint?.layout === "board") {
+    return [baseVariants[2], baseVariants[4], baseVariants[1], baseVariants[3]];
+  }
+  return baseVariants;
+}
+
 function computePdfSlideBlueprints() {
   ensurePdfBuilderDefaults();
   const blueprints = [];
   const sections = state.settings.pdfSections;
   const amenities = safeArray(state.settings.selectedAmenities).slice(0, Number(state.settings.amenityCount || 0));
 
-  sections.forEach((sectionId) => {
-    const section = PDF_SECTION_LIBRARY.find((item) => item.id === sectionId);
+  const baseCounts = {};
+  sections.forEach((instanceId) => {
+    const section = findPdfSectionDefinition(instanceId);
     if (!section) return;
+    const baseId = section.id;
+    baseCounts[baseId] = (baseCounts[baseId] || 0) + 1;
+    const indexSuffix = baseCounts[baseId];
+    const duplicateOffset = instanceId !== baseId ? ` · ${indexSuffix}` : (indexSuffix > 1 ? ` · ${indexSuffix}` : "");
 
     if (section.expandable) {
       const amenityItems = amenities.length ? amenities : [];
       amenityItems.forEach((amenity) => {
         blueprints.push({
-          key: `amenity-${slugify(amenity)}`,
-          sectionId,
+          key: `amenity-${slugify(amenity)}-${baseCounts[baseId]}`,
+          sectionId: baseId,
+          sectionInstanceId: instanceId,
           sectionLabel: section.label,
           title: `Amenidad · ${amenity}`,
           subtitle: `Slide dedicada para ${amenity}.`,
@@ -2549,10 +3021,11 @@ function computePdfSlideBlueprints() {
     }
 
     blueprints.push({
-      key: section.id,
-      sectionId: section.id,
+      key: instanceId,
+      sectionId: baseId,
+      sectionInstanceId: instanceId,
       sectionLabel: section.label,
-      title: section.label,
+      title: `${section.label}${duplicateOffset}`,
       subtitle: section.description,
       visualRole: section.visualRole,
       layout: section.layout,
@@ -2593,6 +3066,8 @@ function ensurePdfSlideConfigExists(blueprint) {
       imagePlacement: inferImagePlacement(blueprint.layout),
       imageAspect: inferImageAspect(blueprint.layout),
       imageSourceMode: "inherit",
+      imageCount: String(Math.max(1, defaultImageIds.length || 1)),
+      activeImageId: defaultImageIds[0] || state.mainId || state.images[0]?.id || "",
       imageSize: inferImageSize(blueprint.layout),
       imageZone: inferImageZone(blueprint.layout, inferImagePlacement(blueprint.layout)),
       imageFraming: inferImageFraming(blueprint.layout),
@@ -2617,6 +3092,10 @@ function ensurePdfSlideConfigExists(blueprint) {
   if (!config.imagePlacement) config.imagePlacement = inferImagePlacement(config.layout || blueprint.layout);
   if (!config.imageAspect) config.imageAspect = inferImageAspect(config.layout || blueprint.layout);
   if (!config.imageSourceMode) config.imageSourceMode = "inherit";
+  if (!config.imageCount) config.imageCount = String(Math.max(1, safeArray(config.imageIds).length || 1));
+  if (!config.activeImageId || !state.images.some((image) => image.id === config.activeImageId)) {
+    config.activeImageId = safeArray(config.imageIds).find((id) => state.images.some((image) => image.id === id)) || state.mainId || state.images[0]?.id || "";
+  }
   if (!config.imageSize) config.imageSize = inferImageSize(config.layout || blueprint.layout);
   if (!config.imageZone) config.imageZone = inferImageZone(config.layout || blueprint.layout, config.imagePlacement);
   if (!config.imageFraming) config.imageFraming = inferImageFraming(config.layout || blueprint.layout);
@@ -3737,6 +4216,33 @@ function buildVisualTreatmentLine() {
   return `Treatment: ${treatments.join(", ")}. Zero CGI look, real material weight, credible glass, controlled contrast.`;
 }
 
+function buildTemplateReferenceBlock() {
+  const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  if (!brochureTemplate) return null;
+  const styleProfile = getBrochureStyleProfile(state.settings.brochureStyle);
+  const palette = [styleProfile.paper, styleProfile.ink, styleProfile.accent].filter(Boolean);
+  const absThumb = brochureTemplate.thumbnail
+    ? (typeof window !== "undefined" && window.location
+        ? new URL(brochureTemplate.thumbnail, window.location.href).href
+        : brochureTemplate.thumbnail)
+    : "";
+  return {
+    label: brochureTemplate.label || "",
+    description: brochureTemplate.description || "",
+    collection: brochureTemplate.collection || "",
+    thumbnailPath: brochureTemplate.thumbnail || "",
+    thumbnailUrl: absThumb,
+    canvaId: brochureTemplate.canvaId || "",
+    canvaUrl: brochureTemplate.canvaUrl || "",
+    paletteHints: palette,
+    family: styleProfile.family || "",
+    variant: styleProfile.variant || "",
+    density: styleProfile.density || "",
+    frame: styleProfile.frame || "",
+    ornament: styleProfile.ornament || "",
+  };
+}
+
 function buildPdfBrief() {
   const main = getMainImage();
   const analysis = getPdfDeckAnalysis();
@@ -3747,17 +4253,43 @@ function buildPdfBrief() {
   const palette = (state.settings.selectedPalette || []).join(", ");
   const language = state.settings.brochureLanguage === "en" ? "English" : "Spanish";
   const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const templateRef = buildTemplateReferenceBlock();
 
   const lines = [
     `Create an architectural brochure in ${language}. Type: ${labelForProjectType()}. Audience: ${labelForDecision("audience")}. ${blueprints.length} pages.`,
     context ? `Project: ${context}` : null,
     `Tone: ${labelForDecision("pdfTone")}. Narrative: ${labelForDecision("narrative")}. Cover: ${labelForDecision("coverStyle")}. Density: ${labelForDecision("visualDensity")}. Brochure style: ${brochureTemplate?.label || optionLabel(BROCHURE_STYLE_OPTIONS, state.settings.brochureStyle)}.`,
-    brochureTemplate ? `Template selected: ${brochureTemplate.label}. Collection: ${brochureTemplate.collection}. Reference: ${brochureTemplate.description}.` : null,
+    templateRef ? `VISUAL TEMPLATE REFERENCE (must be respected as the aesthetic base of the brochure):` : null,
+    templateRef ? `  • Template: ${templateRef.label} — ${templateRef.description}` : null,
+    templateRef ? `  • Collection: ${templateRef.collection} · Family: ${templateRef.family} · Variant: ${templateRef.variant}` : null,
+    templateRef?.thumbnailUrl ? `  • Thumbnail reference image (visual base): ${templateRef.thumbnailUrl}` : null,
+    templateRef?.canvaUrl ? `  • Canva source: ${templateRef.canvaUrl}` : null,
+    templateRef?.paletteHints?.length ? `  • Template palette hints (paper/ink/accent): ${templateRef.paletteHints.join(", ")}` : null,
+    templateRef ? `  • Slides must inherit this template's palette, layout direction, typographic vibe, whitespace, and grid rhythm.` : null,
     `Visual: ${labelForDecision("renderLanguage")}, ${labelForDecision("imageMood")}, ${labelForDecision("timeOfDay")}, ${labelForDecision("lightScenario")}.`,
     palette ? `Palette: ${palette}` : null,
     `Images: ${state.settings.pdfImageMode === "rendered" ? "render project photos before layout" : "use raw project photos"}.`,
     (analysis.materials || []).length ? `Materials: ${analysis.materials.slice(0, 6).join(", ")}` : null,
     sections ? `Sections: ${sections}` : null,
+    (() => {
+      const layouts = state.settings.pdfSlideLayouts || {};
+      const entries = Object.entries(layouts).filter(([, v]) => v);
+      return entries.length ? `Per-slide layout picks: ${entries.map(([k, v]) => `${k}=${v}`).join(", ")}` : null;
+    })(),
+    (() => {
+      const prompts = state.settings.pdfPerImagePrompts || {};
+      const rows = [];
+      Object.entries(prompts).forEach(([slideKey, byImage]) => {
+        Object.entries(byImage || {}).forEach(([imgId, entry]) => {
+          if (!entry) return;
+          const parts = [];
+          if (entry.style) parts.push(`style=${entry.style}`);
+          if (entry.prompt) parts.push(`prompt="${entry.prompt}"`);
+          if (parts.length) rows.push(`${slideKey}/${imgId}: ${parts.join(" ")}`);
+        });
+      });
+      return rows.length ? `Per-image overrides: ${rows.join(" | ")}` : null;
+    })(),
     changeRequest ? `Change: ${changeRequest}` : null,
     `Output: editorial, commercial architecture deck. Mood boards, hero renders, curated Pinterest-style layouts, minimal high-value text. Title font: ${state.settings.titleFont}. Body font: ${state.settings.bodyFont}.`,
   ];
@@ -4478,8 +5010,9 @@ function buildPdfVisualPrompt(kind, moodBoardLayout = "") {
     ? safeArray(state.settings.selectedPalette).join(", ")
     : safeArray(analysis.palette).slice(0, 5).join(", ");
   const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const templateRefBlock = buildTemplateReferenceBlock();
   const templateHint = brochureTemplate
-    ? `Template reference: ${brochureTemplate.label}. ${brochureTemplate.description}. Collection: ${brochureTemplate.collection}.`
+    ? `Template reference: ${brochureTemplate.label}. ${brochureTemplate.description}. Collection: ${brochureTemplate.collection}.${templateRefBlock?.thumbnailUrl ? ` Visual reference image: ${templateRefBlock.thumbnailUrl}.` : ""}${templateRefBlock?.paletteHints?.length ? ` Palette hints: ${templateRefBlock.paletteHints.join(", ")}.` : ""} Respect its layout direction and typographic vibe.`
     : null;
   const antiTextClause = "ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, NO NUMBERS, NO LOGOS, NO LABELS, NO WATERMARKS, NO TYPOGRAPHY ANYWHERE.";
   const layoutPrompt = getMoodBoardLayoutPrompt(moodBoardLayout);
@@ -6628,6 +7161,9 @@ function pickDeckSettings() {
   payload.brochureTemplateCanvaId = brochureTemplate?.canvaId || "";
   payload.brochureTemplateCanvaUrl = brochureTemplate?.canvaUrl || "";
   payload.brochureTemplateCanvaBridge = brochureTemplate?.canvaBridge || "local-preview-from-canva-reference";
+  payload.templateReference = buildTemplateReferenceBlock();
+  payload.pdfSlideLayouts = state.settings.pdfSlideLayouts || {};
+  payload.pdfPerImagePrompts = state.settings.pdfPerImagePrompts || {};
   payload.canvaGenerationBrief = buildCanvaGenerationBrief(brochureTemplate);
   payload.slideBlueprints = computePdfSlideBlueprints().map((blueprint) => ({
     key: blueprint.key,
@@ -7153,7 +7689,7 @@ function handleDelegatedClick(event) {
       state.settings.selectedPalette = getSuggestedPalette(getMainImage()?.analysis || buildAnalysisFallback()).slice(0, 4);
     }
     persistSettings();
-    renderDecisions();
+    renderAll();
     updatePromptText();
     return;
   }
@@ -7167,7 +7703,7 @@ function handleDelegatedClick(event) {
     state.settings.selectedPalette = [...list].slice(0, 6);
     state.settings.colorMode = "manual";
     persistSettings();
-    renderDecisions();
+    renderAll();
     updatePromptText();
     return;
   }
@@ -7411,6 +7947,48 @@ function handleDelegatedClick(event) {
     return;
   }
 
+  const slideVariantButton = target.closest("[data-slide-variant][data-slide-variant-value]");
+  if (slideVariantButton) {
+    const slideKey = slideVariantButton.dataset.slideVariant;
+    const value = slideVariantButton.dataset.slideVariantValue;
+    if (!state.settings.pdfSlideLayouts || typeof state.settings.pdfSlideLayouts !== "object") state.settings.pdfSlideLayouts = {};
+    state.settings.pdfSlideLayouts[slideKey] = value;
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
+
+  const perImageStyleButton = target.closest("[data-per-image-style][data-per-image-id][data-per-image-style-value]");
+  if (perImageStyleButton) {
+    const slideKey = perImageStyleButton.dataset.perImageStyle;
+    const imageId = perImageStyleButton.dataset.perImageId;
+    const styleVal = perImageStyleButton.dataset.perImageStyleValue;
+    if (!state.settings.pdfPerImagePrompts || typeof state.settings.pdfPerImagePrompts !== "object") state.settings.pdfPerImagePrompts = {};
+    if (!state.settings.pdfPerImagePrompts[slideKey]) state.settings.pdfPerImagePrompts[slideKey] = {};
+    const current = state.settings.pdfPerImagePrompts[slideKey][imageId] || {};
+    state.settings.pdfPerImagePrompts[slideKey][imageId] = {
+      ...current,
+      style: current.style === styleVal ? "" : styleVal,
+    };
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
+
+  const slideImageCountButton = target.closest("[data-slide-image-count][data-slide-image-count-value]");
+  if (slideImageCountButton) {
+    setSlideImageCount(slideImageCountButton.dataset.slideImageCount, Number(slideImageCountButton.dataset.slideImageCountValue || 1));
+    return;
+  }
+
+  const slideActiveImageButton = target.closest("[data-slide-active-image][data-slide-image-id]");
+  if (slideActiveImageButton) {
+    setSlideActiveImage(slideActiveImageButton.dataset.slideActiveImage, slideActiveImageButton.dataset.slideImageId);
+    return;
+  }
+
   const slideImageToggleButton = target.closest("[data-slide-image-toggle][data-slide-image-id]");
   if (slideImageToggleButton) {
     toggleSlideImageSelection(slideImageToggleButton.dataset.slideImageToggle, slideImageToggleButton.dataset.slideImageId);
@@ -7494,6 +8072,12 @@ function handleDelegatedClick(event) {
     return;
   }
 
+  const generateResultButton = target.closest("[data-generate-result]");
+  if (generateResultButton) {
+    handleGenerateResult(false);
+    return;
+  }
+
   const resolveButton = target.closest("[data-feedback-resolve]");
   if (resolveButton) {
     const item = state.feedback.find((entry) => entry.id === resolveButton.dataset.feedbackResolve);
@@ -7521,6 +8105,20 @@ function handleDelegatedChange(event) {
     updatePromptText();
     return;
   }
+
+  if (target.matches("[data-palette-custom]")) {
+    const index = clamp(Number(target.dataset.paletteCustom || 0), 0, 5);
+    const color = String(target.value || "").trim();
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    const next = safeArray(state.settings.selectedPalette).slice(0, 6);
+    next[index] = color;
+    state.settings.selectedPalette = next.filter(Boolean);
+    state.settings.colorMode = "manual";
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
 }
 
 function handleDelegatedInput(event) {
@@ -7537,29 +8135,64 @@ function handleDelegatedInput(event) {
     persistSettings();
     updatePromptText();
   }
+  if (target.matches("[data-slide-inline-text-key][data-slide-inline-text-field]")) {
+    const config = state.settings.pdfSlideConfigs[target.dataset.slideInlineTextKey];
+    if (!config) return;
+    const field = target.dataset.slideInlineTextField;
+    config[field] = normalizeInlineEditableText(target.innerText || target.textContent || "");
+    config.textMode = "custom";
+    persistSettings();
+    updatePromptText();
+  }
+  if (target.matches("[data-per-image-prompt][data-per-image-id]")) {
+    const slideKey = target.dataset.perImagePrompt;
+    const imageId = target.dataset.perImageId;
+    if (!state.settings.pdfPerImagePrompts || typeof state.settings.pdfPerImagePrompts !== "object") state.settings.pdfPerImagePrompts = {};
+    if (!state.settings.pdfPerImagePrompts[slideKey]) state.settings.pdfPerImagePrompts[slideKey] = {};
+    const current = state.settings.pdfPerImagePrompts[slideKey][imageId] || {};
+    state.settings.pdfPerImagePrompts[slideKey][imageId] = {
+      ...current,
+      prompt: target.value,
+    };
+    persistSettings();
+    updatePromptText();
+  }
 }
 
 function commitPdfSectionSelection(nextSections) {
-  state.settings.pdfSections = unique(safeArray(nextSections).filter((value) => PDF_SECTION_LIBRARY.some((item) => item.id === value)));
+  // Preserve order, keep only entries whose base id maps to a known section, allow duplicates via instance ids.
+  state.settings.pdfSections = safeArray(nextSections).filter((value) => {
+    const base = getSectionBaseId(value);
+    return PDF_SECTION_LIBRARY.some((item) => item.id === base);
+  });
   computePdfSlideBlueprints();
   persistSettings();
   renderAll();
   updatePromptText();
 }
 
+function createPdfSectionInstanceId(sectionId, existing) {
+  const base = getSectionBaseId(sectionId);
+  const already = safeArray(existing).some((value) => value === base);
+  if (!already) return base;
+  return `${base}__${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+}
+
 function addPdfSection(sectionId) {
   if (!sectionId) return;
-  if (state.settings.pdfSections.includes(sectionId)) return;
-  commitPdfSectionSelection([...state.settings.pdfSections, sectionId]);
+  const base = getSectionBaseId(sectionId);
+  if (!PDF_SECTION_LIBRARY.some((item) => item.id === base)) return;
+  const newInstance = createPdfSectionInstanceId(base, state.settings.pdfSections);
+  commitPdfSectionSelection([...state.settings.pdfSections, newInstance]);
 }
 
-function removePdfSection(sectionId) {
-  if (!sectionId) return;
-  commitPdfSectionSelection(state.settings.pdfSections.filter((value) => value !== sectionId));
+function removePdfSection(instanceId) {
+  if (!instanceId) return;
+  commitPdfSectionSelection(state.settings.pdfSections.filter((value) => value !== instanceId));
 }
 
-function movePdfSection(sectionId, direction) {
-  const currentIndex = state.settings.pdfSections.indexOf(sectionId);
+function movePdfSection(instanceId, direction) {
+  const currentIndex = state.settings.pdfSections.indexOf(instanceId);
   if (currentIndex === -1) return;
   const targetIndex = clamp(currentIndex + direction, 0, state.settings.pdfSections.length - 1);
   if (targetIndex === currentIndex) return;
@@ -7648,6 +8281,46 @@ function shiftCurrentSlide(direction) {
   renderAll();
 }
 
+function setSlideImageCount(slideKey, count) {
+  const config = state.settings.pdfSlideConfigs[slideKey];
+  if (!config) return;
+  const nextCount = clamp(Number(count) || 1, 1, 6);
+  config.imageCount = String(nextCount);
+  const selected = safeArray(config.imageIds).filter((id) => state.images.some((image) => image.id === id));
+  if (selected.length > nextCount) {
+    config.imageIds = selected.slice(0, nextCount);
+  } else if (selected.length < nextCount) {
+    const additions = state.images
+      .map((image) => image.id)
+      .filter((id) => !selected.includes(id))
+      .slice(0, nextCount - selected.length);
+    config.imageIds = [...selected, ...additions];
+  } else {
+    config.imageIds = selected;
+  }
+  config.activeImageId = config.imageIds.find((id) => id === config.activeImageId) || config.imageIds[0] || state.mainId || state.images[0]?.id || "";
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
+function setSlideActiveImage(slideKey, imageId) {
+  const config = state.settings.pdfSlideConfigs[slideKey];
+  if (!config || !imageId) return;
+  if (!config.useProjectImages) {
+    toast("Activa primero el uso de fotos del proyecto para esta diapositiva.", "warn");
+    return;
+  }
+  const count = resolveSlideImageCount(config);
+  const selected = safeArray(config.imageIds).filter((id) => state.images.some((image) => image.id === id));
+  config.imageIds = [imageId, ...selected.filter((id) => id !== imageId)].slice(0, count);
+  config.activeImageId = imageId;
+  config.imageCount = String(count);
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
 function toggleSlideImageSelection(slideKey, imageId) {
   const config = state.settings.pdfSlideConfigs[slideKey];
   if (!config) return;
@@ -7659,6 +8332,8 @@ function toggleSlideImageSelection(slideKey, imageId) {
   if (next.has(imageId)) next.delete(imageId);
   else next.add(imageId);
   config.imageIds = [...next];
+  config.imageCount = String(Math.max(1, Math.min(config.imageIds.length || 1, 6)));
+  config.activeImageId = config.imageIds.includes(config.activeImageId) ? config.activeImageId : config.imageIds[0] || state.mainId || state.images[0]?.id || "";
   persistSettings();
   renderAll();
   updatePromptText();
