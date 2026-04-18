@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f9c199"/>
+      <stop offset="55%" stop-color="#ec7d42"/>
+      <stop offset="100%" stop-color="#f5d9c8"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff9f68" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#ffd2ba" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="blurStrong"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurSoft"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.18"/></filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#ffd2ba" stroke-opacity="0.16" stroke-width="1"/>
+    </pattern>
+  </defs><rect width="1600" height="1000" rx="36" fill="url(#bg)"/>
+        <rect x="48" y="48" width="1504" height="904" rx="30" fill="url(#soft)" opacity="0.95"/>
+        <circle cx="420" cy="280" r="250" fill="#ffffff" opacity="0.12" filter="url(#blurStrong)"/>
+        <circle cx="1240" cy="750" r="320" fill="#ffd2ba" opacity="0.15" filter="url(#blurStrong)"/>
+        <text x="120" y="210" fill="#ffffff" font-family="Arial" font-size="116" font-weight="800" letter-spacing="0"><tspan x="120" dy="0">Portafolio</tspan><tspan x="120" dy="108">creativo</tspan></text>
+        <text x="126" y="130" fill="#fff5ef" font-family="Arial" font-size="22" letter-spacing="8">MOTION ISSUE</text>
+        <rect x="118" y="744" width="420" height="2" fill="#ffffff" opacity="0.32"/>
+        <text x="118" y="804" fill="#fff7f0" font-family="Arial" font-size="28">Efecto poster suave y lleno de energia</text></svg>

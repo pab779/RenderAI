@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#243124"/>
+      <stop offset="55%" stop-color="#344235"/>
+      <stop offset="100%" stop-color="#e5dbc8"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#41533f" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#d9ccb5" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="blurStrong"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurSoft"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.18"/></filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#d9ccb5" stroke-opacity="0.16" stroke-width="1"/>
+    </pattern>
+  </defs><rect width="1600" height="1000" rx="36" fill="url(#bg)"/>
+        <circle cx="280" cy="280" r="220" fill="#41533f" opacity="0.18" filter="url(#blurSoft)"/>
+        <rect x="860" y="110" width="520" height="760" rx="26" fill="rgba(255,255,255,0.78)"/>
+        <rect x="904" y="154" width="432" height="520" rx="22" fill="url(#soft)" filter="url(#shadow)"/>
+        <rect x="140" y="712" width="520" height="2" fill="#f7f3ea" opacity="0.25"/>
+        <text x="140" y="255" fill="#f7f3ea" font-family="Georgia" font-size="110" font-weight="700" letter-spacing="-1"><tspan x="140" dy="0">The Art of</tspan><tspan x="140" dy="102">Perfume</tspan></text>
+        <text x="140" y="126" fill="#f7f3ea" font-family="Arial" font-size="22" letter-spacing="8">ATMOSPHERIC DECK</text>
+        <text x="140" y="786" fill="#f7f3ea" font-family="Arial" font-size="28">Lujo organico, textura y tono de lifestyle</text></svg>

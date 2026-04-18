@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d2e0ea"/>
+      <stop offset="55%" stop-color="#bfd2df"/>
+      <stop offset="100%" stop-color="#ecf3f7"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8ba7bf" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#f4f7fa" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="blurStrong"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurSoft"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.18"/></filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#f4f7fa" stroke-opacity="0.16" stroke-width="1"/>
+    </pattern>
+  </defs><rect width="1600" height="1000" rx="36" fill="url(#bg)"/>
+        <rect x="74" y="86" width="790" height="828" rx="18" fill="#8ba7bf" opacity="0.10"/>
+        <rect x="120" y="138" width="700" height="736" rx="16" fill="url(#soft)" filter="url(#shadow)"/>
+        <rect x="932" y="136" width="510" height="310" rx="16" fill="rgba(255,255,255,0.78)"/>
+        <rect x="932" y="486" width="510" height="390" rx="16" fill="rgba(255,255,255,0.90)"/>
+        <text x="960" y="248" fill="#ffffff" font-family="Arial" font-size="96" font-weight="800" letter-spacing="-1.5"><tspan x="960" dy="0">ARCHITECTURE</tspan></text>
+        <text x="960" y="602" fill="#ffffff" font-family="Arial" font-size="24" letter-spacing="7">VISUAL PORTFOLIO</text>
+        <text x="960" y="648" fill="#ffffff" opacity="0.74" font-family="Arial" font-size="28">Cobertura serena con hero arquitectonico</text>
+        <rect x="960" y="708" width="320" height="2" fill="#f4f7fa" opacity="0.3"/>
+        <rect x="960" y="746" width="410" height="18" rx="9" fill="#ffffff" opacity="0.12"/>
+        <rect x="960" y="778" width="360" height="18" rx="9" fill="#ffffff" opacity="0.12"/>
+        <rect x="960" y="810" width="300" height="18" rx="9" fill="#ffffff" opacity="0.12"/></svg>

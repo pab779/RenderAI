@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f5f1ea"/>
+      <stop offset="55%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f4f0ea"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#ece0d6" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="blurStrong"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurSoft"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.18"/></filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#ece0d6" stroke-opacity="0.16" stroke-width="1"/>
+    </pattern>
+  </defs><rect width="1600" height="1000" rx="36" fill="url(#bg)"/>
+        <rect x="70" y="70" width="1460" height="860" rx="26" fill="#f5f1ea" opacity="0.86"/>
+        <rect x="70" y="70" width="380" height="860" rx="26 0 0 26" fill="#ffffff"/>
+        <rect x="450" y="480" width="1080" height="450" rx="0 26 26 0" fill="#ece0d6" opacity="0.12"/>
+        <text x="510" y="250" fill="#d71920" font-family="Arial" font-size="140" font-weight="900" letter-spacing="-6">PITCH</text>
+        <text x="510" y="372" fill="#d71920" font-family="Arial" font-size="140" font-weight="900" letter-spacing="-6">DECK</text>
+        <text x="120" y="180" fill="#ffffff" font-family="Arial" font-size="26" letter-spacing="8">STRATEGY DECK</text>
+        <text x="120" y="222" fill="#ffffff" font-family="Arial" font-size="30">Grandes titulares y energia de propuesta</text></svg>

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4e3a29"/>
+      <stop offset="55%" stop-color="#7c5f44"/>
+      <stop offset="100%" stop-color="#1f1712"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d0a67a" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#8f6a49" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="blurStrong"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurSoft"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.18"/></filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#8f6a49" stroke-opacity="0.16" stroke-width="1"/>
+    </pattern>
+  </defs><rect width="1600" height="1000" rx="36" fill="url(#bg)"/>
+        <rect x="64" y="80" width="680" height="840" rx="26" fill="#ffffff" opacity="0.92"/>
+        <rect x="790" y="80" width="746" height="840" rx="26" fill="url(#soft)" filter="url(#shadow)"/>
+        <text x="112" y="218" fill="#f9f2e8" font-family="Arial" font-size="96" font-weight="700" letter-spacing="-1"><tspan x="112" dy="0">LETS TALK ABOUT</tspan><tspan x="112" dy="89">ARCHITECTURE</tspan></text>
+        <text x="116" y="150" fill="#8f6a49" font-family="Arial" font-size="20" letter-spacing="8">FEATURE STORY</text>
+        <rect x="116" y="672" width="430" height="2" fill="#f9f2e8" opacity="0.20"/>
+        <text x="116" y="736" fill="#f9f2e8" opacity="0.76" font-family="Arial" font-size="28">Conversacion visual del proyecto</text>
+        <rect x="116" y="788" width="420" height="18" rx="9" fill="#f9f2e8" opacity="0.12"/>
+        <rect x="116" y="820" width="360" height="18" rx="9" fill="#f9f2e8" opacity="0.12"/></svg>

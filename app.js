@@ -407,6 +407,11 @@ const PROJECT_TYPE_OPTIONS = [
   { value: "university", label: "Tarea de universidad", description: "Mas didactica y explicativa." },
 ];
 
+const TEMPLATE_TYPE_OPTIONS = [
+  { value: "brochure", label: "Brochure", description: "Formato de una pagina tipo flyer o poster." },
+  { value: "ppt", label: "Presentacion", description: "Deck tipo PowerPoint multi-diapositiva." },
+];
+
 const AMENITY_LIBRARY = [
   "Lobby", "Cowork", "Rooftop", "Piscina", "Gimnasio", "Spa", "Restaurante", "Cafe", "Sala de reuniones", "Terraza",
   "Lounge", "Playground", "Recepcion", "Mirador", "Biblioteca", "Tiendas", "Galeria", "Auditorio",
@@ -660,6 +665,224 @@ function buildBrochureTemplateLibrary() {
 
 const BROCHURE_TEMPLATE_LIBRARY = buildBrochureTemplateLibrary();
 
+let LOCAL_TEMPLATE_CATALOG = null;
+let LOCAL_TEMPLATE_OBJECTS = null;
+let LOCAL_TEMPLATE_OBJECTS_PROMISE = null;
+const BLANK_LOCAL_TEMPLATES = [
+  {
+    id: "blank-brochure",
+    type: "brochure",
+    label: "Blanc Brochure",
+    description: "Hojas limpias para disenar desde cero.",
+    slideCount: 12,
+    slidePreviews: [],
+    blank: true,
+  },
+  {
+    id: "blank-ppt",
+    type: "ppt",
+    label: "Blanc PPT",
+    description: "Presentacion en blanco con capas editables.",
+    slideCount: 12,
+    slidePreviews: [],
+    blank: true,
+  },
+];
+async function loadLocalTemplateCatalog() {
+  if (LOCAL_TEMPLATE_CATALOG) return LOCAL_TEMPLATE_CATALOG;
+  try {
+    const resp = await fetch('./assets/local-brochure-templates/local-template-catalog.json');
+    LOCAL_TEMPLATE_CATALOG = await resp.json();
+  } catch (e) {
+    LOCAL_TEMPLATE_CATALOG = { brochure: [], ppt: [] };
+  }
+  return LOCAL_TEMPLATE_CATALOG;
+}
+
+async function loadLocalTemplateObjects() {
+  if (LOCAL_TEMPLATE_OBJECTS) return LOCAL_TEMPLATE_OBJECTS;
+  if (LOCAL_TEMPLATE_OBJECTS_PROMISE) return LOCAL_TEMPLATE_OBJECTS_PROMISE;
+  LOCAL_TEMPLATE_OBJECTS_PROMISE = fetch('./assets/local-brochure-templates/local-template-objects.json?v=1')
+    .then((resp) => (resp.ok ? resp.json() : { templates: {} }))
+    .then((data) => {
+      LOCAL_TEMPLATE_OBJECTS = data || { templates: {} };
+      return LOCAL_TEMPLATE_OBJECTS;
+    })
+    .catch(() => {
+      LOCAL_TEMPLATE_OBJECTS = { templates: {} };
+      return LOCAL_TEMPLATE_OBJECTS;
+    });
+  return LOCAL_TEMPLATE_OBJECTS_PROMISE;
+}
+
+function requestLocalTemplateObjectsHydration() {
+  if (LOCAL_TEMPLATE_OBJECTS || LOCAL_TEMPLATE_OBJECTS_PROMISE) return;
+  loadLocalTemplateObjects().then(() => {
+    if (state.flow === "pdf" && state.currentStep === 5) renderAll();
+  });
+}
+
+function getAllLocalTemplates() {
+  const catalog = LOCAL_TEMPLATE_CATALOG || { brochure: [], ppt: [] };
+  return [...BLANK_LOCAL_TEMPLATES, ...safeArray(catalog.brochure), ...safeArray(catalog.ppt)];
+}
+
+function getSelectedLocalTemplateEntry() {
+  if (!state?.settings?.localTemplate) return null;
+  return getAllLocalTemplates().find((item) => item.id === state.settings.localTemplate) || null;
+}
+
+function getLocalTemplateSlidePreview(entry, layoutOrSlide = 1) {
+  const previews = safeArray(entry?.slidePreviews);
+  if (!previews.length) return null;
+  const slideNumber = Number(String(layoutOrSlide || "").replace("tpl-page-", "")) || Number(layoutOrSlide) || 1;
+  return previews.find((preview) => Number(preview.slide || preview.page || 0) === slideNumber)
+    || previews[Math.max(0, slideNumber - 1)]
+    || previews[0];
+}
+
+function resolveLocalTemplatePreviewUrl(entry, layoutOrSlide = 1, cacheBust = false) {
+  const preview = getLocalTemplateSlidePreview(entry, layoutOrSlide);
+  const path = preview?.path || entry?.thumbnail || "";
+  return path && cacheBust ? `${path}?v=2` : path;
+}
+
+function getLocalTemplateObjectMap(entry) {
+  if (!entry?.id || !LOCAL_TEMPLATE_OBJECTS?.templates) return null;
+  return LOCAL_TEMPLATE_OBJECTS.templates[entry.id] || null;
+}
+
+function getLocalTemplateSlideObjectRecord(entry, layoutOrSlide = 1) {
+  const objectMap = getLocalTemplateObjectMap(entry);
+  if (!objectMap) return null;
+  const slideNumber = Number(String(layoutOrSlide || "").replace("tpl-page-", "")) || Number(layoutOrSlide) || 1;
+  return safeArray(objectMap.slides).find((slide) => Number(slide.slide || 0) === slideNumber)
+    || safeArray(objectMap.slides)[Math.max(0, slideNumber - 1)]
+    || null;
+}
+
+function getLocalTemplateSlideObjects(entry, layoutOrSlide = 1) {
+  return safeArray(getLocalTemplateSlideObjectRecord(entry, layoutOrSlide)?.objects);
+}
+
+function clampTemplateRect(obj = {}) {
+  const x = clamp(Number(obj.x) || 0, -12, 112);
+  const y = clamp(Number(obj.y) || 0, -12, 112);
+  const width = clamp(Number(obj.width) || 1, 1, 120);
+  const height = clamp(Number(obj.height) || 1, 1, 120);
+  return { x, y, width, height };
+}
+
+function resolveTemplateObjectRect(config = {}, obj = {}) {
+  const base = clampTemplateRect(obj);
+  const override = config.templateObjectTransforms?.[obj.id] || {};
+  return clampTemplateRect({ ...base, ...override });
+}
+
+function persistTemplateObjectRect(config = {}, objectId = "", rect = {}) {
+  if (!objectId) return;
+  if (!config.templateObjectTransforms || typeof config.templateObjectTransforms !== "object") config.templateObjectTransforms = {};
+  config.templateObjectTransforms[objectId] = clampTemplateRect(rect);
+}
+
+function templateObjectArea(obj = {}) {
+  const rect = clampTemplateRect(obj);
+  return rect.width * rect.height;
+}
+
+function isTemplateTextObject(obj = {}) {
+  return obj.kind === "text" && String(obj.text || "").trim().length > 0 && templateObjectArea(obj) > 8;
+}
+
+function isTemplateImageSlotCandidate(obj = {}) {
+  const area = templateObjectArea(obj);
+  if (obj.kind === "image") return area > 20;
+  if (obj.kind !== "shape") return false;
+  const name = String(obj.name || "").toLowerCase();
+  const fill = String(obj.fill || "");
+  const rect = clampTemplateRect(obj);
+  if (area > 1450) return true;
+  if (/picture|image|photo|media|group/i.test(name) && area > 150) return true;
+  if (!fill && area > 260 && rect.width > 12 && rect.height > 10) return true;
+  return false;
+}
+
+function buildTemplateBackgroundSlot() {
+  return {
+    id: "__background__",
+    kind: "image",
+    role: "background",
+    name: "Fondo",
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    z: -100,
+  };
+}
+
+function labelTemplateImageSlot(slot = {}, index = 0) {
+  if (slot.id === "__background__" || slot.role === "background") return "Fondo";
+  if (slot.role === "hero") return "Cuadro principal";
+  if (slot.role === "custom") return slot.name || `Cuadro ${index}`;
+  return slot.name || `Cuadro ${index}`;
+}
+
+function templateSlotFallbackIndex(slot = {}, index = 0) {
+  return slot.id === "__background__" || slot.role === "background" ? 0 : Math.max(0, Number(index || 0) - 1);
+}
+
+function resolveTemplateEditableObjects(entry, activeLayout, config = {}) {
+  const isBlankCanvas = String(activeLayout || "") === "blank-canvas";
+  const objects = getLocalTemplateSlideObjects(entry, activeLayout);
+  const textObjects = objects
+    .filter(isTemplateTextObject)
+    .sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
+    .slice(0, 18);
+  let imageSlots = isBlankCanvas
+    ? []
+    : objects
+      .filter(isTemplateImageSlotCandidate)
+      .sort((a, b) => templateObjectArea(b) - templateObjectArea(a))
+      .slice(0, 8)
+      .map((obj, index) => ({ ...obj, id: obj.id || `slot-${index + 1}` }));
+
+  if (!imageSlots.length && !isBlankCanvas) {
+    imageSlots = resolveTemplatePhotoFrames(config, activeLayout, resolveSlideImageCount(config)).map((frame, index) => ({
+      id: `auto-slot-${index + 1}`,
+      kind: "image",
+      role: index === 0 ? "hero" : "support",
+      name: index === 0 ? "Imagen principal" : `Imagen ${index + 1}`,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      z: 100 + index,
+    }));
+  }
+
+  const customObjects = safeArray(config.templateCustomObjects);
+  const customTextObjects = customObjects
+    .filter((obj) => obj.kind === "text")
+    .map((obj, index) => ({ ...obj, role: obj.role || "custom", z: 400 + index }));
+  const customImageSlots = customObjects
+    .filter((obj) => obj.kind === "image")
+    .map((obj, index) => ({ ...obj, role: obj.role || "custom", z: 500 + index }));
+
+  return {
+    textObjects: [...textObjects, ...customTextObjects],
+    imageSlots: [buildTemplateBackgroundSlot(), ...imageSlots, ...customImageSlots],
+  };
+}
+
+function resolveTemplateAssignedImage(config = {}, slotId = "", fallbackIndex = 0) {
+  const assignedId = config.templateSlotImages?.[slotId];
+  if (slotId === "__background__" && !assignedId) return null;
+  const ids = safeArray(config.imageIds);
+  const candidateId = assignedId || ids[fallbackIndex] || ids[0] || config.activeImageId || state.mainId || state.images[0]?.id || "";
+  return state.images.find((image) => image.id === candidateId) || null;
+}
+
 const BROCHURE_LANGUAGE_OPTIONS = [
   { value: "es", label: "Espanol", description: "Todo el brochure en espanol legible y controlado." },
   { value: "en", label: "English", description: "All brochure copy in controlled, legible English." },
@@ -721,7 +944,7 @@ const SLIDE_LAYOUT_OPTIONS = [
 ];
 
 const SLIDE_IMAGE_SOURCE_OPTIONS = [
-  { value: "inherit", label: "Segun brochure", description: "Respeta el modo global del paso 3." },
+  { value: "inherit", label: "Segun slot", description: "Respeta el modo definido para ese marco de imagen." },
   { value: "rendered", label: "Renderizada", description: "Usa la version render maestra de esa imagen." },
   { value: "raw", label: "Cruda", description: "Mantiene la foto original sin reinterpretarla." },
 ];
@@ -901,6 +1124,7 @@ const DEFAULT_SETTINGS = {
   coverStyle: "visual",
   deckMode: "client",
   projectType: "business",
+  templateType: "ppt",
   pdfImageMode: "rendered",
   brochureStyle: CANVA_TEMPLATE_DEFAULT,
   brochureLanguage: "es",
@@ -912,6 +1136,7 @@ const DEFAULT_SETTINGS = {
   customAmenities: [],
   amenityCount: "2",
   pdfSections: ["cover", "concept", "moodboard", "materials", "amenities", "plan-2d", "closing"],
+  localTemplate: "",
   pdfSlideConfigs: {},
 };
 
@@ -964,6 +1189,7 @@ const state = {
 const elements = {};
 let assetDropzoneDragDepth = 0;
 let apiHealthTimer = null;
+let canvasObjectDrag = null;
 
 const ELEMENT_IDS = [
   "authScreen", "loginForm", "loginUsername", "loginPassword", "loginError",
@@ -976,6 +1202,7 @@ const ELEMENT_IDS = [
   "analysisCanvas", "analysisInteractionLayer", "annotationDraft", "annotationCategory", "annotationLabel",
   "annotationToggleBtn", "annotationResetBtn", "annotationHelp",
   "analysisSummary", "analysisMeta", "analysisEditors", "step3Eyebrow", "step3Title", "contextBrief", "changeRequest", "decisionGroups", "pdfDeckBuilder",
+  "introGoalsCard", "introGoalsGroups", "introContextBrief",
   "pdfSectionStudio", "step4Eyebrow", "step4Title", "resultView",
   "resultStatus", "downloadResultBtn", "downloadAltBtn", "regenerateResultBtn", "restartFlowBtn", "resultPrimary",
   "resultSecondary", "resultMeta", "feedbackForm", "feedbackCategoryChips", "feedbackRatingChips",
@@ -993,9 +1220,14 @@ function init() {
   hydrateSession();
   elements.contextBrief.value = state.settings.contextBrief || "";
   elements.changeRequest.value = state.settings.changeRequest || "";
+  if (elements.introContextBrief) elements.introContextBrief.value = state.settings.contextBrief || "";
   elements.feedbackMessage.value = state.feedbackDraft.message || "";
   applySession();
   renderAll();
+  loadLocalTemplateCatalog().then(() => renderDecisions());
+  loadLocalTemplateObjects().then(() => {
+    if (state.flow === "pdf") renderAll();
+  });
   checkApiHealth();
   if (apiHealthTimer) clearInterval(apiHealthTimer);
   apiHealthTimer = window.setInterval(() => { checkApiHealth(); }, 10000);
@@ -1022,6 +1254,9 @@ function bindEvents() {
   elements.refreshAnalysisBtn.addEventListener("click", () => runProjectAnalyses(true));
   elements.contextBrief.addEventListener("input", handleContextChange);
   elements.changeRequest.addEventListener("input", handleChangeRequest);
+  if (elements.introContextBrief) {
+    elements.introContextBrief.addEventListener("input", handleIntroContextChange);
+  }
   elements.downloadResultBtn.addEventListener("click", () => downloadCurrentResult("primary"));
   elements.downloadAltBtn.addEventListener("click", () => downloadCurrentResult("alternate"));
   elements.regenerateResultBtn.addEventListener("click", async () => { await handleGenerateResult(true); });
@@ -1041,9 +1276,13 @@ function bindEvents() {
   elements.analysisInteractionLayer.addEventListener("pointerdown", startAnnotationDrag);
   elements.analysisInteractionLayer.addEventListener("pointermove", updateAnnotationDrag);
   window.addEventListener("pointerup", finishAnnotationDrag);
+  document.addEventListener("pointerdown", startTemplateObjectDrag);
+  window.addEventListener("pointermove", moveTemplateObjectDrag);
+  window.addEventListener("pointerup", finishTemplateObjectDrag);
   document.addEventListener("click", handleDelegatedClick);
   document.addEventListener("change", handleDelegatedChange);
   document.addEventListener("input", handleDelegatedInput);
+  document.addEventListener("focusin", handleDelegatedFocusIn);
 }
 
 function hydrateSession() {
@@ -1190,14 +1429,7 @@ function validateStep(step) {
       toast("Selecciona al menos una seccion para el brochure.", "warn");
       return false;
     }
-    if (
-      hasPdfSectionBase("amenities", state.settings.pdfSections)
-      && Number(state.settings.amenityCount || 0) > 0
-      && safeArray(state.settings.selectedAmenities).length < Number(state.settings.amenityCount || 0)
-    ) {
-      toast("Si activas amenidades con cantidad mayor a cero, completa la seleccion visual.", "warn");
-      return false;
-    }
+    // Amenities are now free-text, no count validation needed
   }
 
   return true;
@@ -1210,11 +1442,40 @@ function renderAll() {
   renderStepPanels();
   renderAssets();
   renderAnalysis();
+  renderIntroGoals();
   renderDecisions();
   renderPdfSectionStudio();
   renderResult();
   renderFeedback();
   renderAdmin();
+}
+
+const INTRO_DECK_MODE_OPTIONS = [
+  { value: "client", label: "Brochure cliente", description: "Comercial y facil de leer." },
+  { value: "executive", label: "Resumen ejecutivo", description: "Directo y corto." },
+  { value: "presentation", label: "Presentacion completa", description: "Deck amplio para reunion." },
+];
+
+function renderIntroGoals() {
+  if (!elements.introGoalsCard) return;
+  const isPdf = state.flow === "pdf";
+  // Only show on step 3 (design), not step 4 (slides map) which shares the same panel
+  elements.introGoalsCard.classList.toggle("hidden", !isPdf || state.currentStep !== 3);
+  if (!isPdf) {
+    elements.introGoalsGroups.innerHTML = "";
+    return;
+  }
+  const audienceGroup = DECISION_GROUPS.pdf.find((group) => group.key === "audience");
+  const deckModeGroup = DECISION_GROUPS.pdf.find((group) => group.key === "deckMode")
+    || { key: "deckMode", options: INTRO_DECK_MODE_OPTIONS };
+  elements.introGoalsGroups.innerHTML = [
+    renderCompactChoiceSet("projectType", "Proyecto", "Tipo de brochure", PROJECT_TYPE_OPTIONS, state.settings.projectType),
+    renderCompactChoiceSet("audience", "Publico meta", "A quien se le habla", audienceGroup?.options || [], state.settings.audience),
+    renderCompactChoiceSet("deckMode", "Tipo de entrega", "Brochure, resumen ejecutivo o presentacion", deckModeGroup.options || INTRO_DECK_MODE_OPTIONS, state.settings.deckMode),
+  ].join("");
+  if (elements.introContextBrief && elements.introContextBrief.value !== (state.settings.contextBrief || "")) {
+    elements.introContextBrief.value = state.settings.contextBrief || "";
+  }
 }
 
 function renderWorkspaceVisibility() {
@@ -1752,6 +2013,9 @@ function renderDecisions() {
   elements.changeRequest.value = state.settings.changeRequest || "";
   elements.step3Panel.classList.toggle("step3-market-mode", state.flow === "pdf");
   elements.step3Panel.classList.toggle("step3-structure-mode", state.flow === "pdf" && state.currentStep === 4);
+  // Paso 1 ya aloja el brief y el tipo de entrega para el flujo PDF, asi que en paso 3 ocultamos el context-card.
+  const legacyContextCard = elements.step3Panel?.querySelector(".context-card");
+  if (legacyContextCard) legacyContextCard.classList.toggle("hidden", state.flow === "pdf");
   if (!state.flow) {
     elements.decisionGroups.innerHTML = "";
     elements.decisionGroups.classList.add("hidden");
@@ -1796,12 +2060,24 @@ function renderDecisions() {
 
 function handleContextChange(event) {
   state.settings.contextBrief = event.target.value;
+  if (elements.introContextBrief && elements.introContextBrief !== event.target) {
+    elements.introContextBrief.value = event.target.value;
+  }
   persistSettings();
   updatePromptText();
 }
 
 function handleChangeRequest(event) {
   state.settings.changeRequest = event.target.value;
+  persistSettings();
+  updatePromptText();
+}
+
+function handleIntroContextChange(event) {
+  state.settings.contextBrief = event.target.value;
+  if (elements.contextBrief && elements.contextBrief !== event.target) {
+    elements.contextBrief.value = event.target.value;
+  }
   persistSettings();
   updatePromptText();
 }
@@ -2242,74 +2518,56 @@ function renderPdfSectionStudioEditor() {
   const activeTemplateEntry = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   const slideLayoutOptions = getSlideLayoutVariantsForTemplate(activeTemplateEntry, currentBlueprint);
   const activeSlideLayout = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[currentBlueprint.key]) || slideLayoutOptions[0]?.value || currentConfig.layout || currentBlueprint.layout;
-  const selectedImages = safeArray(currentConfig.imageIds);
-  const imageCount = resolveSlideImageCount(currentConfig);
   const activeImageId = resolveSlideActiveImageId(currentConfig);
   const activeImage = state.images.find((image) => image.id === activeImageId) || null;
   const palette = resolveEditorPalette(analysis);
-  const selectedMaterials = safeArray(currentConfig.materialHighlights);
-  const selectedObjects = safeArray(currentConfig.objectHighlights);
   const isBoardSlide = isMoodBoardBlueprint(currentBlueprint, currentConfig);
+  const moodBoardLayout = String(currentConfig.moodBoardLayout || inferMoodBoardLayout(currentBlueprint));
+  const selectedLocalTemplate = getSelectedLocalTemplateEntry();
+  if (selectedLocalTemplate && !LOCAL_TEMPLATE_OBJECTS) requestLocalTemplateObjectsHydration();
 
   elements.pdfSectionStudio.innerHTML = `
     <article class="pdf-section-shell slide-studio-v2">
-      <div class="slide-studio-head">
-        <div>
-          <span class="eyebrow">Paso 5 · Canva + imagenes</span>
-          <strong>Editor visual del brochure</strong>
+
+      <div class="slide-studio-topbar">
+        <div class="slide-studio-title">
+          <span class="eyebrow">Paso 5 · Editor</span>
+          <strong>Diapositiva ${currentIndex + 1} de ${blueprints.length} · ${escapeHtml(currentBlueprint.sectionLabel)}</strong>
         </div>
-        <div class="choice-inline wrap">
-          <button type="button" class="button button-ghost" data-slide-nav-shift="-1" ${currentIndex === 0 ? "disabled" : ""}>Anterior</button>
-          <span class="status-chip status-soft">${currentIndex + 1}/${blueprints.length}</span>
-          <button type="button" class="button button-ghost" data-slide-nav-shift="1" ${currentIndex >= blueprints.length - 1 ? "disabled" : ""}>Siguiente</button>
+        <div class="slide-studio-nav-btns">
+          <button type="button" class="button button-ghost btn-sm" data-slide-nav-shift="-1" ${currentIndex === 0 ? "disabled" : ""}>← Anterior</button>
+          <span class="status-chip status-soft">${currentIndex + 1} / ${blueprints.length}</span>
+          <button type="button" class="button button-ghost btn-sm" data-slide-nav-shift="1" ${currentIndex >= blueprints.length - 1 ? "disabled" : ""}>Siguiente →</button>
+        </div>
+        <div class="slide-studio-actions">
+          <button type="button" class="button button-ghost btn-sm" data-slide-reset-copy="${currentBlueprint.key}">↺ Restaurar texto</button>
+          <span class="status-chip status-soft status-xs">${escapeHtml(buildSectionConfigSummary(currentBlueprint, currentConfig))}</span>
         </div>
       </div>
 
       ${renderSlideFilmstrip(blueprints, currentBlueprint)}
+      ${renderEditorCommandBar(currentBlueprint, currentConfig, activeSlideLayout, palette, activeImage)}
 
-      <section class="slide-studio-stage">
-        <div class="slide-studio-main">
-          <div class="mini-head compact">
+      <!-- Canva-like editor: image slots live next to the canvas; render treatment is below. -->
+      <section class="studio-workbench studio-workbench-with-sidebar">
+
+        ${renderCanvasSlotSidebar(currentBlueprint, currentConfig, activeSlideLayout)}
+
+        <div class="studio-col studio-col-canvas">
+          <div class="studio-canvas-label">
             <span class="eyebrow">${escapeHtml(currentBlueprint.sectionLabel)}</span>
             <strong>${escapeHtml(currentBlueprint.title)}</strong>
+            <small>Arrastra MOVE para componer. El fondo y cada cuadro de imagen se asignan desde la izquierda.</small>
           </div>
           ${renderSlideLayoutStrip(slideLayoutOptions, activeSlideLayout, currentBlueprint.key)}
+          ${isBoardSlide ? renderMoodBoardLayoutStrip(currentBlueprint, moodBoardLayout) : ""}
           ${buildEditableSlideCanvas(currentBlueprint, currentConfig, slideText, activeSlideLayout, styleProfile, palette)}
         </div>
-        ${renderSlidePaletteEditor(palette)}
+
       </section>
 
-      <section class="slide-studio-split slide-image-workbench">
-        <div class="slide-studio-panel">
-          <div class="mini-head compact">
-            <span class="eyebrow">Imagenes</span>
-            <strong>Escoge cuantas fotos usa esta pagina</strong>
-          </div>
-          <label class="toggle-card compact-toggle">
-            <input type="checkbox" data-slide-use-project="${currentBlueprint.key}" ${Boolean(currentConfig.useProjectImages) ? "checked" : ""} ${currentBlueprint.allowProjectImages ? "" : "disabled"} />
-            <span>${currentBlueprint.allowProjectImages ? "Usar fotos del proyecto en esta diapositiva" : "Esta diapositiva usa recursos derivados / mood board"}</span>
-          </label>
-          ${renderSlideImageCountControls(currentBlueprint.key, imageCount)}
-          ${renderSlidePhotoSelector(currentBlueprint, currentConfig, activeImageId)}
-          ${isBoardSlide ? renderBoardCurationPanel(analysis, currentBlueprint, selectedMaterials, selectedObjects) : ""}
-        </div>
+      ${renderTemplateImageMapper(currentBlueprint, currentConfig, activeSlideLayout)}
 
-        <div class="slide-studio-panel">
-          <div class="mini-head compact">
-            <span class="eyebrow">Editor de foto</span>
-            <strong>${activeImage ? escapeHtml(activeImage.name) : "Selecciona una foto"}</strong>
-          </div>
-          ${renderActivePhotoInspector(currentBlueprint, currentConfig, activeImage, activeImageId)}
-        </div>
-      </section>
-
-      <div class="slide-studio-footer">
-        <span class="status-chip status-soft">${escapeHtml(buildSectionConfigSummary(currentBlueprint, currentConfig))}</span>
-        <div class="choice-inline wrap">
-          <button type="button" class="button button-ghost" data-slide-reset-copy="${currentBlueprint.key}">Restaurar texto sugerido</button>
-          <button type="button" class="button button-primary" data-generate-result>Generar brochure</button>
-        </div>
-      </div>
     </article>
   `;
 }
@@ -2330,6 +2588,16 @@ function hydrateSlideConfigDefaults(blueprint, config) {
   if (!config.slideBackground) config.slideBackground = "inherit";
   if (!config.moodBoardLayout) config.moodBoardLayout = inferMoodBoardLayout(blueprint);
   if (!Array.isArray(config.imageIds)) config.imageIds = [];
+  if (!config.templateSlotImages || typeof config.templateSlotImages !== "object") config.templateSlotImages = {};
+  if (!config.templateSlotRender || typeof config.templateSlotRender !== "object") config.templateSlotRender = {};
+  if (!config.templateTextOverrides || typeof config.templateTextOverrides !== "object") config.templateTextOverrides = {};
+  if (!Array.isArray(config.templateCustomObjects)) config.templateCustomObjects = [];
+  if (!config.templateObjectTransforms || typeof config.templateObjectTransforms !== "object") config.templateObjectTransforms = {};
+  if (!config.templateObjectStyles || typeof config.templateObjectStyles !== "object") config.templateObjectStyles = {};
+  // Ensure at least the main image is pre-selected so user can swap/remove it
+  if (config.useProjectImages && blueprint.allowProjectImages && !config.imageIds.length && (state.mainId || state.images[0])) {
+    config.imageIds = [state.mainId || state.images[0].id];
+  }
   if (!config.imageCount) config.imageCount = String(Math.max(1, config.imageIds.length || 1));
   if (!config.activeImageId || !state.images.some((image) => image.id === config.activeImageId)) {
     config.activeImageId = config.imageIds.find((id) => state.images.some((image) => image.id === id)) || config.imageIds[0] || state.mainId || state.images[0]?.id || "";
@@ -2337,16 +2605,24 @@ function hydrateSlideConfigDefaults(blueprint, config) {
 }
 
 function renderSlideFilmstrip(blueprints, currentBlueprint) {
+  // Get slide previews from the selected local template
+  const selectedLocal = getSelectedLocalTemplateEntry();
+  const slidePreviews = selectedLocal?.slidePreviews || [];
+
   return `
     <nav class="canva-slide-nav studio-filmstrip" aria-label="Diapositivas del brochure">
       ${blueprints.map((blueprint, index) => {
         const config = state.settings.pdfSlideConfigs[blueprint.key] || {};
-        const previewImage = resolveSlidePreviewImages(config)[0];
+        const userPreviewImage = resolveSlidePreviewImages(config)[0];
+        // Use template slide preview if available, otherwise user photo
+        const templateSlide = slidePreviews[index];
+        const thumbUrl = templateSlide?.path || (userPreviewImage?.url || "");
         const layoutVariant = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[blueprint.key]) || config.layout || blueprint.layout;
         return `
           <button type="button" class="canva-slide-nav-chip ${blueprint.key === currentBlueprint.key ? "active" : ""}" data-slide-nav="${blueprint.key}">
-            <span>${index + 1} · ${escapeHtml(blueprint.sectionLabel)}</span>
-            <span class="canva-slide-nav-thumb canva-slide-nav-thumb-${escapeHtml(layoutVariant)}" ${previewImage?.url ? `style="--thumb-url:url('${escapeHtml(previewImage.url)}')"` : ""}></span>
+            <span class="canva-slide-nav-index">${index + 1}</span>
+            <span class="canva-slide-nav-label">${escapeHtml(blueprint.sectionLabel)}</span>
+            <span class="canva-slide-nav-thumb canva-slide-nav-thumb-${escapeHtml(layoutVariant)}" ${thumbUrl ? `style="background-image:url('${escapeHtml(thumbUrl)}');background-size:cover;background-position:center"` : ""}></span>
             <strong>${escapeHtml(blueprint.title)}</strong>
           </button>
         `;
@@ -2356,14 +2632,227 @@ function renderSlideFilmstrip(blueprints, currentBlueprint) {
 }
 
 function renderSlideLayoutStrip(layoutOptions, activeLayout, slideKey) {
+  // If a local template is selected and has slidePreviews, show real template slides
+  const selectedLocal = getSelectedLocalTemplateEntry();
+  const slidePreviews = selectedLocal?.slidePreviews || [];
+
+  if (slidePreviews.length) {
+    // Render real template slide thumbnails
+    return `
+      <div class="slide-layout-picker studio-layout-strip tpl-slide-strip" role="tablist" aria-label="Hojas de la plantilla">
+        <p class="tpl-strip-label">Elige hoja o empieza en blanco:</p>
+        <div class="tpl-slide-chips">
+          <button type="button" class="tpl-slide-chip tpl-slide-chip-blank ${String(activeLayout) === "blank-canvas" ? "active" : ""}"
+            data-slide-variant="${slideKey}" data-slide-variant-value="blank-canvas"
+            title="Hoja totalmente en blanco">
+            <span class="blank-slide-thumb" aria-hidden="true"></span>
+            <span>Blanco</span>
+          </button>
+          ${slidePreviews.map((preview, i) => {
+            const slideNum = preview.slide || preview.page || (i + 1);
+            const val = `tpl-page-${slideNum}`;
+            const isActive = String(activeLayout) === val;
+            return `
+              <button type="button" class="tpl-slide-chip ${isActive ? "active" : ""}"
+                data-slide-variant="${slideKey}" data-slide-variant-value="${val}"
+                title="Hoja ${slideNum} de la plantilla">
+                <img src="${escapeHtml(preview.path + '?v=2')}" alt="Hoja ${slideNum}" loading="lazy" />
+                <span>${slideNum}</span>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  // Fallback: abstract layout chips when no template selected
   return `
     <div class="slide-layout-picker studio-layout-strip" role="tablist" aria-label="Layouts disponibles para esta diapositiva">
+      <button type="button" class="slide-layout-chip ${String(activeLayout) === "blank-canvas" ? "active" : ""}" data-slide-variant="${slideKey}" data-slide-variant-value="blank-canvas" title="Canvas totalmente en blanco">
+        <span class="slide-layout-thumb slide-layout-thumb-blank" aria-hidden="true"></span>
+        <span>Blanco</span>
+      </button>
       ${safeArray(layoutOptions).map((option) => `
         <button type="button" class="slide-layout-chip ${String(activeLayout) === option.value ? "active" : ""}" data-slide-variant="${slideKey}" data-slide-variant-value="${option.value}" title="${escapeHtml(option.label)}">
           <span class="slide-layout-thumb slide-layout-thumb-${option.value}" aria-hidden="true"></span>
           <span>${escapeHtml(option.label)}</span>
         </button>
       `).join("")}
+    </div>
+  `;
+}
+
+function renderCanvasSlotSidebar(blueprint, config, activeLayout) {
+  const { imageSlots } = resolveTemplateEditableObjects(getSelectedLocalTemplateEntry(), activeLayout, config);
+  const slots = imageSlots.length ? imageSlots : [buildTemplateBackgroundSlot()];
+  const activeSlotId = config.activeTemplateSlot || slots[0]?.id || "__background__";
+  const renderImageOptions = (selectedId = "") => state.images.length
+    ? state.images.map((image) => `<option value="${escapeHtml(image.id)}" ${image.id === selectedId ? "selected" : ""}>${escapeHtml(image.name)}${image.id === state.mainId ? " · principal" : ""}</option>`).join("")
+    : "";
+
+  return `
+    <aside class="canvas-slot-sidebar" aria-label="Capas de imagen de la diapositiva">
+      <div class="slot-sidebar-head">
+        <span class="eyebrow">Capas imagen</span>
+        <strong>Asigna fotos al canvas</strong>
+        <small>Fondo, marcos y cuadros se reemplazan desde aqui.</small>
+      </div>
+      <div class="slot-sidebar-list">
+        ${slots.map((slot, index) => {
+          const assigned = resolveTemplateAssignedImage(config, slot.id, templateSlotFallbackIndex(slot, index));
+          const isActive = activeSlotId === slot.id;
+          const label = labelTemplateImageSlot(slot, index);
+          return `
+            <article class="slot-sidebar-card ${isActive ? "active" : ""}">
+              <button type="button" class="slot-sidebar-preview" data-template-slot-active="${blueprint.key}" data-template-slot-id="${escapeHtml(slot.id)}" aria-label="Activar ${escapeHtml(label)}">
+                ${assigned?.url
+                  ? `<img src="${assigned.url}" alt="${escapeHtml(assigned.name)}" loading="lazy" />`
+                  : `<span>${slot.id === "__background__" ? "BG" : index}</span>`}
+              </button>
+              <div class="slot-sidebar-copy">
+                <button type="button" class="slot-sidebar-title" data-template-slot-active="${blueprint.key}" data-template-slot-id="${escapeHtml(slot.id)}">
+                  <strong>${escapeHtml(label)}</strong>
+                  <small>${assigned ? escapeHtml(assigned.name) : "Sin foto asignada"}</small>
+                </button>
+                <select class="slot-sidebar-select" data-template-slot-select-image="${blueprint.key}" data-template-slot-id="${escapeHtml(slot.id)}" aria-label="Foto para ${escapeHtml(label)}">
+                  <option value="">${slot.id === "__background__" ? "Mantener fondo de plantilla" : "Sin foto"}</option>
+                  ${renderImageOptions(assigned?.id || "")}
+                </select>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+      <button type="button" class="slot-sidebar-add" data-template-add-object="${blueprint.key}" data-template-add-kind="image">+ Nuevo cuadro de imagen</button>
+    </aside>
+  `;
+}
+
+function renderMoodBoardLayoutStrip(blueprint, activeMoodLayout) {
+  return `
+    <div class="mood-reference-strip" aria-label="Layouts conceptuales de mood board">
+      <div class="mood-reference-head">
+        <span class="eyebrow">Mood board layout</span>
+        <strong>Escoge como debe componerse esta lamina</strong>
+      </div>
+      <div class="mood-reference-chips">
+        ${MOOD_BOARD_LAYOUT_OPTIONS.map((option) => `
+          <button type="button" class="mood-reference-chip ${String(activeMoodLayout) === option.value ? "active" : ""}" data-slide-mood-layout="${blueprint.key}" data-slide-mood-layout-value="${option.value}" title="${escapeHtml(option.description)}">
+            <span class="mood-layout-preview mood-layout-${option.value}" aria-hidden="true"></span>
+            <strong>${escapeHtml(option.label)}</strong>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function normalizeTemplateTextAlign(value = "") {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("center")) return "center";
+  if (text.includes("right")) return "right";
+  if (text.includes("justify")) return "justify";
+  return "left";
+}
+
+function resolveTemplateTextContent(obj, index, blueprint, config, slideText, title, subtitle, bullets) {
+  const override = config.templateTextOverrides?.[obj.id];
+  if (override) return override;
+  const original = String(obj.text || "").trim();
+  const lower = original.toLowerCase();
+  if (index === 0 || /architecture|portfolio|project|deck|interior|design|titulo|title|brochure/.test(lower)) return title;
+  if (index === 1 && subtitle) return subtitle;
+  if (index >= 2 && bullets[index - 2]) return bullets[index - 2];
+  if (/lorem|ipsum|sample|description|subtitle|headline|text/i.test(original) && bullets.length) return bullets[index % bullets.length];
+  return sanitizeVisibleDeckText(original, index === 0 ? blueprint.title : (bullets[index % Math.max(1, bullets.length)] || slideText.subtitle || ""));
+}
+
+function buildTemplateObjectTextStyle(obj, config, titleFontFamily, bodyFontFamily, index = 0) {
+  const rect = resolveTemplateObjectRect(config, obj);
+  const overrideStyle = config.templateObjectStyles?.[obj.id] || {};
+  const style = { ...(obj.style || {}), ...overrideStyle };
+  const rawSize = Number(style.fontSize || 0);
+  const size = clamp(rawSize ? (overrideStyle.fontSize ? rawSize : rawSize * 0.72) : (index === 0 ? 32 : 14), 8, 72);
+  const family = style.fontFamily
+    ? `"${String(style.fontFamily).replace(/"/g, "")}", ${index === 0 ? "serif" : "sans-serif"}`
+    : (index === 0 ? titleFontFamily : bodyFontFamily);
+  const color = /^#[0-9a-f]{6}$/i.test(String(style.color || "")) ? style.color : "var(--slide-edit-ink)";
+  const fill = /^#[0-9a-f]{6}$/i.test(String(style.background || "")) ? style.background : "";
+  const align = normalizeTemplateTextAlign(style.align);
+  return [
+    `left:${rect.x}%`,
+    `top:${rect.y}%`,
+    `width:${rect.width}%`,
+    `height:${rect.height}%`,
+    `z-index:${30 + index}`,
+    `font-family:${family}`,
+    `font-size:${size}px`,
+    `font-weight:${style.bold ? 800 : index === 0 ? 700 : 500}`,
+    `font-style:${style.italic ? "italic" : "normal"}`,
+    `color:${color}`,
+    `text-align:${align}`,
+    fill ? `background:${fill}` : "",
+  ].join(";");
+}
+
+function buildTemplateObjectImageStyle(obj, config = {}) {
+  const rect = resolveTemplateObjectRect(config, obj);
+  return `left:${rect.x}%;top:${rect.y}%;width:${rect.width}%;height:${rect.height}%;`;
+}
+
+function buildTemplateEditableObjectLayer(blueprint, config, slideText, activeLayout, title, subtitle, bullets, titleFontFamily, bodyFontFamily) {
+  const entry = getSelectedLocalTemplateEntry();
+  const { textObjects, imageSlots } = resolveTemplateEditableObjects(entry, activeLayout, config);
+  const textMarkup = textObjects.map((obj, index) => {
+    const text = resolveTemplateTextContent(obj, index, blueprint, config, slideText, title, subtitle, bullets);
+    const isActive = config.activeTemplateObject === obj.id;
+    return `
+      <div class="tpl-edit-object tpl-edit-text tpl-edit-role-${escapeHtml(obj.role || "text")} ${isActive ? "active" : ""}"
+        data-template-object-key="${blueprint.key}"
+        data-template-object-id="${escapeHtml(obj.id)}"
+        data-object-x="${resolveTemplateObjectRect(config, obj).x}"
+        data-object-y="${resolveTemplateObjectRect(config, obj).y}"
+        data-object-width="${resolveTemplateObjectRect(config, obj).width}"
+        data-object-height="${resolveTemplateObjectRect(config, obj).height}"
+        style="${buildTemplateObjectTextStyle(obj, config, titleFontFamily, bodyFontFamily, index)}">
+        <span class="tpl-object-handle" contenteditable="false" data-template-object-drag-handle>MOVE</span>
+        <div class="tpl-edit-text-content" contenteditable="true" spellcheck="true"
+          data-template-object-text-key="${blueprint.key}"
+          data-template-object-id="${escapeHtml(obj.id)}">${escapeHtml(text)}</div>
+      </div>
+    `;
+  }).join("");
+
+  const imageMarkup = imageSlots.map((slot, index) => {
+    const image = resolveTemplateAssignedImage(config, slot.id, templateSlotFallbackIndex(slot, index));
+    const isActive = config.activeTemplateSlot === slot.id || (!config.activeTemplateSlot && index === 0);
+    const rect = resolveTemplateObjectRect(config, slot);
+    const isBackground = slot.id === "__background__" || slot.role === "background";
+    const label = labelTemplateImageSlot(slot, index);
+    const zIndex = isBackground ? 1 : 8 + index;
+    return `
+      <button type="button" class="tpl-edit-object tpl-edit-image-slot ${isBackground ? "tpl-background-slot" : ""} ${isActive ? "active" : ""} ${image ? "has-image" : "is-empty"}"
+        data-template-slot-active="${blueprint.key}"
+        data-template-slot-id="${escapeHtml(slot.id)}"
+        data-template-object-key="${blueprint.key}"
+        data-template-object-id="${escapeHtml(slot.id)}"
+        data-object-x="${rect.x}"
+        data-object-y="${rect.y}"
+        data-object-width="${rect.width}"
+        data-object-height="${rect.height}"
+        style="${buildTemplateObjectImageStyle(slot, config)}z-index:${zIndex};">
+        <span class="tpl-object-handle" data-template-object-drag-handle>MOVE</span>
+        ${image ? `<img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" draggable="false" />` : `<span>${isBackground ? "Fondo sin reemplazar" : "Asignar imagen"}</span>`}
+        <small>${escapeHtml(label)}</small>
+      </button>
+    `;
+  }).join("");
+
+  return `
+    <div class="tpl-edit-object-layer" data-template-object-count="${textObjects.length + imageSlots.length}">
+      ${imageMarkup}
+      ${textMarkup}
     </div>
   `;
 }
@@ -2391,22 +2880,264 @@ function buildEditableSlideCanvas(blueprint, config, slideText, activeLayout, st
     `--slide-edit-accent:${accent}`,
     `--slide-edit-accent-2:${accent2}`,
   ].join(";");
+  const titleFontFamily = `'${state.settings.titleFont || "Cormorant Garamond"}', serif`;
+  const bodyFontFamily = `'${state.settings.bodyFont || "Manrope"}', sans-serif`;
   const imageSlots = images.length ? images : [{ id: "empty", name: "Sin foto seleccionada", url: "" }];
 
+  // Check if a template page is selected — show the actual Canva template slide
+  const isTplPage = String(activeLayout).startsWith("tpl-page-");
+  const isBlankCanvas = String(activeLayout) === "blank-canvas";
+  let tplSlideUrl = "";
+  if (isTplPage) {
+    const pageNum = parseInt(String(activeLayout).replace("tpl-page-", ""), 10) || 1;
+    tplSlideUrl = resolveLocalTemplatePreviewUrl(getSelectedLocalTemplateEntry(), pageNum, true);
+  }
+
+  if (isBlankCanvas) {
+    const objectLayer = buildTemplateEditableObjectLayer(blueprint, config, slideText, activeLayout, title, subtitle, bullets, titleFontFamily, bodyFontFamily);
+    return `
+      <div class="slide-canvas-wrapper">
+        <div class="slide-edit-canvas slide-tpl-canvas slide-blank-canvas has-object-map" data-layout-variant="${escapeHtml(activeLayout)}" style="${canvasStyle};--slide-edit-title-font:${titleFontFamily};--slide-edit-body-font:${bodyFontFamily}">
+          <div class="blank-canvas-paper" aria-hidden="true"></div>
+          ${objectLayer}
+          <span class="slide-edit-canvas-badge">Canvas en blanco · editable</span>
+        </div>
+      </div>
+    `;
+  }
+
+  if (isTplPage && tplSlideUrl) {
+    const entry = getSelectedLocalTemplateEntry();
+    const editableObjects = entry ? resolveTemplateEditableObjects(entry, activeLayout, config) : { textObjects: [], imageSlots: [] };
+    const hasObjectMap = Boolean(LOCAL_TEMPLATE_OBJECTS && (editableObjects.textObjects.length || editableObjects.imageSlots.length));
+    const hasCustomBackground = Boolean(config.templateSlotImages?.__background__);
+    const photoZones = hasObjectMap ? "" : buildTemplateCanvasPhotoZones(blueprint, config, imageSlots, activeLayout);
+    const textZone = hasObjectMap ? "" : buildTemplateCanvasTextZone(blueprint, title, subtitle, bullets, titleFontFamily, bodyFontFamily, config, activeLayout);
+    const objectLayer = hasObjectMap
+      ? buildTemplateEditableObjectLayer(blueprint, config, slideText, activeLayout, title, subtitle, bullets, titleFontFamily, bodyFontFamily)
+      : "";
+    return `
+      <div class="slide-canvas-wrapper">
+        <div class="slide-edit-canvas slide-tpl-canvas ${hasObjectMap ? "has-object-map" : ""} ${hasCustomBackground ? "has-custom-background" : ""}" data-layout-variant="${escapeHtml(activeLayout)}">
+          <img class="tpl-canvas-bg" src="${escapeHtml(tplSlideUrl)}" alt="Plantilla" draggable="false" />
+          <div class="tpl-canvas-dim" aria-hidden="true"></div>
+          ${objectLayer}
+          ${photoZones}
+          ${textZone}
+          <span class="slide-edit-canvas-badge">${hasObjectMap ? "PPT editable" : "Plantilla Canva"} · hoja ${String(activeLayout).replace("tpl-page-", "")}</span>
+          ${entry && !LOCAL_TEMPLATE_OBJECTS ? `<span class="slide-edit-canvas-loader">Leyendo objetos editables...</span>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  // Default: CSS-based canvas (no template selected or fallback)
   return `
-    <div class="slide-edit-canvas studio-live-canvas live-bg-${background}" data-layout-variant="${escapeHtml(activeLayout)}" style="${canvasStyle}">
-      <div class="slide-edit-canvas-media" data-count="${Math.min(Math.max(imageSlots.length, 1), 6)}" data-arrangement="${escapeHtml(config.imageArrangement || "single")}" data-framing="${escapeHtml(config.imageFraming || "clean")}" style="${mediaStyle}">
-        ${imageSlots.map((image) => image.url
-          ? `<img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" />`
-          : `<span class="slide-edit-media-empty">Selecciona una imagen del proyecto</span>`).join("")}
+    <div class="slide-canvas-wrapper">
+      <div class="slide-edit-canvas studio-live-canvas live-bg-${background}" data-layout-variant="${escapeHtml(activeLayout)}" style="${canvasStyle};--slide-edit-title-font:${titleFontFamily};--slide-edit-body-font:${bodyFontFamily}">
+        <div class="slide-edit-canvas-media" data-count="${Math.min(Math.max(imageSlots.length, 1), 6)}" data-arrangement="${escapeHtml(config.imageArrangement || "single")}" data-framing="${escapeHtml(config.imageFraming || "clean")}" style="${mediaStyle}">
+          ${imageSlots.map((image, idx) => image.url
+            ? `<div class="canvas-image-wrapper" data-image-idx="${idx}">
+                <img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" draggable="false" />
+                <div class="canvas-image-handles">
+                  <span class="canvas-handle canvas-handle-tl" title="Redimensionar"></span>
+                  <span class="canvas-handle canvas-handle-tr" title="Redimensionar"></span>
+                  <span class="canvas-handle canvas-handle-bl" title="Redimensionar"></span>
+                  <span class="canvas-handle canvas-handle-br" title="Redimensionar"></span>
+                </div>
+              </div>`
+            : `<span class="slide-edit-media-empty">Selecciona una imagen del proyecto</span>`).join("")}
+        </div>
+        <div class="slide-edit-canvas-overlay" style="${textStyle}">
+          <small contenteditable="false">${escapeHtml(blueprint.sectionLabel)}</small>
+          <strong class="ce-title" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customTitle" style="font-family:${titleFontFamily}">${escapeHtml(title)}</strong>
+          <em class="ce-subtitle" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customSubtitle" style="font-family:${titleFontFamily}">${escapeHtml(subtitle)}</em>
+          <div class="ce-bullets" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customBullets" style="font-family:${bodyFontFamily}">${bullets.slice(0, 4).map((bullet) => escapeHtml(bullet)).join("<br>")}</div>
+        </div>
+        <span class="slide-edit-canvas-badge">${sourceMode === "raw" ? "foto cruda" : "render"} · ${escapeHtml(treatment)}</span>
+        <div class="canvas-layer-controls">
+          <button type="button" class="canvas-layer-btn" title="Enviar atras" data-canvas-layer="back">&#9660;</button>
+          <button type="button" class="canvas-layer-btn" title="Enviar adelante" data-canvas-layer="front">&#9650;</button>
+        </div>
       </div>
-      <div class="slide-edit-canvas-overlay" style="${textStyle}">
-        <small contenteditable="false">${escapeHtml(blueprint.sectionLabel)}</small>
-        <strong class="ce-title" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customTitle">${escapeHtml(title)}</strong>
-        <em class="ce-subtitle" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customSubtitle">${escapeHtml(subtitle)}</em>
-        <div class="ce-bullets" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customBullets">${bullets.slice(0, 4).map((bullet) => escapeHtml(bullet)).join("<br>")}</div>
+    </div>
+  `;
+}
+
+function buildTemplateCanvasPhotoZones(blueprint, config, imageSlots, activeLayout) {
+  const selectedImages = safeArray(imageSlots).slice(0, resolveSlideImageCount(config));
+  const slots = selectedImages.length ? selectedImages : [{ id: "empty", name: "Sin foto seleccionada", url: "" }];
+  const frames = resolveTemplatePhotoFrames(config, activeLayout, slots.length);
+  return frames.map((frame, index) => {
+    const image = slots[index] || slots[0] || {};
+    const isActive = image?.id && image.id === config.activeImageId;
+    const style = `left:${frame.x}%;top:${frame.y}%;width:${frame.width}%;height:${frame.height}%;`;
+    const attrs = image?.id && image.id !== "empty"
+      ? `data-slide-active-image="${blueprint.key}" data-slide-image-id="${image.id}"`
+      : "";
+    return `
+      <button type="button" class="tpl-canvas-photo-zone ${isActive ? "is-current" : ""} ${image?.url ? "" : "tpl-canvas-photo-empty"}" style="${style}" title="${image?.url ? "Cambiar o activar foto" : "Selecciona una foto del proyecto"}" ${attrs}>
+        ${image?.url
+          ? `<img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.name || `Foto ${index + 1}`)}" loading="lazy" draggable="false" />`
+          : `<span>Selecciona una foto</span>`}
+        <div class="tpl-canvas-photo-badge">${escapeHtml(index === 0 ? "Foto principal" : `Foto ${index + 1}`)}</div>
+      </button>
+    `;
+  }).join("");
+}
+
+function resolveTemplatePhotoFrames(config, activeLayout, count = 1) {
+  const placement = String(config.imagePlacement || inferImagePlacement(config.layout || activeLayout));
+  const size = String(config.imageSize || "large");
+  const arrangement = String(config.imageArrangement || "single");
+  const full = placement === "full" || size === "full-page";
+  const baseWidth = size === "small" ? 28 : size === "medium" ? 38 : size === "giant" ? 62 : 48;
+  const baseHeight = size === "small" ? 32 : size === "medium" ? 44 : size === "giant" ? 66 : 56;
+  const base = full
+    ? { x: 5, y: 8, width: 90, height: 78 }
+    : placement === "left"
+      ? { x: 6, y: 18, width: baseWidth, height: baseHeight }
+      : placement === "top"
+        ? { x: 10, y: 10, width: 80, height: 38 }
+        : placement === "bottom"
+          ? { x: 10, y: 52, width: 80, height: 36 }
+          : placement === "center"
+            ? { x: (100 - baseWidth) / 2, y: 18, width: baseWidth, height: baseHeight }
+            : { x: 51, y: 18, width: baseWidth, height: baseHeight };
+
+  const needed = clamp(Number(count) || 1, 1, 6);
+  if (needed === 1 || arrangement === "single") return [base];
+  if (arrangement === "pair" || needed === 2) {
+    return [
+      { x: base.x, y: base.y, width: base.width * 0.48, height: base.height },
+      { x: base.x + base.width * 0.52, y: base.y, width: base.width * 0.48, height: base.height },
+    ].slice(0, needed);
+  }
+  if (arrangement === "triptych" || needed === 3) {
+    const w = base.width / 3.18;
+    return [0, 1, 2].map((index) => ({
+      x: base.x + index * (w * 1.09),
+      y: base.y,
+      width: w,
+      height: base.height,
+    })).slice(0, needed);
+  }
+  return [
+    { x: base.x, y: base.y, width: base.width * 0.58, height: base.height * 0.56 },
+    { x: base.x + base.width * 0.62, y: base.y, width: base.width * 0.38, height: base.height * 0.28 },
+    { x: base.x + base.width * 0.62, y: base.y + base.height * 0.34, width: base.width * 0.38, height: base.height * 0.34 },
+    { x: base.x, y: base.y + base.height * 0.62, width: base.width * 0.56, height: base.height * 0.30 },
+    { x: base.x + base.width * 0.60, y: base.y + base.height * 0.74, width: base.width * 0.40, height: base.height * 0.24 },
+    { x: base.x + base.width * 0.16, y: base.y + base.height * 0.24, width: base.width * 0.28, height: base.height * 0.28 },
+  ].slice(0, needed);
+}
+
+function buildTemplateCanvasTextZone(blueprint, title, subtitle, bullets, titleFontFamily, bodyFontFamily, config, activeLayout) {
+  const textStyle = buildTemplateTextStyle(config, activeLayout);
+  return `
+    <div class="tpl-canvas-text-zone" style="${textStyle};--tpl-title-font:${titleFontFamily};--tpl-body-font:${bodyFontFamily}">
+      <small contenteditable="false">${escapeHtml(blueprint.sectionLabel)}</small>
+      <strong class="ce-title" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customTitle">${escapeHtml(title)}</strong>
+      ${subtitle ? `<em class="ce-subtitle" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customSubtitle">${escapeHtml(subtitle)}</em>` : ""}
+      <div class="ce-bullets" contenteditable="true" spellcheck="true" data-slide-inline-text-key="${blueprint.key}" data-slide-inline-text-field="customBullets">${safeArray(bullets).slice(0, 4).map((bullet) => escapeHtml(bullet)).join("<br>")}</div>
+    </div>
+  `;
+}
+
+function buildTemplateTextStyle(config, activeLayout) {
+  const placement = String(config.imagePlacement || inferImagePlacement(config.layout || activeLayout));
+  if (placement === "left") return "left:auto;right:5%;top:13%;width:34%;";
+  if (placement === "right") return "left:5%;top:13%;width:34%;";
+  if (placement === "top") return "left:7%;top:55%;width:42%;";
+  if (placement === "bottom") return "left:7%;top:12%;width:42%;";
+  if (placement === "full") return "left:6%;bottom:7%;width:42%;";
+  return "left:6%;top:12%;width:38%;";
+}
+
+function renderEditorUtilityToolbar(blueprint, config, isBoardSlide) {
+  const selectedCount = safeArray(config.imageIds).length || 1;
+  return `
+    <div class="editor-toolstrip" aria-label="Herramientas rapidas de editor">
+      <div class="editor-toolstrip-row">
+        <span>Fotos</span>
+        ${[1, 2, 3, 4, 5, 6].map((count) => `
+          <button type="button" class="editor-tool ${Number(selectedCount) === count ? "active" : ""}" data-slide-image-count="${blueprint.key}" data-slide-image-count-value="${count}">${count}</button>
+        `).join("")}
       </div>
-      <span class="slide-edit-canvas-badge">${sourceMode === "raw" ? "foto cruda" : "render"} · ${escapeHtml(treatment)}</span>
+      <div class="editor-toolstrip-row">
+        <span>Texto</span>
+        <button type="button" class="editor-tool" data-slide-text-mode="${blueprint.key}" data-slide-text-mode-value="suggested">Sugerido</button>
+        <button type="button" class="editor-tool" data-slide-text-mode="${blueprint.key}" data-slide-text-mode-value="custom">Editable</button>
+      </div>
+      ${isBoardSlide ? `<div class="editor-toolstrip-row"><span>Board</span><strong>${escapeHtml(optionLabel(MOOD_BOARD_LAYOUT_OPTIONS, config.moodBoardLayout || inferMoodBoardLayout(blueprint)))}</strong></div>` : ""}
+    </div>
+  `;
+}
+
+function renderEditorCommandBar(blueprint, config, activeLayout, palette, activeImage) {
+  const key = blueprint.key;
+  const paletteColors = resolveEditorPalette(getPdfDeckAnalysis()).slice(0, 5);
+  const titleFont = state.settings.titleFont || "Cormorant Garamond";
+  const bodyFont = state.settings.bodyFont || "Manrope";
+  const activeSlot = config.activeTemplateSlot || Object.keys(config.templateSlotImages || {})[0] || "";
+  const activeObjectId = config.activeTemplateObject || activeSlot || "";
+  const activeObjectStyle = activeObjectId ? (config.templateObjectStyles?.[activeObjectId] || {}) : {};
+  return `
+    <div class="editor-commandbar" aria-label="Editor visual de diapositiva">
+      <div class="editor-command-group editor-command-identity">
+        <span class="eyebrow">Editor</span>
+        <strong>${escapeHtml(blueprint.sectionLabel)}</strong>
+        <small>${escapeHtml(String(activeLayout || "layout"))}${activeSlot ? ` · slot ${escapeHtml(activeSlot.replace("auto-slot-", ""))}` : ""}</small>
+      </div>
+      <div class="editor-command-group">
+        <span>Crear</span>
+        <button type="button" class="editor-command-chip" data-template-add-object="${key}" data-template-add-kind="text">Cuadro texto</button>
+        <button type="button" class="editor-command-chip" data-template-add-object="${key}" data-template-add-kind="image">Cuadro imagen</button>
+      </div>
+      <div class="editor-command-group editor-font-preview-mini">
+        <span>Fuentes</span>
+        <select class="editor-command-select" data-template-active-font-select="${key}" aria-label="Fuente del objeto activo">
+          ${unique([...TITLE_FONT_OPTIONS.slice(0, 10), ...BODY_FONT_OPTIONS.slice(0, 10)].map((item) => item.value)).map((font) => `
+            <option value="${escapeHtml(font)}" ${String(activeObjectStyle.fontFamily || bodyFont) === font ? "selected" : ""}>${escapeHtml(font)}</option>
+          `).join("")}
+        </select>
+        <button type="button" class="editor-command-chip font-chip" data-template-active-font="${key}" data-template-active-font-value="${escapeHtml(titleFont)}" style="font-family:'${escapeHtml(titleFont)}', serif">Titulo actual</button>
+        <button type="button" class="editor-command-chip font-chip" data-template-active-font="${key}" data-template-active-font-value="${escapeHtml(bodyFont)}" style="font-family:'${escapeHtml(bodyFont)}', sans-serif">Texto actual</button>
+      </div>
+      <div class="editor-command-group">
+        <span>Color texto</span>
+        <div class="editor-command-swatches">
+          ${paletteColors.map((color) => `
+            <button type="button" class="editor-swatch ${activeObjectStyle.color === color ? "active" : ""}" data-template-active-color="${key}" data-template-active-color-value="${escapeHtml(color)}" style="--swatch:${escapeHtml(color)}" title="${escapeHtml(color)}"></button>
+          `).join("")}
+        </div>
+      </div>
+      <div class="editor-command-group">
+        <span>Fondo objeto</span>
+        <div class="editor-command-swatches">
+          <button type="button" class="editor-swatch swatch-none" data-template-active-fill="${key}" data-template-active-fill-value="" title="Sin relleno"></button>
+          ${["#fffaf2", "#211812", ...paletteColors].slice(0, 6).map((color) => `
+            <button type="button" class="editor-swatch ${activeObjectStyle.background === color ? "active" : ""}" data-template-active-fill="${key}" data-template-active-fill-value="${escapeHtml(color)}" style="--swatch:${escapeHtml(color)}" title="${escapeHtml(color)}"></button>
+          `).join("")}
+        </div>
+      </div>
+      <div class="editor-command-group">
+        <span>Texto</span>
+        <button type="button" class="editor-command-chip ${config.textMode === "suggested" ? "active" : ""}" data-slide-text-mode="${key}" data-slide-text-mode-value="suggested">Sugerido</button>
+        <button type="button" class="editor-command-chip ${config.textMode === "custom" ? "active" : ""}" data-slide-text-mode="${key}" data-slide-text-mode-value="custom">Editable</button>
+      </div>
+      <div class="editor-command-group">
+        <span>Objeto activo</span>
+        <button type="button" class="editor-command-chip" data-template-active-size="${key}" data-template-active-size-delta="-4">Reducir</button>
+        <button type="button" class="editor-command-chip" data-template-active-size="${key}" data-template-active-size-delta="4">Agrandar</button>
+        <button type="button" class="editor-command-chip" data-template-active-font-size="${key}" data-template-active-font-size-delta="-2">A-</button>
+        <button type="button" class="editor-command-chip" data-template-active-font-size="${key}" data-template-active-font-size-delta="2">A+</button>
+        <button type="button" class="editor-command-chip danger" data-template-active-delete="${key}" ${activeObjectId ? "" : "disabled"}>Eliminar</button>
+      </div>
+      <div class="editor-command-group editor-command-current">
+        <span>Foto activa abajo</span>
+        <strong>${activeImage ? escapeHtml(activeImage.name) : "Sin foto"}</strong>
+      </div>
     </div>
   `;
 }
@@ -2475,6 +3206,56 @@ function renderSlidePaletteEditor(palette) {
   `;
 }
 
+function renderEditorTypographySection() {
+  const activeTitleFont = TITLE_FONT_OPTIONS.find(o => o.value === state.settings.titleFont) || TITLE_FONT_OPTIONS[0];
+  const activeBodyFont = BODY_FONT_OPTIONS.find(o => o.value === state.settings.bodyFont) || BODY_FONT_OPTIONS[0];
+  return `
+    <section class="slide-studio-panel slide-typography-panel">
+      <div class="mini-head compact">
+        <span class="eyebrow">Tipografia</span>
+        <strong>Fuentes del brochure</strong>
+      </div>
+      <div class="font-preview-stack compact-font-stack">
+        <div class="font-selected-pair">
+          <button type="button" class="font-selected-card active" data-choice-key="titleFont" data-choice-value="${activeTitleFont.value}">
+            <span>Titulos</span>
+            <strong style="font-family:'${escapeHtml(activeTitleFont.value)}', serif">${escapeHtml(activeTitleFont.label)}</strong>
+          </button>
+          <button type="button" class="font-selected-card active" data-choice-key="bodyFont" data-choice-value="${activeBodyFont.value}">
+            <span>Texto</span>
+            <strong style="font-family:'${escapeHtml(activeBodyFont.value)}', sans-serif">${escapeHtml(activeBodyFont.label)}</strong>
+          </button>
+        </div>
+        <details class="font-library-drawer">
+          <summary><strong>Cambiar fuentes</strong></summary>
+          <div class="font-preview-group">
+            <span class="field-label">Titulos</span>
+            <div class="font-preview-grid">
+              ${TITLE_FONT_OPTIONS.map(o => `
+                <button type="button" class="font-preview-card ${state.settings.titleFont === o.value ? "active" : ""}" data-choice-key="titleFont" data-choice-value="${o.value}">
+                  <strong style="font-family:'${escapeHtml(o.value)}', serif">${escapeHtml(o.label)}</strong>
+                  <span style="font-family:'${escapeHtml(o.value)}', serif">${escapeHtml(o.sample)}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+          <div class="font-preview-group">
+            <span class="field-label">Texto corrido</span>
+            <div class="font-preview-grid">
+              ${BODY_FONT_OPTIONS.map(o => `
+                <button type="button" class="font-preview-card ${state.settings.bodyFont === o.value ? "active" : ""}" data-choice-key="bodyFont" data-choice-value="${o.value}">
+                  <strong style="font-family:'${escapeHtml(o.value)}', sans-serif">${escapeHtml(o.label)}</strong>
+                  <span style="font-family:'${escapeHtml(o.value)}', sans-serif">${escapeHtml(o.sample)}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+  `;
+}
+
 function resolveSlideImageCount(config) {
   const count = Number(config.imageCount || safeArray(config.imageIds).length || 1);
   return clamp(Number.isFinite(count) ? count : 1, 1, 6);
@@ -2503,17 +3284,131 @@ function renderSlidePhotoSelector(blueprint, config, activeImageId) {
     return `<div class="empty-state compact-empty"><strong>Sin fotos cargadas</strong><span>Sube imagenes en el paso 1 para escogerlas aqui.</span></div>`;
   }
   return `
+    <p class="photo-grid-hint">Clic: añadir foto · segunda vez: activar para editar · tercera vez: quitar de la diapositiva</p>
     <div class="slide-image-grid studio-photo-grid ${config.useProjectImages ? "" : "is-disabled"}">
-      ${state.images.map((image) => `
-        <button type="button" class="slide-image-card ${selected.includes(image.id) ? "active" : ""} ${activeImageId === image.id ? "is-current" : ""}" data-slide-active-image="${blueprint.key}" data-slide-image-id="${image.id}" ${config.useProjectImages ? "" : "disabled"}>
+      ${state.images.map((image) => {
+        const selIndex = selected.indexOf(image.id);
+        const isSelected = selIndex >= 0;
+        return `
+        <button type="button" class="slide-image-card ${isSelected ? "active" : ""} ${activeImageId === image.id ? "is-current" : ""}" data-slide-active-image="${blueprint.key}" data-slide-image-id="${image.id}" ${config.useProjectImages ? "" : "disabled"}>
+          ${isSelected ? `<span class="slide-image-order-badge">${selIndex + 1}</span>` : ""}
           <img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" />
           <div class="slide-image-copy">
             <strong>${escapeHtml(image.name)}</strong>
             <span>${image.id === state.mainId ? "Principal" : "Referencia"}</span>
           </div>
         </button>
-      `).join("")}
+      `;}).join("")}
     </div>
+  `;
+}
+
+function resolveTemplateSlotRender(config = {}, slotId = "") {
+  const stored = config.templateSlotRender?.[slotId] || {};
+  return {
+    sourceMode: stored.sourceMode || config.imageSourceMode || "rendered",
+    renderTreatment: stored.renderTreatment || config.renderTreatment || "master",
+    imageRepresentation: stored.imageRepresentation || config.imageRepresentation || state.settings.representationStyle || "photographic",
+    imageFinish: stored.imageFinish || config.imageFinish || state.settings.imageFinish || "crisp",
+    imageOccupancy: stored.imageOccupancy || config.imageOccupancy || state.settings.occupancy || "none",
+    prompt: stored.prompt || "",
+  };
+}
+
+function renderTemplateSlotOptionGroup(label, options, activeValue, slideKey, slotId, field, preferredValues = []) {
+  const filtered = preferredValues.length
+    ? safeArray(options).filter((option) => preferredValues.includes(option.value))
+    : safeArray(options);
+  return `
+    <div class="slot-render-group">
+      <span>${escapeHtml(label)}</span>
+      <div class="slot-render-chips">
+        ${filtered.map((option) => `
+          <button type="button" class="slot-render-chip ${String(activeValue) === option.value ? "active" : ""}"
+            data-template-slot-render="${escapeHtml(slideKey)}"
+            data-template-slot-id="${escapeHtml(slotId)}"
+            data-template-slot-render-field="${escapeHtml(field)}"
+            data-template-slot-render-value="${escapeHtml(option.value)}">
+            ${escapeHtml(option.label)}
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderTemplateImageMapper(blueprint, config, activeLayout) {
+  const entry = getSelectedLocalTemplateEntry();
+  const { imageSlots } = resolveTemplateEditableObjects(entry, activeLayout, config);
+  const slots = imageSlots.length ? imageSlots : [buildTemplateBackgroundSlot()];
+  const activeSlotId = config.activeTemplateSlot || slots[0]?.id || "";
+  const activeImage = state.images.find((image) => image.id === config.activeImageId) || state.images[0] || null;
+  const assignedSlotImage = resolveTemplateAssignedImage(config, activeSlotId, 0);
+  const activeSlotImage = assignedSlotImage || (activeSlotId === "__background__" ? null : activeImage);
+  const slotRender = resolveTemplateSlotRender(config, activeSlotId);
+  const activeSlot = slots.find((slot) => slot.id === activeSlotId) || slots[0] || null;
+  const activeLabel = activeSlot ? labelTemplateImageSlot(activeSlot, slots.indexOf(activeSlot)) : "Sin slot";
+
+  return `
+    <section class="template-image-mapper" aria-label="Vinculacion de imagenes y render por slot">
+      <div class="template-mapper-head">
+        <div>
+          <span class="eyebrow">Editor del slot activo</span>
+          <strong>Foto elegida y tratamiento individual</strong>
+        </div>
+        <p>La foto se asigna en la barra izquierda del canvas. Aqui solo ajustas el slot activo y su render para no duplicar decisiones.</p>
+      </div>
+      <div class="template-mapper-grid template-mapper-grid-compact">
+        <div class="mapper-panel mapper-active-panel">
+          <div class="mapper-panel-head">
+            <strong>1 · Seleccion actual</strong>
+            <span>${slots.length} capa${slots.length === 1 ? "" : "s"}</span>
+          </div>
+          <div class="mapper-active-slot-card">
+            <div class="mapper-active-preview">
+              ${activeSlotImage?.url
+                ? `<img src="${activeSlotImage.url}" alt="${escapeHtml(activeSlotImage.name)}" loading="lazy" />`
+                : `<span>Sin foto</span>`}
+            </div>
+            <div>
+              <span class="eyebrow">${escapeHtml(activeLabel)}</span>
+              <strong>${activeSlotImage ? escapeHtml(activeSlotImage.name) : "Selecciona una foto en la barra izquierda"}</strong>
+              <p>${activeSlot?.id === "__background__" ? "Este slot reemplaza el fondo visual de la plantilla." : "Este slot representa un cuadro editable dentro de la diapositiva."}</p>
+            </div>
+          </div>
+          <div class="mapper-slot-summary-list">
+            ${slots.map((slot, index) => {
+          const assigned = resolveTemplateAssignedImage(config, slot.id, templateSlotFallbackIndex(slot, index));
+              return `
+                <article class="mapper-slot-card mapper-slot-summary ${activeSlotId === slot.id ? "active" : ""}">
+                  <button type="button" class="mapper-slot-main" data-template-slot-active="${blueprint.key}" data-template-slot-id="${escapeHtml(slot.id)}">
+                    <span class="mapper-slot-number">${slot.id === "__background__" ? "BG" : index}</span>
+                    <span><strong>${escapeHtml(labelTemplateImageSlot(slot, index))}</strong><small>${assigned ? escapeHtml(assigned.name) : "sin foto asignada"}</small></span>
+                  </button>
+                </article>
+              `;
+            }).join("")}
+          </div>
+        </div>
+        <div class="mapper-panel mapper-render-panel">
+          <div class="mapper-panel-head">
+            <strong>2 · Render individual</strong>
+            <span>${activeSlotImage ? escapeHtml(activeSlotImage.name) : "elige slot"}</span>
+          </div>
+          ${activeSlotId ? `
+            ${renderTemplateSlotOptionGroup("Origen", SLIDE_IMAGE_SOURCE_OPTIONS, slotRender.sourceMode, blueprint.key, activeSlotId, "sourceMode", ["rendered", "raw"])}
+            ${renderTemplateSlotOptionGroup("Estilo", SLIDE_RENDER_TREATMENT_OPTIONS, slotRender.renderTreatment, blueprint.key, activeSlotId, "renderTreatment", ["master", "editorial", "warm", "moody", "linear", "technical"])}
+            ${renderTemplateSlotOptionGroup("Representacion", SLIDE_IMAGE_REPRESENTATION_OPTIONS, slotRender.imageRepresentation, blueprint.key, activeSlotId, "imageRepresentation", ["photographic", "three-dimensional", "linear-drawing", "mixed-media"])}
+            ${renderTemplateSlotOptionGroup("Acabado", SLIDE_IMAGE_FINISH_OPTIONS, slotRender.imageFinish, blueprint.key, activeSlotId, "imageFinish", ["crisp", "filmic-grain", "soft-film", "contrast-rich"])}
+            ${renderTemplateSlotOptionGroup("Personas", SLIDE_IMAGE_OCCUPANCY_OPTIONS, slotRender.imageOccupancy, blueprint.key, activeSlotId, "imageOccupancy", ["none", "few", "many"])}
+            <label class="slot-render-prompt">
+              <span>Cambio especifico para este slot</span>
+              <textarea data-template-slot-render-prompt="${blueprint.key}" data-template-slot-id="${escapeHtml(activeSlotId)}" placeholder="Ej: esta imagen sin personas, noche calida, mantener rotulos exactos.">${escapeHtml(slotRender.prompt)}</textarea>
+            </label>
+          ` : `<div class="empty-state compact-empty"><strong>Selecciona un slot</strong><span>Elige un marco o fondo de la columna 2.</span></div>`}
+        </div>
+      </div>
+    </section>
   `;
 }
 
@@ -2522,7 +3417,25 @@ function renderActivePhotoInspector(blueprint, config, activeImage, activeImageI
   const perImagePrompts = (state.settings.pdfPerImagePrompts && state.settings.pdfPerImagePrompts[key]) || {};
   const perPrompt = perImagePrompts[activeImageId] || {};
   const selected = safeArray(config.imageIds);
+
+  // Image selector tabs
+  const imageTabsMarkup = selected.length > 0 ? `
+    <div class="per-image-tabs">
+      ${selected.map((imgId, idx) => {
+        const img = state.images.find(i => i.id === imgId);
+        if (!img) return '';
+        return `
+          <button type="button" class="per-image-tab ${imgId === activeImageId ? "active" : ""}" data-slide-active-image="${key}" data-slide-image-id="${imgId}">
+            <img src="${img.url}" alt="" loading="lazy" />
+            <span>Foto ${idx + 1}</span>
+          </button>
+        `;
+      }).join('')}
+    </div>
+  ` : '';
+
   return `
+    ${imageTabsMarkup}
     <div class="active-image-preview">
       <div class="active-image-frame">
         ${activeImage ? `<img src="${activeImage.url}" alt="${escapeHtml(activeImage.name)}" loading="lazy" />` : `<span class="empty-active-image">Selecciona una imagen para editarla</span>`}
@@ -2546,25 +3459,52 @@ function renderActivePhotoInspector(blueprint, config, activeImage, activeImageI
       imageRepresentation: config.imageRepresentation || "inherit",
       imageFinish: config.imageFinish || "inherit",
     })}
+    ${selected.length ? `
     <div class="decision-group compact-decision">
       <div class="decision-group-head">
-        <strong>Tratamiento creativo de esta foto</strong>
-        <p>Se aplica solo si esta imagen se renderiza para esta diapositiva.</p>
+        <strong>Tratamiento de imagenes</strong>
+        <p>Configura estilo y contraste por foto. Cada columna es una imagen.</p>
       </div>
-      <div class="choice-inline wrap per-image-chips">
-        ${["minimal-bw","warm-editorial","high-contrast","soft-film","vibrant"].map((chipVal) => `
-          <button type="button" class="select-chip ${perPrompt.style === chipVal ? "active" : ""}" data-per-image-style="${key}" data-per-image-id="${activeImageId}" data-per-image-style-value="${chipVal}" ${activeImage ? "" : "disabled"}>${chipVal.replace("-", " ")}</button>
-        `).join("")}
+      <div class="per-image-treatment-matrix">
+        <div class="per-image-treatment-matrix-head">
+          ${selected.map((imgId, idx) => `<span>Imagen ${idx + 1}</span>`).join("")}
+        </div>
+        <div class="per-image-treatment-row">
+          <span class="row-label">Estilo</span>
+          <div class="row-cells">
+            ${selected.map((imgId) => {
+              const pp = perImagePrompts[imgId] || {};
+              return `<div class="per-image-treatment-cell">${["minimal-bw","warm-editorial","high-contrast","soft-film","vibrant"].map((chipVal) => `
+                <button type="button" class="select-chip ${pp.style === chipVal ? "active" : ""}" data-per-image-style="${key}" data-per-image-id="${imgId}" data-per-image-style-value="${chipVal}">${chipVal.replace("-", " ")}</button>
+              `).join("")}</div>`;
+            }).join("")}
+          </div>
+        </div>
+        <div class="per-image-treatment-row">
+          <span class="row-label">Contraste</span>
+          <div class="row-cells">
+            ${selected.map((imgId) => {
+              const pp = perImagePrompts[imgId] || {};
+              return `<div class="per-image-treatment-cell">${["alto","medio","bajo"].map((cv) => `
+                <button type="button" class="select-chip ${pp.contrast === cv ? "active" : ""}" data-per-image-contrast="${key}" data-per-image-id="${imgId}" data-per-image-contrast-value="${cv}">${cv}</button>
+              `).join("")}</div>`;
+            }).join("")}
+          </div>
+        </div>
       </div>
-      <textarea class="per-image-prompt" placeholder="Cambio especifico para esta foto. Ej: mantener geometria, hacerla nocturna calida, sin personas." data-per-image-prompt="${key}" data-per-image-id="${activeImageId}" ${activeImage ? "" : "disabled"}>${escapeHtml(perPrompt.prompt || "")}</textarea>
+      <textarea class="per-image-prompt" placeholder="Cambio especifico para esta foto (la activa). Ej: mantener geometria, hacerla nocturna calida, sin personas." data-per-image-prompt="${key}" data-per-image-id="${activeImageId}" ${activeImage ? "" : "disabled"}>${escapeHtml(perPrompt.prompt || "")}</textarea>
     </div>
+    ` : ""}
   `;
 }
 
 function renderBoardCurationPanel(analysis, blueprint, selectedMaterials, selectedObjects) {
   return `
-    <details class="board-curation compact-details">
-      <summary>Materiales y objetos para mood board</summary>
+    <div class="board-curation">
+      <div class="mini-head compact">
+        <span class="eyebrow">Mood board</span>
+        <strong>Materiales y objetos para esta lamina</strong>
+      </div>
       <div class="field">
         <span>Materiales</span>
         <div class="curation-chip-grid">
@@ -2581,6 +3521,10 @@ function renderBoardCurationPanel(analysis, blueprint, selectedMaterials, select
           `).join("") || `<span class="builder-note">No hay objetos leidos aun.</span>`}
         </div>
       </div>
+      <div class="mini-head compact" style="margin-top:1rem">
+        <span class="eyebrow">Layout del mood board</span>
+        <strong>Composicion visual</strong>
+      </div>
       <div class="choice-grid mood-layout-grid">
         ${MOOD_BOARD_LAYOUT_OPTIONS.map((option) => `
           <button type="button" class="choice-card mood-layout-card ${String((state.settings.pdfSlideConfigs[blueprint.key] || {}).moodBoardLayout || inferMoodBoardLayout(blueprint)) === option.value ? "active" : ""}" data-slide-mood-layout="${blueprint.key}" data-slide-mood-layout-value="${option.value}">
@@ -2590,7 +3534,7 @@ function renderBoardCurationPanel(analysis, blueprint, selectedMaterials, select
           </button>
         `).join("")}
       </div>
-    </details>
+    </div>
   `;
 }
 
@@ -2631,6 +3575,8 @@ function renderPdfDeckBuilder() {
   const visibleStyles = getFilteredBrochureStyleOptions();
   const activeStyle = getBrochureStyleProfile(state.settings.brochureStyle);
   const activeTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const selectedLocalTemplate = getSelectedLocalTemplateEntry();
+  const activeTemplateLabel = selectedLocalTemplate?.label || activeTemplate?.label || "Plantilla base";
   const activeTitleFont = TITLE_FONT_OPTIONS.find((option) => option.value === state.settings.titleFont) || TITLE_FONT_OPTIONS[0];
   const activeBodyFont = BODY_FONT_OPTIONS.find((option) => option.value === state.settings.bodyFont) || BODY_FONT_OPTIONS[0];
   const templateCounts = {
@@ -2699,29 +3645,23 @@ function renderPdfDeckBuilder() {
         const amenityInlineMarkup = isAmenities ? `
           <div class="section-amenity-inline">
             <div class="section-amenity-inline-head">
-              <span class="field-label">Cantidad de amenidades</span>
-              <span class="section-amenity-status">${escapeHtml(amenitySummaryLabel)}</span>
+              <span class="field-label">Amenidades del proyecto</span>
+              <span class="section-amenity-status">${selectedAmenities.length ? selectedAmenities.length + ' amenidades' : 'Sin amenidades'}</span>
             </div>
-            <div class="choice-inline wrap">
-              ${Array.from({ length: MAX_AMENITY_COUNT + 1 }, (_, count) => count).map((count) => `
-                <button type="button" class="select-chip ${amenityCount === count ? "active" : ""}" data-amenity-count="${count}">
-                  ${count === 0 ? "Ninguna" : `${count}`}
-                </button>
-              `).join("")}
+            <div class="amenity-custom-row">
+              <input type="text" data-amenity-custom-input placeholder="Escribe el nombre de la amenidad..." />
+              <button type="button" class="button button-secondary" data-amenity-custom-add>Agregar</button>
             </div>
-            ${amenityCount > 0 ? `
+            ${selectedAmenities.length ? `
               <div class="amenity-chip-grid">
-                ${amenityOptions.map((amenity) => `
-                  <button type="button" class="amenity-chip ${state.settings.selectedAmenities.includes(amenity) ? "active" : ""}" data-amenity-value="${escapeHtml(amenity)}">
+                ${selectedAmenities.map(amenity => `
+                  <span class="amenity-chip active">
                     ${escapeHtml(amenity)}
-                  </button>
-                `).join("")}
+                    <button type="button" class="amenity-remove-btn" data-amenity-remove="${escapeHtml(amenity)}" title="Quitar">&times;</button>
+                  </span>
+                `).join('')}
               </div>
-              <div class="amenity-custom-row">
-                <input type="text" data-amenity-custom-input placeholder="Agregar amenidad especifica..." />
-                <button type="button" class="button button-secondary" data-amenity-custom-add>Agregar</button>
-              </div>
-            ` : ""}
+            ` : ''}
           </div>
         ` : "";
         return `
@@ -2750,7 +3690,6 @@ function renderPdfDeckBuilder() {
     renderCompactChoiceSet("visualDensity", "Densidad", "Cuanto aire vs. cantidad visual", densityGroup?.options || [], state.settings.visualDensity),
     renderCompactChoiceSet("coverStyle", "Portada", "Gestualidad de la cubierta", coverGroup?.options || [], state.settings.coverStyle),
     renderCompactChoiceSet("brochureLanguage", "Idioma", "Lenguaje final del deck", BROCHURE_LANGUAGE_OPTIONS, state.settings.brochureLanguage),
-    renderCompactChoiceSet("pdfImageMode", "Imagen global", "Modo por defecto para las paginas", PDF_IMAGE_MODE_OPTIONS, state.settings.pdfImageMode),
   ].join("");
 
   const paletteCardMarkup = `
@@ -2812,7 +3751,7 @@ function renderPdfDeckBuilder() {
           <strong>Arma la secuencia de diapositivas</strong>
         </div>
         <div class="slide-plan-summary">
-          <span class="status-chip status-soft">Template · ${escapeHtml(activeTemplate.label)}</span>
+          <span class="status-chip status-soft">Plantilla · ${escapeHtml(activeTemplateLabel)}</span>
           <span class="status-chip status-soft">${blueprints.length} pagina${blueprints.length === 1 ? "" : "s"}</span>
         </div>
         <div class="slide-plan-grid-simple">
@@ -2822,99 +3761,71 @@ function renderPdfDeckBuilder() {
     `;
   }
 
+  const localCatalog = LOCAL_TEMPLATE_CATALOG || { brochure: [], ppt: [] };
+  const blankTemplates = BLANK_LOCAL_TEMPLATES.filter((item) => item.type === state.settings.templateType);
+  const localTemplates = state.settings.templateType === "brochure"
+    ? [...blankTemplates, ...safeArray(localCatalog.brochure)]
+    : [...blankTemplates, ...safeArray(localCatalog.ppt)];
+
+  const localTemplateMarkup = `
+    <section class="pdf-builder-card local-tpl-section">
+      <div class="local-tpl-section-head">
+        <div>
+          <span class="eyebrow">Biblioteca visual local</span>
+          <strong>Escoge un unico layout base para el brochure</strong>
+        </div>
+        <div class="template-type-pill">
+          ${TEMPLATE_TYPE_OPTIONS.map(opt => `
+            <button type="button" class="template-type-pill-btn ${state.settings.templateType === opt.value ? "active" : ""}" data-choice-key="templateType" data-choice-value="${opt.value}">${escapeHtml(opt.label)}</button>
+          `).join('')}
+        </div>
+      </div>
+      <div class="style-library-grid template-browser-gallery local-tpl-gallery">
+        ${localTemplates.length ? localTemplates.map(t => {
+          const thumbSrc = (t.slidePreviews && t.slidePreviews[0] && t.slidePreviews[0].path) ? t.slidePreviews[0].path + '?v=2' : t.thumbnail;
+          const extraSlides = t.slidePreviews ? t.slidePreviews.slice(1, 4) : [];
+          return `
+          <button type="button" class="style-card style-card-market ${state.settings.localTemplate === t.id ? "active" : ""}" data-local-template="${t.id}">
+            <div class="style-card-preview style-card-preview-art">
+              <div class="style-card-thumb-frame">
+                ${t.blank
+                  ? `<span class="style-card-blank-thumb"><b>BLANC</b><small>canvas editable</small></span>`
+                  : `<img class="style-card-thumb" src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(t.label)}" loading="lazy" />`}
+                ${state.settings.localTemplate === t.id ? '<span class="tpl-check-badge">✓</span>' : ''}
+              </div>
+            </div>
+            ${extraSlides.length ? `<div class="local-tpl-strip">${extraSlides.map(s => `<img src="${escapeHtml(s.path + '?v=2')}" alt="" loading="lazy" />`).join('')}</div>` : ''}
+            <div class="style-card-copy">
+              <strong>${escapeHtml(t.label)}</strong>
+              <p>${t.slideCount ? t.slideCount + ' hojas disponibles' : 'Layout editable'}</p>
+            </div>
+          </button>
+        `;}).join('') : '<div class="empty-state compact-empty"><strong>No hay plantillas locales disponibles</strong></div>'}
+      </div>
+    </section>
+  `;
+
   return `
     <article class="pdf-builder-shell template-market-shell pdf-step3-shell">
       <div class="mini-head">
         <span class="eyebrow">Paso 3 · Diseño base</span>
-        <strong>Escoge el template visual que definirá el brochure</strong>
+        <strong>Define la estrategia editorial y escoge la plantilla</strong>
       </div>
 
-      <div class="template-browser-card pdf-builder-card">
-          <div class="template-browser-head">
-            <div class="mini-head compact">
-              <span class="eyebrow">Template</span>
-              <strong>${escapeHtml(activeTemplate.label)}</strong>
-              <small class="template-browser-meta">${escapeHtml(activeTemplate.collection || activeStyle.family)}</small>
-            </div>
-          </div>
-
-        <div class="template-browser-toolbar">
-          <div class="template-filter-row">
-            ${templateFilterMarkup}
-          </div>
-          <label class="template-search-field">
-            <span>Buscar template</span>
-            <input type="text" value="${escapeHtml(styleSearch)}" data-style-search placeholder="Portfolio, dark, editorial, minimal, hospitality..." />
-          </label>
+      <!-- ESTRATEGIA EDITORIAL — always visible at top -->
+      <section class="pdf-builder-card pdf-strategy-open-card">
+        <div class="step3-strategy-head">
+          <span class="eyebrow">Estrategia editorial</span>
+          <strong>Define tono, audiencia, narrativa e idioma antes de elegir el layout</strong>
         </div>
-
-        <div class="style-library-grid template-browser-gallery">
-          ${templateCardMarkup}
+        <div class="template-strategy-grid step3-strategy-grid">
+          ${strategyBlocks}
         </div>
-      </div>
+      </section>
 
-      <div class="pdf-builder-grid pdf-builder-grid-market">
-        <section class="pdf-builder-card">
-          <div class="mini-head">
-            <span class="eyebrow">Base editorial</span>
-            <strong>Define el tono del brochure sin parametrizar aun las imagenes</strong>
-          </div>
-          <div class="template-strategy-grid">
-            ${strategyBlocks}
-          </div>
-        </section>
+      <!-- Una sola biblioteca: brochure o PPT, sin galeria duplicada -->
+      ${localTemplateMarkup}
 
-        <section class="pdf-builder-card">
-          <div class="mini-head">
-            <span class="eyebrow">Tipografia</span>
-            <strong>Escoge una dupla tipografica mas cercana a un deck premium</strong>
-          </div>
-          <div class="font-preview-stack">
-            <div class="font-selected-pair">
-              <button type="button" class="font-selected-card active" data-choice-key="titleFont" data-choice-value="${activeTitleFont.value}">
-                <span>Titulos</span>
-                <strong style="font-family:'${escapeHtml(activeTitleFont.value)}', serif">${escapeHtml(activeTitleFont.label)}</strong>
-                <small style="font-family:'${escapeHtml(activeTitleFont.value)}', serif">${escapeHtml(activeTitleFont.sample)}</small>
-              </button>
-              <button type="button" class="font-selected-card active" data-choice-key="bodyFont" data-choice-value="${activeBodyFont.value}">
-                <span>Texto</span>
-                <strong style="font-family:'${escapeHtml(activeBodyFont.value)}', sans-serif">${escapeHtml(activeBodyFont.label)}</strong>
-                <small style="font-family:'${escapeHtml(activeBodyFont.value)}', sans-serif">${escapeHtml(activeBodyFont.sample)}</small>
-              </button>
-            </div>
-            <details class="font-library-drawer">
-              <summary>
-                <strong>Cambiar dupla tipografica</strong>
-                <small>Abre la biblioteca solo si quieres ajustar fuentes.</small>
-              </summary>
-              <div class="font-preview-group">
-              <span class="field-label">Titulos</span>
-              <div class="font-preview-grid">
-                ${TITLE_FONT_OPTIONS.map((option) => `
-                  <button type="button" class="font-preview-card ${state.settings.titleFont === option.value ? "active" : ""}" data-choice-key="titleFont" data-choice-value="${option.value}">
-                    <strong style="font-family:'${escapeHtml(option.value)}', serif">${escapeHtml(option.label)}</strong>
-                    <span style="font-family:'${escapeHtml(option.value)}', serif">${escapeHtml(option.sample)}</span>
-                  </button>
-                `).join("")}
-              </div>
-              </div>
-              <div class="font-preview-group">
-              <span class="field-label">Texto corrido</span>
-              <div class="font-preview-grid">
-                ${BODY_FONT_OPTIONS.map((option) => `
-                  <button type="button" class="font-preview-card ${state.settings.bodyFont === option.value ? "active" : ""}" data-choice-key="bodyFont" data-choice-value="${option.value}">
-                    <strong style="font-family:'${escapeHtml(option.value)}', sans-serif">${escapeHtml(option.label)}</strong>
-                    <span style="font-family:'${escapeHtml(option.value)}', sans-serif">${escapeHtml(option.sample)}</span>
-                  </button>
-                `).join("")}
-              </div>
-              </div>
-            </details>
-          </div>
-        </section>
-
-        ${paletteCardMarkup}
-      </div>
     </article>
   `;
 }
@@ -3339,7 +4250,7 @@ function buildBrochureStylePreview(option) {
 
 function resolveSlideImageSourceMode(config) {
   const explicit = String(config?.imageSourceMode || "inherit");
-  return explicit === "inherit" ? state.settings.pdfImageMode : explicit;
+  return explicit === "inherit" ? "rendered" : explicit;
 }
 
 function getDecisionOptions(key) {
@@ -3908,12 +4819,13 @@ function normalizeDeckBullets(value) {
 
 function mergeAiDeckSlide(aiSlide, fallbackSlide, blueprint, index) {
   const config = state.settings.pdfSlideConfigs?.[blueprint.key] || {};
+  const configuredLayout = resolveConfiguredSlideLayout(blueprint, config);
   const fallback = normalizeSlide({
     ...(fallbackSlide || createSlideFromBlueprint(blueprint, getPdfDeckAnalysis(), index)),
     key: blueprint.key,
     sectionId: blueprint.sectionId,
     visualRole: blueprint.visualRole,
-    layout: config.layout || blueprint.layout,
+    layout: configuredLayout,
   }, index);
   const manualTextLocked = ["custom", "free"].includes(String(config.textMode || "suggested"));
   if (manualTextLocked) {
@@ -3922,7 +4834,7 @@ function mergeAiDeckSlide(aiSlide, fallbackSlide, blueprint, index) {
       key: blueprint.key,
       sectionId: blueprint.sectionId,
       visualRole: blueprint.visualRole,
-      layout: config.layout || blueprint.layout,
+      layout: configuredLayout,
     }, index);
   }
 
@@ -3952,7 +4864,7 @@ function mergeAiDeckSlide(aiSlide, fallbackSlide, blueprint, index) {
     subtitle,
     bullets,
     visualRole: blueprint.visualRole,
-    layout: state.settings.pdfSlideConfigs?.[blueprint.key]?.layout || blueprint.layout,
+    layout: configuredLayout,
   }, index);
 }
 
@@ -4217,6 +5129,38 @@ function buildVisualTreatmentLine() {
 }
 
 function buildTemplateReferenceBlock() {
+  const localTemplate = getSelectedLocalTemplateEntry();
+  if (localTemplate) {
+    const previewPath = resolveLocalTemplatePreviewUrl(localTemplate, 1, false);
+    const absThumb = previewPath
+      ? (typeof window !== "undefined" && window.location
+          ? new URL(previewPath, window.location.href).href
+          : previewPath)
+      : "";
+    const paletteHints = safeArray(state.settings.selectedPalette).length
+      ? safeArray(state.settings.selectedPalette).slice(0, 5)
+      : getSuggestedPalette(getPdfDeckAnalysis()).slice(0, 5);
+    return {
+      label: localTemplate.label || "",
+      description: `${localTemplate.category || "local"} editable con ${localTemplate.slideCount || safeArray(localTemplate.slidePreviews).length || 1} hoja(s) de referencia.`,
+      collection: "Plantilla PPT local RenderAI",
+      thumbnailPath: previewPath,
+      thumbnailUrl: absThumb,
+      canvaId: "",
+      canvaUrl: "",
+      paletteHints,
+      family: localTemplate.category || state.settings.templateType || "ppt",
+      variant: "local-ppt-template",
+      density: "",
+      frame: "",
+      ornament: "",
+      localTemplateId: localTemplate.id || "",
+      localTemplateCategory: localTemplate.category || "",
+      localTemplatePptxPath: localTemplate.pptxPath || "",
+      localTemplateSlideCount: localTemplate.slideCount || safeArray(localTemplate.slidePreviews).length || 0,
+    };
+  }
+
   const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   if (!brochureTemplate) return null;
   const styleProfile = getBrochureStyleProfile(state.settings.brochureStyle);
@@ -4252,13 +5196,12 @@ function buildPdfBrief() {
   const sections = blueprints.map((b) => b.title).join(", ");
   const palette = (state.settings.selectedPalette || []).join(", ");
   const language = state.settings.brochureLanguage === "en" ? "English" : "Spanish";
-  const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   const templateRef = buildTemplateReferenceBlock();
 
   const lines = [
     `Create an architectural brochure in ${language}. Type: ${labelForProjectType()}. Audience: ${labelForDecision("audience")}. ${blueprints.length} pages.`,
     context ? `Project: ${context}` : null,
-    `Tone: ${labelForDecision("pdfTone")}. Narrative: ${labelForDecision("narrative")}. Cover: ${labelForDecision("coverStyle")}. Density: ${labelForDecision("visualDensity")}. Brochure style: ${brochureTemplate?.label || optionLabel(BROCHURE_STYLE_OPTIONS, state.settings.brochureStyle)}.`,
+    `Tone: ${labelForDecision("pdfTone")}. Narrative: ${labelForDecision("narrative")}. Cover: ${labelForDecision("coverStyle")}. Density: ${labelForDecision("visualDensity")}. Brochure style: ${templateRef?.label || optionLabel(BROCHURE_STYLE_OPTIONS, state.settings.brochureStyle)}.`,
     templateRef ? `VISUAL TEMPLATE REFERENCE (must be respected as the aesthetic base of the brochure):` : null,
     templateRef ? `  • Template: ${templateRef.label} — ${templateRef.description}` : null,
     templateRef ? `  • Collection: ${templateRef.collection} · Family: ${templateRef.family} · Variant: ${templateRef.variant}` : null,
@@ -4268,7 +5211,7 @@ function buildPdfBrief() {
     templateRef ? `  • Slides must inherit this template's palette, layout direction, typographic vibe, whitespace, and grid rhythm.` : null,
     `Visual: ${labelForDecision("renderLanguage")}, ${labelForDecision("imageMood")}, ${labelForDecision("timeOfDay")}, ${labelForDecision("lightScenario")}.`,
     palette ? `Palette: ${palette}` : null,
-    `Images: ${state.settings.pdfImageMode === "rendered" ? "render project photos before layout" : "use raw project photos"}.`,
+    "Images: configured per slide and per template image slot. Only slots marked as rendered should be rendered; raw slots must remain untouched.",
     (analysis.materials || []).length ? `Materials: ${analysis.materials.slice(0, 6).join(", ")}` : null,
     sections ? `Sections: ${sections}` : null,
     (() => {
@@ -4405,6 +5348,8 @@ async function generateRenderResult() {
 }
 
 async function generatePdfDeck() {
+  await loadLocalTemplateCatalog();
+  await loadLocalTemplateObjects();
   const main = getMainImage();
   if (main && !main.analysis) {
     await runMainAnalysis(false);
@@ -4517,13 +5462,14 @@ function buildRenderTargetDescriptors(renderTargets) {
   return safeArray(renderTargets).map((target) => {
     const blueprint = target.blueprint || {};
     const config = target.config || {};
+    const layout = resolveConfiguredSlideLayout(blueprint, config);
     const image = imagesById[target.imageId] || null;
     return {
       targetKey: target.key,
       slideKey: target.slideKey,
       slideTitle: blueprint.title || "",
       sectionId: blueprint.sectionId || "",
-      layout: config.layout || blueprint.layout || "",
+      layout,
       imageId: target.imageId,
       imageName: image?.name || `Foto ${idToRefIndex[target.imageId] || "?"}`,
       imageRefIndex: idToRefIndex[target.imageId] || null,
@@ -4665,6 +5611,18 @@ function collectPdfRenderTargets(items) {
   blueprints.forEach((blueprint) => {
     const config = state.settings.pdfSlideConfigs?.[blueprint.key] || {};
     if (!blueprint.allowProjectImages || !config.useProjectImages) return;
+    const slotEntries = Object.entries(config.templateSlotImages || {}).filter(([, imageId]) => byId.has(imageId));
+    if (slotEntries.length) {
+      slotEntries.forEach(([slotId, imageId]) => {
+        const slotConfig = { ...config, ...resolveTemplateSlotRender(config, slotId) };
+        if (resolveTemplateSlotRender(config, slotId).sourceMode !== "rendered") return;
+        const key = `${blueprint.key}::${slotId}::${imageId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        targets.push({ key, slideKey: blueprint.key, slotId, imageId, blueprint, config: slotConfig });
+      });
+      return;
+    }
     const sourceMode = resolveSlideImageSourceMode(config);
     if (sourceMode !== "rendered") return;
     const selected = safeArray(config.imageIds).filter((id) => byId.has(id));
@@ -4760,6 +5718,8 @@ async function buildPdfProjectVisuals(main) {
       renderAll();
       const fallback = await buildLocalRenderFallback(image);
       fallbackByUse[target.key] = fallback.url;
+      const compatibilityKey = `${target.slideKey}::${target.imageId}`;
+      if (!fallbackByUse[compatibilityKey]) fallbackByUse[compatibilityKey] = fallback.url;
       if (!fallbackMap[image.id]) fallbackMap[image.id] = fallback.url;
     }
     const mergedMap = { ...rawMap, ...fallbackMap };
@@ -4813,6 +5773,8 @@ async function buildPdfProjectVisuals(main) {
     if (rendered?.source) renderedProvider = rendered.source;
     const outputUrl = rendered?.url || image.url;
     renderedByUse[target.key] = outputUrl;
+    const compatibilityKey = `${target.slideKey}::${target.imageId}`;
+    if (!renderedByUse[compatibilityKey]) renderedByUse[compatibilityKey] = outputUrl;
     if (!renderedMap[image.id]) renderedMap[image.id] = outputUrl;
   }
 
@@ -4856,6 +5818,7 @@ function buildPdfProjectRenderPrompt(image, blueprint = null, config = {}) {
   lines.push(buildStrictStyleDirective({ representationStyle: representation, imageFinish: finish }));
   lines.push(buildOccupancyDirectiveForValue(occupancy));
   lines.push(buildSlideRenderTreatmentDirective(renderTreatment, config));
+  if (config.prompt) lines.push(`USER SLOT CHANGE REQUEST: ${String(config.prompt).slice(0, 800)}. Respect this request without changing locked geometry or signage.`);
   lines.push(buildVisualTreatmentLine());
   lines.push("Fidelity priority: do not add furniture, do not remove objects, do not invent architecture, do not distort signs, do not replace the project with an alternate design. If a sign/text is visible, preserve it exactly or keep that source area visually unchanged.");
   return lines.filter(Boolean).join("\n");
@@ -5009,10 +5972,9 @@ function buildPdfVisualPrompt(kind, moodBoardLayout = "") {
   const palette = safeArray(state.settings.selectedPalette).length
     ? safeArray(state.settings.selectedPalette).join(", ")
     : safeArray(analysis.palette).slice(0, 5).join(", ");
-  const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   const templateRefBlock = buildTemplateReferenceBlock();
-  const templateHint = brochureTemplate
-    ? `Template reference: ${brochureTemplate.label}. ${brochureTemplate.description}. Collection: ${brochureTemplate.collection}.${templateRefBlock?.thumbnailUrl ? ` Visual reference image: ${templateRefBlock.thumbnailUrl}.` : ""}${templateRefBlock?.paletteHints?.length ? ` Palette hints: ${templateRefBlock.paletteHints.join(", ")}.` : ""} Respect its layout direction and typographic vibe.`
+  const templateHint = templateRefBlock
+    ? `Template reference: ${templateRefBlock.label}. ${templateRefBlock.description}. Collection: ${templateRefBlock.collection}.${templateRefBlock.thumbnailUrl ? ` Visual reference image: ${templateRefBlock.thumbnailUrl}.` : ""}${templateRefBlock.paletteHints?.length ? ` Palette hints: ${templateRefBlock.paletteHints.join(", ")}.` : ""} Respect its layout direction and typographic vibe.`
     : null;
   const antiTextClause = "ABSOLUTELY NO TEXT, NO LETTERS, NO WORDS, NO NUMBERS, NO LOGOS, NO LABELS, NO WATERMARKS, NO TYPOGRAPHY ANYWHERE.";
   const layoutPrompt = getMoodBoardLayoutPrompt(moodBoardLayout);
@@ -5142,18 +6104,19 @@ function buildLocalDeck() {
   const summary = buildPdfBrief();
   const slides = blueprints.map((blueprint, index) => {
     const config = state.settings.pdfSlideConfigs?.[blueprint.key] || {};
+    const configuredLayout = resolveConfiguredSlideLayout(blueprint, config);
     const copy = getSlideTextDraft(blueprint, analysis);
     return normalizeSlide({
       ...createSlideFromBlueprint(blueprint, analysis, index),
       ...copy,
-      layout: config.layout || blueprint.layout,
-      imagePlacement: config.imagePlacement || inferImagePlacement(config.layout || blueprint.layout),
-      imageAspect: config.imageAspect || inferImageAspect(config.layout || blueprint.layout),
+      layout: configuredLayout,
+      imagePlacement: config.imagePlacement || inferImagePlacement(configuredLayout),
+      imageAspect: config.imageAspect || inferImageAspect(configuredLayout),
       imageSourceMode: config.imageSourceMode || "inherit",
-      imageSize: config.imageSize || inferImageSize(config.layout || blueprint.layout),
-      imageZone: config.imageZone || inferImageZone(config.layout || blueprint.layout, config.imagePlacement || inferImagePlacement(config.layout || blueprint.layout)),
-      imageFraming: config.imageFraming || inferImageFraming(config.layout || blueprint.layout),
-      imageArrangement: config.imageArrangement || inferImageArrangement(config.layout || blueprint.layout),
+      imageSize: config.imageSize || inferImageSize(configuredLayout),
+      imageZone: config.imageZone || inferImageZone(configuredLayout, config.imagePlacement || inferImagePlacement(configuredLayout)),
+      imageFraming: config.imageFraming || inferImageFraming(configuredLayout),
+      imageArrangement: config.imageArrangement || inferImageArrangement(configuredLayout),
       moodBoardLayout: config.moodBoardLayout || inferMoodBoardLayout(blueprint),
       renderTreatment: config.renderTreatment || "master",
       imageRepresentation: config.imageRepresentation || "inherit",
@@ -5193,6 +6156,318 @@ async function composeDeckSlides(slides, deckTitle = "RenderAI Studio") {
   }));
 }
 
+async function composeLocalTemplateSlide(slide, index, pageCount, deckTitle, palette, localTemplate, width = 1600, height = 1131) {
+  const layout = slide.layout || "tpl-page-1";
+  const previewUrl = resolveLocalTemplatePreviewUrl(localTemplate, layout, false);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  const resolvedPalette = safeArray(palette).length ? safeArray(palette) : getSuggestedPalette(getPdfDeckAnalysis());
+  const accent = resolvedPalette[0] || "#8b6547";
+  const accent2 = resolvedPalette[1] || colorMixHex(accent, "#ffffff", 0.38);
+  const paper = colorMixHex(resolvedPalette[2] || "#f7efe5", "#ffffff", 0.32);
+  const ink = "#1c1511";
+  const titleFont = slide.titleFont || state.settings.titleFont || "Cormorant Garamond";
+  const bodyFont = slide.bodyFont || state.settings.bodyFont || "Manrope";
+  const config = state.settings.pdfSlideConfigs?.[slide.key] || {};
+  const mergedConfig = {
+    ...config,
+    layout,
+    imagePlacement: slide.imagePlacement || config.imagePlacement || inferImagePlacement(layout),
+    imageSize: slide.imageSize || config.imageSize || inferImageSize(layout),
+    imageArrangement: slide.imageArrangement || config.imageArrangement || inferImageArrangement(layout),
+  };
+
+  context.fillStyle = paper;
+  context.fillRect(0, 0, width, height);
+  if (previewUrl) {
+    const templateImage = await loadImage(previewUrl).catch(() => null);
+    if (templateImage) {
+      context.save();
+      context.globalAlpha = 0.26;
+      context.filter = "blur(1.4px) saturate(0.86) contrast(0.92)";
+      drawCoverImagePlain(context, templateImage, { x: 0, y: 0, width, height });
+      context.restore();
+    }
+  }
+
+  const wash = context.createLinearGradient(0, 0, width, height);
+  wash.addColorStop(0, colorWithAlpha(paper, 0.90));
+  wash.addColorStop(0.52, "rgba(255,255,255,0.74)");
+  wash.addColorStop(1, colorWithAlpha(accent2, 0.24));
+  context.fillStyle = wash;
+  context.fillRect(0, 0, width, height);
+
+  drawArchitecturalGrid(context, { width, height, color: "rgba(30,22,15,0.045)" });
+
+  const editableTemplateObjects = resolveTemplateEditableObjects(localTemplate, layout, config);
+  const editableImageSlots = safeArray(editableTemplateObjects.imageSlots);
+  const editableTextObjects = safeArray(editableTemplateObjects.textObjects);
+  if (editableImageSlots.length || editableTextObjects.length || layout === "blank-canvas" || localTemplate?.blank) {
+    const backgroundImage = resolveTemplateAssignedImage(config, "__background__", 0);
+    if (backgroundImage?.url) {
+      const bg = await loadImage(backgroundImage.url).catch(() => null);
+      if (bg) {
+        drawCoverImagePlain(context, bg, { x: 0, y: 0, width, height });
+        context.fillStyle = "rgba(255,252,247,0.08)";
+        context.fillRect(0, 0, width, height);
+      }
+      if (previewUrl && layout !== "blank-canvas") {
+        const templateImage = await loadImage(previewUrl).catch(() => null);
+        if (templateImage) {
+          context.save();
+          context.globalAlpha = 0.13;
+          drawCoverImagePlain(context, templateImage, { x: 0, y: 0, width, height });
+          context.restore();
+        }
+      }
+    }
+
+    const nonBackgroundSlots = editableImageSlots.filter((slot) => slot.id !== "__background__");
+    for (let i = 0; i < nonBackgroundSlots.length; i += 1) {
+      const slot = nonBackgroundSlots[i];
+      const source = resolveTemplateAssignedImage(config, slot.id, templateSlotFallbackIndex(slot, i + 1));
+      const frame = percentFrameToCanvasFrame(resolveTemplateObjectRect(config, slot), width, height);
+      await drawLocalTemplateImageSlot(context, source?.url || "", frame, {
+        radius: slot.role === "custom" ? 18 : 24,
+        accent: i === 0 ? accent : accent2,
+        label: labelTemplateImageSlot(slot, i + 1),
+        bodyFont,
+      });
+    }
+
+    const slideTextForTemplate = {
+      title: sanitizeVisibleDeckText(slide.title, `Pagina ${index + 1}`),
+      subtitle: sanitizeVisibleDeckText(slide.subtitle, ""),
+      bullets: safeArray(slide.bullets).map((item) => sanitizeVisibleDeckText(item, "")).filter(Boolean),
+    };
+    editableTextObjects.forEach((obj, objIndex) => {
+      const text = resolveTemplateTextContent(
+        obj,
+        objIndex,
+        { title: slideTextForTemplate.title, sectionLabel: slide.tag || slide.sectionLabel || `Pagina ${index + 1}` },
+        config,
+        slideTextForTemplate,
+        slideTextForTemplate.title,
+        slideTextForTemplate.subtitle,
+        slideTextForTemplate.bullets,
+      );
+      drawTemplateTextObjectOnCanvas(context, obj, text, config, {
+        width,
+        height,
+        index: objIndex,
+        titleFont,
+        bodyFont,
+        ink,
+        accent,
+      });
+    });
+
+    drawCanvaDeckChrome(context, {
+      tag: sanitizeVisibleDeckText(slide.tag || slide.sectionLabel || `Pagina ${index + 1}`, `Pagina ${index + 1}`).toUpperCase(),
+      deckTitle,
+      index,
+      pageCount,
+      width,
+      height,
+      ink,
+      accent,
+      bodyFont,
+      minimal: true,
+    });
+    context.font = `700 13px "${bodyFont}", sans-serif`;
+    context.fillStyle = "rgba(36,27,21,0.62)";
+    const templateLabel = `PLANTILLA EDITABLE · ${sanitizeVisibleDeckText(localTemplate.label || "PPT", "PPT").slice(0, 56).toUpperCase()}`;
+    context.fillText(templateLabel, 76, height - 72);
+    return { url: canvas.toDataURL("image/jpeg", 0.94), width, height };
+  }
+
+  const slideImages = resolveLocalTemplateSlideImages(slide, config);
+  const frames = resolveTemplatePhotoFrames(mergedConfig, layout, Math.max(1, slideImages.length || 1))
+    .map((frame) => percentFrameToCanvasFrame(frame, width, height));
+
+  for (let i = 0; i < frames.length; i += 1) {
+    const frame = frames[i];
+    const imageUrl = slideImages[i] || slideImages[0] || slide.imageDataUrl || getMainImage()?.url || "";
+    await drawLocalTemplateImageSlot(context, imageUrl, frame, {
+      radius: i === 0 ? 34 : 22,
+      accent: i === 0 ? accent : accent2,
+      label: i === 0 ? "Imagen principal" : `Imagen ${i + 1}`,
+      bodyFont,
+    });
+  }
+
+  const textFrame = resolveLocalTemplateTextFrame(mergedConfig, width, height);
+  context.fillStyle = "rgba(255,252,247,0.92)";
+  roundRectPath(context, textFrame.x, textFrame.y, textFrame.width, textFrame.height, 34);
+  context.fill();
+  context.strokeStyle = colorWithAlpha(accent, 0.24);
+  context.lineWidth = 2;
+  context.stroke();
+  drawCanvaDeckChrome(context, {
+    tag: sanitizeVisibleDeckText(slide.tag || slide.sectionLabel || `Pagina ${index + 1}`, `Pagina ${index + 1}`).toUpperCase(),
+    deckTitle,
+    index,
+    pageCount,
+    width,
+    height,
+    ink,
+    accent,
+    bodyFont,
+    minimal: true,
+  });
+  drawCanvasTextBlock(
+    context,
+    sanitizeVisibleDeckText(slide.title, `Pagina ${index + 1}`),
+    sanitizeVisibleDeckText(slide.subtitle, ""),
+    safeArray(slide.bullets).map((item) => sanitizeVisibleDeckText(item, "")).filter(Boolean).slice(0, 4),
+    {
+      x: textFrame.x + 42,
+      y: textFrame.y + 72,
+      width: textFrame.width - 84,
+      titleSize: Math.round(Math.min(74, Math.max(48, textFrame.width / 7.2))),
+      subtitleSize: 23,
+      bulletSize: 20,
+      titleColor: ink,
+      bodyColor: "rgba(36,27,21,0.78)",
+      accentColor: accent,
+      titleFont,
+      bodyFont,
+    },
+  );
+
+  drawPaletteRail(context, resolvedPalette.slice(0, 5), {
+    x: width - 520,
+    y: height - 100,
+    swatchWidth: 72,
+    gap: 10,
+    showHex: false,
+    bodyFont,
+  });
+
+  context.font = `700 13px "${bodyFont}", sans-serif`;
+  context.fillStyle = "rgba(36,27,21,0.62)";
+  const templateLabel = `PLANTILLA LOCAL · ${sanitizeVisibleDeckText(localTemplate.label || "PPT", "PPT").slice(0, 56).toUpperCase()}`;
+  context.fillText(templateLabel, 76, height - 72);
+
+  return { url: canvas.toDataURL("image/jpeg", 0.94), width, height };
+}
+
+function drawTemplateTextObjectOnCanvas(context, obj, text, config, options = {}) {
+  const {
+    width = 1600,
+    height = 1131,
+    index = 0,
+    titleFont = "Cormorant Garamond",
+    bodyFont = "Manrope",
+    ink = "#211812",
+    accent = "#8b6547",
+  } = options;
+  const rect = resolveTemplateObjectRect(config, obj);
+  const frame = percentFrameToCanvasFrame(rect, width, height);
+  const style = { ...(obj.style || {}), ...(config.templateObjectStyles?.[obj.id] || {}) };
+  const rawSize = Number(style.fontSize || 0);
+  const fontSize = clamp(Math.round(rawSize ? (config.templateObjectStyles?.[obj.id]?.fontSize ? rawSize : rawSize * 1.02) : (index === 0 ? 54 : 24)), 14, 96);
+  const fontFamily = String(style.fontFamily || (index === 0 ? titleFont : bodyFont)).replace(/"/g, "");
+  const fontWeight = style.bold ? 800 : index === 0 ? 750 : 500;
+  const align = normalizeTemplateTextAlign(style.align);
+  const safeText = sanitizeVisibleDeckText(text, index === 0 ? "Titulo" : "");
+  const textColor = /^#[0-9a-f]{6}$/i.test(String(style.color || "")) ? style.color : ink;
+  const fill = /^#[0-9a-f]{6}$/i.test(String(style.background || "")) ? style.background : "";
+
+  context.save();
+  if (fill) {
+    context.fillStyle = colorWithAlpha(fill, 0.92);
+    roundRectPath(context, frame.x, frame.y, frame.width, frame.height, 18);
+    context.fill();
+  }
+  context.fillStyle = textColor;
+  context.font = `${fontWeight} ${fontSize}px "${fontFamily}", ${index === 0 ? "serif" : "sans-serif"}`;
+  context.textAlign = align === "right" ? "right" : align === "center" ? "center" : "left";
+  context.textBaseline = "top";
+  const pad = Math.max(12, Math.round(fontSize * 0.34));
+  const textX = align === "right" ? frame.x + frame.width - pad : align === "center" ? frame.x + frame.width / 2 : frame.x + pad;
+  const lineWidth = Math.max(80, frame.width - pad * 2);
+  const lineHeight = Math.round(fontSize * 1.16);
+  const maxLines = Math.max(1, Math.floor((frame.height - pad * 2) / lineHeight));
+  const lines = wrapCanvasText(context, safeText, lineWidth).slice(0, maxLines);
+  lines.forEach((line, lineIndex) => {
+    const finalLine = lineIndex === maxLines - 1 && wrapCanvasText(context, safeText, lineWidth).length > maxLines
+      ? fitCanvasLine(context, `${line}...`, lineWidth)
+      : fitCanvasLine(context, line, lineWidth);
+    context.fillText(finalLine, textX, frame.y + pad + lineIndex * lineHeight);
+  });
+  if (index === 0) {
+    context.fillStyle = accent;
+    context.fillRect(frame.x + pad, Math.min(frame.y + frame.height - pad, frame.y + pad + lines.length * lineHeight + 10), Math.min(86, frame.width * 0.32), 4);
+  }
+  context.restore();
+}
+
+function resolveLocalTemplateSlideImages(slide, config) {
+  const selected = safeArray(config?.imageIds)
+    .map((id) => state.images.find((image) => image.id === id)?.url)
+    .filter(Boolean);
+  if (slide.imageDataUrl && !selected.includes(slide.imageDataUrl)) return [slide.imageDataUrl, ...selected].slice(0, 6);
+  return selected.length ? selected.slice(0, 6) : [slide.imageDataUrl || getMainImage()?.url || ""].filter(Boolean);
+}
+
+function percentFrameToCanvasFrame(frame, width, height) {
+  return {
+    x: Math.round(width * Number(frame.x || 0) / 100),
+    y: Math.round(height * Number(frame.y || 0) / 100),
+    width: Math.round(width * Number(frame.width || 0) / 100),
+    height: Math.round(height * Number(frame.height || 0) / 100),
+  };
+}
+
+function resolveLocalTemplateTextFrame(config, width, height) {
+  const placement = String(config.imagePlacement || inferImagePlacement(config.layout || "split"));
+  if (placement === "left") return { x: Math.round(width * 0.62), y: Math.round(height * 0.16), width: Math.round(width * 0.31), height: Math.round(height * 0.56) };
+  if (placement === "right") return { x: Math.round(width * 0.06), y: Math.round(height * 0.16), width: Math.round(width * 0.34), height: Math.round(height * 0.58) };
+  if (placement === "top") return { x: Math.round(width * 0.08), y: Math.round(height * 0.58), width: Math.round(width * 0.48), height: Math.round(height * 0.31) };
+  if (placement === "bottom") return { x: Math.round(width * 0.08), y: Math.round(height * 0.14), width: Math.round(width * 0.48), height: Math.round(height * 0.32) };
+  if (placement === "full") return { x: Math.round(width * 0.06), y: Math.round(height * 0.62), width: Math.round(width * 0.48), height: Math.round(height * 0.25) };
+  return { x: Math.round(width * 0.07), y: Math.round(height * 0.15), width: Math.round(width * 0.36), height: Math.round(height * 0.54) };
+}
+
+async function drawLocalTemplateImageSlot(context, imageUrl, frame, options = {}) {
+  const { radius = 28, accent = "#8b6547", label = "Imagen", bodyFont = "Manrope" } = options;
+  context.save();
+  context.shadowColor = "rgba(37, 25, 16, 0.26)";
+  context.shadowBlur = 28;
+  context.shadowOffsetY = 18;
+  context.fillStyle = "rgba(255,255,255,0.72)";
+  roundRectPath(context, frame.x, frame.y, frame.width, frame.height, radius);
+  context.fill();
+  context.restore();
+
+  const image = imageUrl ? await loadImage(imageUrl).catch(() => null) : null;
+  if (image) {
+    context.save();
+    roundRectPath(context, frame.x, frame.y, frame.width, frame.height, radius);
+    context.clip();
+    drawCoverImagePlain(context, image, frame);
+    context.restore();
+  } else {
+    context.fillStyle = "rgba(36,27,21,0.08)";
+    roundRectPath(context, frame.x, frame.y, frame.width, frame.height, radius);
+    context.fill();
+  }
+
+  context.strokeStyle = colorWithAlpha(accent, 0.45);
+  context.lineWidth = 3;
+  roundRectPath(context, frame.x, frame.y, frame.width, frame.height, radius);
+  context.stroke();
+  context.fillStyle = colorWithAlpha(accent, 0.88);
+  roundRectPath(context, frame.x + 22, frame.y + frame.height - 52, Math.min(210, frame.width - 44), 30, 999);
+  context.fill();
+  context.font = `700 12px "${bodyFont}", sans-serif`;
+  context.fillStyle = "#fffaf3";
+  context.fillText(String(label).toUpperCase(), frame.x + 38, frame.y + frame.height - 32);
+}
+
 function resolveSlideBackgroundStops(slideBg, styleProfile) {
   const presets = {
     "dark-luxury": ["#1a1714", "#201c18", "#2a2420"],
@@ -5228,6 +6503,10 @@ function resolveSlideBackgroundStops(slideBg, styleProfile) {
 async function composeBrochureSlide(slide, index, pageCount, deckTitle, palette) {
   const width = 1600;
   const height = 1131;
+  const localTemplate = getSelectedLocalTemplateEntry();
+  if (localTemplate && (String(slide.layout || "").startsWith("tpl-page-") || String(slide.layout || "") === "blank-canvas" || localTemplate.blank)) {
+    return composeLocalTemplateSlide(slide, index, pageCount, deckTitle, palette, localTemplate, width, height);
+  }
   const styleProfile = getBrochureStyleProfile(slide.brochureStyle || state.settings.brochureStyle);
   if (styleProfile.canvaId) {
     return composeCanvaReferenceSlide(slide, index, pageCount, deckTitle, palette, styleProfile, width, height);
@@ -7105,6 +8384,12 @@ function createSlideFromBlueprint(blueprint, analysis, index) {
   };
 }
 
+function resolveConfiguredSlideLayout(blueprint, config = {}) {
+  return state.settings.pdfSlideLayouts?.[blueprint.key]
+    || config.layout
+    || blueprint.layout;
+}
+
 function deriveDeckTitle() {
   const context = (state.settings.contextBrief || "").trim();
   const firstLine = context.split("\n").find((line) => line.trim().length > 0);
@@ -7151,6 +8436,8 @@ function pickDeckSettings() {
   const keys = ["pageCount", "audience", "pdfTone", "narrative", "plans", "visualDensity", "coverStyle", "deckMode", "renderLanguage", "imageMood", "timeOfDay", "lightScenario", "occupancy", "representationStyle", "imageFinish", "lensProfile", "weatherAtmosphere", "projectType", "pdfImageMode", "brochureStyle", "brochureLanguage", "titleFont", "bodyFont", "colorMode", "selectedPalette", "selectedAmenities", "customAmenities", "amenityCount", "pdfSections"];
   const payload = keys.reduce((acc, key) => ({ ...acc, [key]: state.settings[key] }), {});
   const brochureTemplate = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const localTemplate = getSelectedLocalTemplateEntry();
+  const templateReference = buildTemplateReferenceBlock();
   payload.brochureTemplateLabel = brochureTemplate?.label || "";
   payload.brochureTemplateCollection = brochureTemplate?.collection || "";
   payload.brochureTemplateDescription = brochureTemplate?.description || "";
@@ -7161,35 +8448,58 @@ function pickDeckSettings() {
   payload.brochureTemplateCanvaId = brochureTemplate?.canvaId || "";
   payload.brochureTemplateCanvaUrl = brochureTemplate?.canvaUrl || "";
   payload.brochureTemplateCanvaBridge = brochureTemplate?.canvaBridge || "local-preview-from-canva-reference";
-  payload.templateReference = buildTemplateReferenceBlock();
+  if (localTemplate) {
+    payload.brochureTemplateLabel = localTemplate.label || payload.brochureTemplateLabel;
+    payload.brochureTemplateCollection = "Plantilla PPT local RenderAI";
+    payload.brochureTemplateDescription = templateReference?.description || payload.brochureTemplateDescription;
+    payload.brochureTemplateTags = [localTemplate.category || state.settings.templateType || "local"];
+    payload.brochureTemplateValue = localTemplate.id || "";
+    payload.brochureTemplateThumbnail = resolveLocalTemplatePreviewUrl(localTemplate, 1, false);
+    payload.brochureTemplateSource = "local-ppt-template";
+    payload.brochureTemplateCanvaId = "";
+    payload.brochureTemplateCanvaUrl = "";
+    payload.brochureTemplateCanvaBridge = "local-ppt-thumbnail-driven-editor";
+    payload.localTemplateId = localTemplate.id || "";
+    payload.localTemplateLabel = localTemplate.label || "";
+    payload.localTemplateCategory = localTemplate.category || "";
+    payload.localTemplatePptxPath = localTemplate.pptxPath || "";
+    payload.localTemplateSlideCount = localTemplate.slideCount || safeArray(localTemplate.slidePreviews).length || 0;
+  }
+  payload.templateReference = templateReference;
   payload.pdfSlideLayouts = state.settings.pdfSlideLayouts || {};
   payload.pdfPerImagePrompts = state.settings.pdfPerImagePrompts || {};
-  payload.canvaGenerationBrief = buildCanvaGenerationBrief(brochureTemplate);
+  payload.canvaGenerationBrief = buildCanvaGenerationBrief(templateReference || brochureTemplate);
   payload.slideBlueprints = computePdfSlideBlueprints().map((blueprint) => ({
+    ...(function () {
+      const config = state.settings.pdfSlideConfigs?.[blueprint.key] || {};
+      const configuredLayout = resolveConfiguredSlideLayout(blueprint, config);
+      return {
+        layout: configuredLayout,
+        imagePlacement: config.imagePlacement || inferImagePlacement(configuredLayout),
+        imageAspect: config.imageAspect || inferImageAspect(configuredLayout),
+        imageSourceMode: config.imageSourceMode || "inherit",
+        imageSize: config.imageSize || inferImageSize(configuredLayout),
+        imageZone: config.imageZone || inferImageZone(configuredLayout, config.imagePlacement || inferImagePlacement(configuredLayout)),
+        imageFraming: config.imageFraming || inferImageFraming(configuredLayout),
+        imageArrangement: config.imageArrangement || inferImageArrangement(configuredLayout),
+        moodBoardLayout: config.moodBoardLayout || inferMoodBoardLayout(blueprint),
+        renderTreatment: config.renderTreatment || "master",
+        imageRepresentation: config.imageRepresentation || "inherit",
+        imageFinish: config.imageFinish || "inherit",
+        imageOccupancy: config.imageOccupancy || "inherit",
+        textMode: config.textMode || "suggested",
+        useProjectImages: Boolean(config.useProjectImages),
+        imageIds: safeArray(config.imageIds),
+        moodSources: safeArray(config.moodSources),
+        materialHighlights: safeArray(config.materialHighlights),
+        objectHighlights: safeArray(config.objectHighlights),
+      };
+    })(),
     key: blueprint.key,
     sectionId: blueprint.sectionId,
     title: blueprint.title,
     subtitle: blueprint.subtitle,
     visualRole: blueprint.visualRole,
-    layout: state.settings.pdfSlideConfigs?.[blueprint.key]?.layout || blueprint.layout,
-    imagePlacement: state.settings.pdfSlideConfigs?.[blueprint.key]?.imagePlacement || inferImagePlacement(blueprint.layout),
-    imageAspect: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageAspect || inferImageAspect(blueprint.layout),
-    imageSourceMode: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageSourceMode || "inherit",
-    imageSize: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageSize || inferImageSize(blueprint.layout),
-    imageZone: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageZone || inferImageZone(blueprint.layout, state.settings.pdfSlideConfigs?.[blueprint.key]?.imagePlacement || inferImagePlacement(blueprint.layout)),
-    imageFraming: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageFraming || inferImageFraming(blueprint.layout),
-    imageArrangement: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageArrangement || inferImageArrangement(blueprint.layout),
-    moodBoardLayout: state.settings.pdfSlideConfigs?.[blueprint.key]?.moodBoardLayout || inferMoodBoardLayout(blueprint),
-    renderTreatment: state.settings.pdfSlideConfigs?.[blueprint.key]?.renderTreatment || "master",
-    imageRepresentation: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageRepresentation || "inherit",
-    imageFinish: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageFinish || "inherit",
-    imageOccupancy: state.settings.pdfSlideConfigs?.[blueprint.key]?.imageOccupancy || "inherit",
-    textMode: state.settings.pdfSlideConfigs?.[blueprint.key]?.textMode || "suggested",
-    useProjectImages: Boolean(state.settings.pdfSlideConfigs?.[blueprint.key]?.useProjectImages),
-    imageIds: safeArray(state.settings.pdfSlideConfigs?.[blueprint.key]?.imageIds),
-    moodSources: safeArray(state.settings.pdfSlideConfigs?.[blueprint.key]?.moodSources),
-    materialHighlights: safeArray(state.settings.pdfSlideConfigs?.[blueprint.key]?.materialHighlights),
-    objectHighlights: safeArray(state.settings.pdfSlideConfigs?.[blueprint.key]?.objectHighlights),
   }));
   payload.pageCount = String(payload.slideBlueprints.length);
 
@@ -7234,12 +8544,14 @@ function pickDeckSettings() {
 }
 
 function buildCanvaGenerationBrief(template) {
-  const activeTemplate = template || getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
+  const activeTemplate = template || buildTemplateReferenceBlock() || getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   const language = state.settings.brochureLanguage === "en" ? "English" : "Spanish";
   return [
     `Create an editable Canva presentation inspired by the local RenderAI template "${activeTemplate?.label || "RenderAI template"}".`,
     activeTemplate?.canvaUrl ? `Canva visual reference URL: ${activeTemplate.canvaUrl}` : null,
-    "Template source: local Canva-reference preview.",
+    activeTemplate?.thumbnailUrl ? `Template visual reference image: ${activeTemplate.thumbnailUrl}` : null,
+    activeTemplate?.localTemplatePptxPath ? `Local PPTX source path: ${activeTemplate.localTemplatePptxPath}` : null,
+    `Template source: ${activeTemplate?.localTemplateId ? "local PPT template preview" : "local Canva-reference preview"}.`,
     `Use ${language} only for all visible text.`,
     `Deck type: ${labelForProjectType()}. Tone: ${labelForDecision("pdfTone")}. Narrative: ${labelForDecision("narrative")}.`,
     `Use project colors/palette when provided, otherwise derive a premium architectural palette from the uploaded renders.`,
@@ -7664,11 +8976,39 @@ function handleDelegatedClick(event) {
     return;
   }
 
+  const localTemplateButton = target.closest("[data-local-template]");
+  if (localTemplateButton) {
+    const newTplId = localTemplateButton.dataset.localTemplate;
+    state.settings.localTemplate = newTplId;
+    // Auto-assign tpl-page-1 as default layout for all slides when a new template is selected
+    const allLocal = getAllLocalTemplates();
+    const selTpl = allLocal.find(t => t.id === newTplId);
+    if (selTpl?.blank) {
+      if (!state.settings.pdfSlideLayouts) state.settings.pdfSlideLayouts = {};
+      const blueprints = computePdfSlideBlueprints ? computePdfSlideBlueprints() : [];
+      blueprints.forEach((bp) => {
+        state.settings.pdfSlideLayouts[bp.key] = "blank-canvas";
+      });
+    } else if (selTpl && selTpl.slidePreviews && selTpl.slidePreviews.length) {
+      if (!state.settings.pdfSlideLayouts) state.settings.pdfSlideLayouts = {};
+      const blueprints = computePdfSlideBlueprints ? computePdfSlideBlueprints() : [];
+      blueprints.forEach((bp, idx) => {
+        const preview = selTpl.slidePreviews[idx] || selTpl.slidePreviews[0];
+        if (preview) {
+          state.settings.pdfSlideLayouts[bp.key] = `tpl-page-${preview.slide || preview.page || idx + 1}`;
+        }
+      });
+    }
+    persistSettings();
+    renderAll();
+    return;
+  }
+
   const choiceButton = target.closest("[data-choice-key][data-choice-value]");
   if (choiceButton) {
     state.settings[choiceButton.dataset.choiceKey] = choiceButton.dataset.choiceValue;
     persistSettings();
-    renderDecisions();
+    renderAll();
     updatePromptText();
     return;
   }
@@ -7977,6 +9317,24 @@ function handleDelegatedClick(event) {
     return;
   }
 
+  const perImageContrastButton = target.closest("[data-per-image-contrast][data-per-image-id][data-per-image-contrast-value]");
+  if (perImageContrastButton) {
+    const slideKey = perImageContrastButton.dataset.perImageContrast;
+    const imageId = perImageContrastButton.dataset.perImageId;
+    const contrastVal = perImageContrastButton.dataset.perImageContrastValue;
+    if (!state.settings.pdfPerImagePrompts || typeof state.settings.pdfPerImagePrompts !== "object") state.settings.pdfPerImagePrompts = {};
+    if (!state.settings.pdfPerImagePrompts[slideKey]) state.settings.pdfPerImagePrompts[slideKey] = {};
+    const current = state.settings.pdfPerImagePrompts[slideKey][imageId] || {};
+    state.settings.pdfPerImagePrompts[slideKey][imageId] = {
+      ...current,
+      contrast: current.contrast === contrastVal ? "" : contrastVal,
+    };
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
+
   const slideImageCountButton = target.closest("[data-slide-image-count][data-slide-image-count-value]");
   if (slideImageCountButton) {
     setSlideImageCount(slideImageCountButton.dataset.slideImageCount, Number(slideImageCountButton.dataset.slideImageCountValue || 1));
@@ -7992,6 +9350,143 @@ function handleDelegatedClick(event) {
   const slideImageToggleButton = target.closest("[data-slide-image-toggle][data-slide-image-id]");
   if (slideImageToggleButton) {
     toggleSlideImageSelection(slideImageToggleButton.dataset.slideImageToggle, slideImageToggleButton.dataset.slideImageId);
+    return;
+  }
+
+  const addTemplateObjectButton = target.closest("[data-template-add-object][data-template-add-kind]");
+  if (addTemplateObjectButton) {
+    addTemplateCustomObject(addTemplateObjectButton.dataset.templateAddObject, addTemplateObjectButton.dataset.templateAddKind);
+    return;
+  }
+
+  const activeObjectColorButton = target.closest("[data-template-active-color][data-template-active-color-value]");
+  if (activeObjectColorButton) {
+    setActiveTemplateObjectStyle(activeObjectColorButton.dataset.templateActiveColor, {
+      color: activeObjectColorButton.dataset.templateActiveColorValue,
+    });
+    return;
+  }
+
+  const activeObjectFillButton = target.closest("[data-template-active-fill]");
+  if (activeObjectFillButton) {
+    setActiveTemplateObjectStyle(activeObjectFillButton.dataset.templateActiveFill, {
+      background: activeObjectFillButton.dataset.templateActiveFillValue || "",
+    });
+    return;
+  }
+
+  const activeObjectFontButton = target.closest("[data-template-active-font][data-template-active-font-value]");
+  if (activeObjectFontButton) {
+    setActiveTemplateObjectStyle(activeObjectFontButton.dataset.templateActiveFont, {
+      fontFamily: activeObjectFontButton.dataset.templateActiveFontValue,
+    });
+    return;
+  }
+
+  const activeObjectSizeButton = target.closest("[data-template-active-size][data-template-active-size-delta]");
+  if (activeObjectSizeButton) {
+    resizeActiveTemplateObject(activeObjectSizeButton.dataset.templateActiveSize, Number(activeObjectSizeButton.dataset.templateActiveSizeDelta || 0));
+    return;
+  }
+
+  const activeObjectFontSizeButton = target.closest("[data-template-active-font-size][data-template-active-font-size-delta]");
+  if (activeObjectFontSizeButton) {
+    adjustActiveTemplateFontSize(activeObjectFontSizeButton.dataset.templateActiveFontSize, Number(activeObjectFontSizeButton.dataset.templateActiveFontSizeDelta || 0));
+    return;
+  }
+
+  const activeObjectDeleteButton = target.closest("[data-template-active-delete]");
+  if (activeObjectDeleteButton) {
+    deleteActiveTemplateCustomObject(activeObjectDeleteButton.dataset.templateActiveDelete);
+    return;
+  }
+
+  const templateObjectButton = target.closest("[data-template-object-key][data-template-object-id]");
+  if (templateObjectButton && !target.closest("[data-template-object-text-key]")) {
+    setActiveTemplateObject(templateObjectButton.dataset.templateObjectKey, templateObjectButton.dataset.templateObjectId);
+    return;
+  }
+
+  const templateImageSourceButton = target.closest("[data-template-image-source][data-template-image-id]");
+  if (templateImageSourceButton) {
+    const slideKey = templateImageSourceButton.dataset.templateImageSource;
+    const imageId = templateImageSourceButton.dataset.templateImageId;
+    const config = state.settings.pdfSlideConfigs[slideKey];
+    if (!config || !imageId) return;
+    config.useProjectImages = true;
+    if (!safeArray(config.imageIds).includes(imageId)) config.imageIds = [...safeArray(config.imageIds), imageId];
+    config.activeImageId = imageId;
+    config.imageCount = String(Math.max(1, Math.min(safeArray(config.imageIds).length, 6)));
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
+
+  const templateSlotActiveButton = target.closest("[data-template-slot-active][data-template-slot-id]");
+  if (templateSlotActiveButton) {
+    const config = state.settings.pdfSlideConfigs[templateSlotActiveButton.dataset.templateSlotActive];
+    if (!config) return;
+    config.activeTemplateSlot = templateSlotActiveButton.dataset.templateSlotId;
+    config.activeTemplateObject = templateSlotActiveButton.dataset.templateSlotId;
+    const assigned = config.templateSlotImages?.[config.activeTemplateSlot];
+    if (assigned && state.images.some((image) => image.id === assigned)) config.activeImageId = assigned;
+    persistSettings();
+    renderAll();
+    return;
+  }
+
+  const templateSlotBindButton = target.closest("[data-template-slot-bind][data-template-slot-id][data-template-image-id]");
+  if (templateSlotBindButton) {
+    const slideKey = templateSlotBindButton.dataset.templateSlotBind;
+    const slotId = templateSlotBindButton.dataset.templateSlotId;
+    const imageId = templateSlotBindButton.dataset.templateImageId;
+    const config = state.settings.pdfSlideConfigs[slideKey];
+    if (!config || !slotId || !imageId) return;
+    if (!config.templateSlotImages || typeof config.templateSlotImages !== "object") config.templateSlotImages = {};
+    config.templateSlotImages[slotId] = imageId;
+    config.activeTemplateSlot = slotId;
+    config.activeTemplateObject = slotId;
+    config.activeImageId = imageId;
+    config.useProjectImages = true;
+    if (!safeArray(config.imageIds).includes(imageId)) config.imageIds = [...safeArray(config.imageIds), imageId];
+    config.imageCount = String(Math.max(1, Math.min(safeArray(config.imageIds).length, 6)));
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
+
+  const templateSlotClearButton = target.closest("[data-template-slot-clear][data-template-slot-id]");
+  if (templateSlotClearButton) {
+    const config = state.settings.pdfSlideConfigs[templateSlotClearButton.dataset.templateSlotClear];
+    if (!config) return;
+    if (config.templateSlotImages) delete config.templateSlotImages[templateSlotClearButton.dataset.templateSlotId];
+    config.activeTemplateSlot = templateSlotClearButton.dataset.templateSlotId;
+    config.activeTemplateObject = templateSlotClearButton.dataset.templateSlotId;
+    persistSettings();
+    renderAll();
+    updatePromptText();
+    return;
+  }
+
+  const templateSlotRenderButton = target.closest("[data-template-slot-render][data-template-slot-id][data-template-slot-render-field][data-template-slot-render-value]");
+  if (templateSlotRenderButton) {
+    const slideKey = templateSlotRenderButton.dataset.templateSlotRender;
+    const slotId = templateSlotRenderButton.dataset.templateSlotId;
+    const field = templateSlotRenderButton.dataset.templateSlotRenderField;
+    const value = templateSlotRenderButton.dataset.templateSlotRenderValue;
+    const config = state.settings.pdfSlideConfigs[slideKey];
+    if (!config || !slotId || !field) return;
+    if (!config.templateSlotRender || typeof config.templateSlotRender !== "object") config.templateSlotRender = {};
+    config.templateSlotRender[slotId] = {
+      ...(config.templateSlotRender[slotId] || {}),
+      [field]: value,
+    };
+    config.activeTemplateSlot = slotId;
+    persistSettings();
+    renderAll();
+    updatePromptText();
     return;
   }
 
@@ -8034,6 +9529,7 @@ function handleDelegatedClick(event) {
     config.customTitle = "";
     config.customSubtitle = "";
     config.customBullets = "";
+    config.templateTextOverrides = {};
     config.textMode = "suggested";
     persistSettings();
     renderAll();
@@ -8119,6 +9615,27 @@ function handleDelegatedChange(event) {
     updatePromptText();
     return;
   }
+
+  if (target.matches("[data-template-active-font-select]")) {
+    setActiveTemplateObjectStyle(target.dataset.templateActiveFontSelect, {
+      fontFamily: target.value,
+    });
+    return;
+  }
+  if (target.matches("[data-template-slot-select-image][data-template-slot-id]")) {
+    assignTemplateSlotImage(target.dataset.templateSlotSelectImage, target.dataset.templateSlotId, target.value);
+    return;
+  }
+}
+
+function handleDelegatedFocusIn(event) {
+  const target = event.target;
+  if (target.matches("[data-template-object-text-key][data-template-object-id]")) {
+    const config = state.settings.pdfSlideConfigs[target.dataset.templateObjectTextKey];
+    if (!config) return;
+    config.activeTemplateObject = target.dataset.templateObjectId;
+    persistSettings();
+  }
 }
 
 function handleDelegatedInput(event) {
@@ -8141,6 +9658,30 @@ function handleDelegatedInput(event) {
     const field = target.dataset.slideInlineTextField;
     config[field] = normalizeInlineEditableText(target.innerText || target.textContent || "");
     config.textMode = "custom";
+    persistSettings();
+    updatePromptText();
+  }
+  if (target.matches("[data-template-object-text-key][data-template-object-id]")) {
+    const config = state.settings.pdfSlideConfigs[target.dataset.templateObjectTextKey];
+    if (!config) return;
+    config.activeTemplateObject = target.dataset.templateObjectId;
+    if (!config.templateTextOverrides || typeof config.templateTextOverrides !== "object") config.templateTextOverrides = {};
+    config.templateTextOverrides[target.dataset.templateObjectId] = normalizeInlineEditableText(target.innerText || target.textContent || "");
+    config.activeTemplateObject = target.dataset.templateObjectId;
+    config.textMode = "custom";
+    persistSettings();
+    updatePromptText();
+  }
+  if (target.matches("[data-template-slot-render-prompt][data-template-slot-id]")) {
+    const slideKey = target.dataset.templateSlotRenderPrompt;
+    const slotId = target.dataset.templateSlotId;
+    const config = state.settings.pdfSlideConfigs[slideKey];
+    if (!config || !slotId) return;
+    if (!config.templateSlotRender || typeof config.templateSlotRender !== "object") config.templateSlotRender = {};
+    config.templateSlotRender[slotId] = {
+      ...(config.templateSlotRender[slotId] || {}),
+      prompt: target.value,
+    };
     persistSettings();
     updatePromptText();
   }
@@ -8230,6 +9771,11 @@ function addCustomAmenityFromInput() {
   }
   if (!Array.isArray(state.settings.customAmenities)) state.settings.customAmenities = [];
   state.settings.customAmenities = unique([...state.settings.customAmenities, value]).slice(0, 24);
+  // Auto-increment amenity count when adding via free text
+  const currentCount = Number(state.settings.amenityCount || 0);
+  if (currentCount < MAX_AMENITY_COUNT) {
+    state.settings.amenityCount = String(currentCount + 1);
+  }
   if (!safeArray(state.settings.selectedAmenities).includes(value)) {
     toggleAmenitySelection(value);
   } else {
@@ -8272,6 +9818,220 @@ function toggleAmenitySelection(value) {
   updatePromptText();
 }
 
+function ensureSlideConfig(slideKey) {
+  const blueprints = computePdfSlideBlueprints();
+  const blueprint = blueprints.find((entry) => entry.key === slideKey);
+  if (!blueprint) return null;
+  if (!state.settings.pdfSlideConfigs[slideKey]) state.settings.pdfSlideConfigs[slideKey] = {};
+  const config = state.settings.pdfSlideConfigs[slideKey];
+  hydrateSlideConfigDefaults(blueprint, config);
+  return config;
+}
+
+function addTemplateCustomObject(slideKey, kind) {
+  const config = ensureSlideConfig(slideKey);
+  if (!config) return;
+  const isImage = kind === "image";
+  const id = `${isImage ? "custom-image" : "custom-text"}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`;
+  const nextObject = isImage
+    ? { id, kind: "image", name: "Cuadro de imagen", x: 54, y: 34, width: 26, height: 22, role: "custom" }
+    : { id, kind: "text", name: "Cuadro de texto", text: "Nuevo texto editable", x: 14, y: 26, width: 32, height: 11, role: "custom", style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 20, color: "#241b14" } };
+  config.templateCustomObjects = [...safeArray(config.templateCustomObjects), nextObject].slice(-32);
+  config.activeTemplateObject = id;
+  if (isImage) config.activeTemplateSlot = id;
+  if (!isImage) {
+    config.templateTextOverrides[id] = nextObject.text;
+    config.templateObjectStyles[id] = { ...(nextObject.style || {}) };
+  }
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
+function setActiveTemplateObject(slideKey, objectId) {
+  const config = ensureSlideConfig(slideKey);
+  if (!config || !objectId) return;
+  config.activeTemplateObject = objectId;
+  const slotIds = new Set(resolveTemplateEditableObjects(getSelectedLocalTemplateEntry(), state.settings.pdfSlideLayouts?.[slideKey] || config.layout, config).imageSlots.map((slot) => slot.id));
+  if (slotIds.has(objectId)) {
+    config.activeTemplateSlot = objectId;
+    const assigned = config.templateSlotImages?.[objectId];
+    if (assigned && state.images.some((image) => image.id === assigned)) config.activeImageId = assigned;
+  }
+  persistSettings();
+  renderAll();
+}
+
+function setActiveTemplateObjectStyle(slideKey, stylePatch = {}) {
+  const config = ensureSlideConfig(slideKey);
+  const objectId = config?.activeTemplateObject;
+  if (!config || !objectId) {
+    toast("Selecciona primero un cuadro de texto o imagen en el canvas.", "warn");
+    return;
+  }
+  if (!config.templateObjectStyles || typeof config.templateObjectStyles !== "object") config.templateObjectStyles = {};
+  config.templateObjectStyles[objectId] = {
+    ...(config.templateObjectStyles[objectId] || {}),
+    ...stylePatch,
+  };
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
+function assignTemplateSlotImage(slideKey, slotId, imageId) {
+  const config = ensureSlideConfig(slideKey);
+  if (!config || !slotId) return;
+  if (!config.templateSlotImages || typeof config.templateSlotImages !== "object") config.templateSlotImages = {};
+  if (imageId) {
+    config.templateSlotImages[slotId] = imageId;
+    config.activeImageId = imageId;
+    config.useProjectImages = true;
+    if (!safeArray(config.imageIds).includes(imageId)) config.imageIds = [...safeArray(config.imageIds), imageId];
+    config.imageCount = String(Math.max(1, Math.min(safeArray(config.imageIds).length, 6)));
+  } else {
+    delete config.templateSlotImages[slotId];
+  }
+  config.activeTemplateSlot = slotId;
+  config.activeTemplateObject = slotId;
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
+function adjustActiveTemplateFontSize(slideKey, delta) {
+  const config = ensureSlideConfig(slideKey);
+  const objectId = config?.activeTemplateObject;
+  if (!config || !objectId) {
+    toast("Selecciona primero un cuadro de texto en el canvas.", "warn");
+    return;
+  }
+  const object = findTemplateCanvasObject(slideKey, objectId);
+  if (!object || object.kind !== "text") {
+    toast("El tamano de letra solo aplica a cuadros de texto.", "warn");
+    return;
+  }
+  if (!config.templateObjectStyles || typeof config.templateObjectStyles !== "object") config.templateObjectStyles = {};
+  const currentStyle = config.templateObjectStyles[objectId] || {};
+  const base = Number(currentStyle.fontSize || object.style?.fontSize || (object.role === "title" ? 34 : 18));
+  config.templateObjectStyles[objectId] = {
+    ...currentStyle,
+    fontSize: clamp(base + Number(delta || 0), 8, 96),
+  };
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
+function resizeActiveTemplateObject(slideKey, delta) {
+  const config = ensureSlideConfig(slideKey);
+  const objectId = config?.activeTemplateObject;
+  if (!config || !objectId) {
+    toast("Selecciona primero un objeto del canvas.", "warn");
+    return;
+  }
+  const object = findTemplateCanvasObject(slideKey, objectId);
+  if (!object) return;
+  const rect = resolveTemplateObjectRect(config, object);
+  const next = {
+    ...rect,
+    width: clamp(rect.width + Number(delta || 0), 5, 100),
+    height: clamp(rect.height + Number(delta || 0) * 0.72, 4, 100),
+  };
+  persistTemplateObjectRect(config, objectId, next);
+  persistSettings();
+  renderAll();
+}
+
+function deleteActiveTemplateCustomObject(slideKey) {
+  const config = ensureSlideConfig(slideKey);
+  const objectId = config?.activeTemplateObject;
+  if (!config || !objectId) return;
+  const isCustom = safeArray(config.templateCustomObjects).some((obj) => obj.id === objectId);
+  if (!isCustom) {
+    toast("Los objetos propios de la plantilla no se eliminan aqui; puedes moverlos, editar texto o reemplazar su imagen.", "warn");
+    return;
+  }
+  config.templateCustomObjects = safeArray(config.templateCustomObjects).filter((obj) => obj.id !== objectId);
+  if (config.templateTextOverrides) delete config.templateTextOverrides[objectId];
+  if (config.templateSlotImages) delete config.templateSlotImages[objectId];
+  if (config.templateSlotRender) delete config.templateSlotRender[objectId];
+  if (config.templateObjectTransforms) delete config.templateObjectTransforms[objectId];
+  if (config.templateObjectStyles) delete config.templateObjectStyles[objectId];
+  config.activeTemplateObject = "";
+  if (config.activeTemplateSlot === objectId) config.activeTemplateSlot = "";
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
+function findTemplateCanvasObject(slideKey, objectId) {
+  const config = state.settings.pdfSlideConfigs?.[slideKey];
+  if (!config || !objectId) return null;
+  const activeLayout = state.settings.pdfSlideLayouts?.[slideKey] || config.layout;
+  const editable = resolveTemplateEditableObjects(getSelectedLocalTemplateEntry(), activeLayout, config);
+  return [...editable.textObjects, ...editable.imageSlots].find((obj) => obj.id === objectId) || null;
+}
+
+function startTemplateObjectDrag(event) {
+  const handle = event.target.closest("[data-template-object-drag-handle]");
+  const objectEl = event.target.closest("[data-template-object-key][data-template-object-id]");
+  if (!handle && !objectEl?.classList.contains("tpl-edit-image-slot")) return;
+  if (!objectEl) return;
+  const slideKey = objectEl.dataset.templateObjectKey;
+  const objectId = objectEl.dataset.templateObjectId;
+  const config = ensureSlideConfig(slideKey);
+  const canvas = objectEl.closest(".slide-edit-canvas");
+  const object = findTemplateCanvasObject(slideKey, objectId);
+  if (!config || !canvas || !object) return;
+  event.preventDefault();
+  objectEl.setPointerCapture?.(event.pointerId);
+  const canvasRect = canvas.getBoundingClientRect();
+  const startRect = resolveTemplateObjectRect(config, object);
+  canvasObjectDrag = {
+    slideKey,
+    objectId,
+    objectEl,
+    canvasRect,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startRect,
+    moved: false,
+  };
+  config.activeTemplateObject = objectId;
+  if (objectEl.classList.contains("tpl-edit-image-slot")) config.activeTemplateSlot = objectId;
+  objectEl.classList.add("is-dragging", "active");
+}
+
+function moveTemplateObjectDrag(event) {
+  if (!canvasObjectDrag) return;
+  const drag = canvasObjectDrag;
+  const dx = ((event.clientX - drag.startClientX) / Math.max(1, drag.canvasRect.width)) * 100;
+  const dy = ((event.clientY - drag.startClientY) / Math.max(1, drag.canvasRect.height)) * 100;
+  const next = {
+    ...drag.startRect,
+    x: clamp(drag.startRect.x + dx, -5, 105 - drag.startRect.width),
+    y: clamp(drag.startRect.y + dy, -5, 105 - drag.startRect.height),
+  };
+  drag.moved = true;
+  drag.objectEl.style.left = `${next.x}%`;
+  drag.objectEl.style.top = `${next.y}%`;
+  drag.nextRect = next;
+}
+
+function finishTemplateObjectDrag() {
+  if (!canvasObjectDrag) return;
+  const drag = canvasObjectDrag;
+  const config = ensureSlideConfig(drag.slideKey);
+  if (config && drag.nextRect) {
+    persistTemplateObjectRect(config, drag.objectId, drag.nextRect);
+    persistSettings();
+    updatePromptText();
+  }
+  drag.objectEl?.classList.remove("is-dragging");
+  canvasObjectDrag = null;
+}
+
 function shiftCurrentSlide(direction) {
   const blueprints = computePdfSlideBlueprints();
   if (!blueprints.length) return;
@@ -8311,11 +10071,22 @@ function setSlideActiveImage(slideKey, imageId) {
     toast("Activa primero el uso de fotos del proyecto para esta diapositiva.", "warn");
     return;
   }
-  const count = resolveSlideImageCount(config);
-  const selected = safeArray(config.imageIds).filter((id) => state.images.some((image) => image.id === id));
-  config.imageIds = [imageId, ...selected.filter((id) => id !== imageId)].slice(0, count);
-  config.activeImageId = imageId;
-  config.imageCount = String(count);
+  const selected = safeArray(config.imageIds);
+  if (selected.includes(imageId)) {
+    if (config.activeImageId === imageId && selected.length > 1) {
+      // Already active and other photos exist: remove this photo
+      config.imageIds = selected.filter(id => id !== imageId);
+      config.activeImageId = config.imageIds[0] || state.mainId || "";
+    } else {
+      // Just set as active for editing
+      config.activeImageId = imageId;
+    }
+  } else {
+    // Add to selection
+    config.imageIds = [...selected, imageId];
+    config.activeImageId = imageId;
+  }
+  config.imageCount = String(Math.max(1, config.imageIds.length));
   persistSettings();
   renderAll();
   updatePromptText();
@@ -8864,6 +10635,21 @@ async function cropDataUrl(sourceUrl, crop, maxSide = 1600) {
 }
 
 function drawCoverImage(context, image, frame) {
+  context.save();
+  context.beginPath();
+  context.roundRect(frame.x, frame.y, frame.width, frame.height, 34);
+  context.clip();
+  drawCoverImagePlain(context, image, frame);
+  context.restore();
+
+  context.strokeStyle = "rgba(107, 72, 41, 0.12)";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.roundRect(frame.x, frame.y, frame.width, frame.height, 34);
+  context.stroke();
+}
+
+function drawCoverImagePlain(context, image, frame) {
   const imageRatio = image.naturalWidth / Math.max(image.naturalHeight, 1);
   const frameRatio = frame.width / Math.max(frame.height, 1);
   let drawWidth = frame.width;
@@ -8881,18 +10667,7 @@ function drawCoverImage(context, image, frame) {
     offsetY = frame.y - (drawHeight - frame.height) / 2;
   }
 
-  context.save();
-  context.beginPath();
-  context.roundRect(frame.x, frame.y, frame.width, frame.height, 34);
-  context.clip();
   context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
-  context.restore();
-
-  context.strokeStyle = "rgba(107, 72, 41, 0.12)";
-  context.lineWidth = 2;
-  context.beginPath();
-  context.roundRect(frame.x, frame.y, frame.width, frame.height, 34);
-  context.stroke();
 }
 
 function pickImageSize(main) {

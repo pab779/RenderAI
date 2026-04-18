@@ -1,9 +1,11 @@
 outputs/
 desktop-tutorial/
 node_modules/
+test-assets/
 *.local
 .env
 .env.*
+.claude/settings.local.json
 last-openai-body.json
 tmp-*.json
 tmp-*.log
@@ -12,6 +14,10 @@ tmp-*.sh
 server-*.log
 server-*.out.log
 server-*.err.log
+*.ppt
+*.pptx
+*.rar
+*.zip
 *.key
 *.secret
 *.secure.txt

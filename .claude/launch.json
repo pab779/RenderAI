@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "RenderAI Studio",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3218"],
+      "port": 3218,
+      "autoPort": false
+    }
+  ]
+}

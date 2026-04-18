@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" width="1600" height="1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#f7f7f7"/>
+      <stop offset="100%" stop-color="#f1f1f1"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e5e5e5" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#bbbbbb" stop-opacity="0.96"/>
+    </linearGradient>
+    <filter id="blurStrong"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurSoft"><feGaussianBlur stdDeviation="22"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.18"/></filter>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#bbbbbb" stroke-opacity="0.16" stroke-width="1"/>
+    </pattern>
+  </defs><rect width="1600" height="1000" rx="36" fill="url(#bg)"/>
+        <rect x="56" y="56" width="1488" height="888" rx="24" fill="#f7f7f6"/>
+        <rect x="96" y="96" width="1408" height="808" rx="18" fill="url(#grid)" opacity="0.90"/>
+        <rect x="104" y="114" width="460" height="770" rx="14" fill="#ffffff" stroke="#bbbbbb" stroke-opacity="0.26"/>
+        <rect x="608" y="114" width="830" height="540" rx="18" fill="url(#soft)" opacity="0.74"/>
+        <rect x="608" y="690" width="830" height="194" rx="18" fill="#ffffff" stroke="#bbbbbb" stroke-opacity="0.26"/>
+        <text x="144" y="214" fill="#111111" font-family="Arial" font-size="86" font-weight="700" letter-spacing="0"><tspan x="144" dy="0">Manual</tspan><tspan x="144" dy="80">de marca</tspan></text>
+        <text x="144" y="760" fill="#111111" font-family="Arial" font-size="24" letter-spacing="6">BRAND SYSTEM</text>
+        <text x="144" y="804" fill="#111111" opacity="0.70" font-family="Arial" font-size="26">Reticula y consistencia para identidad visual</text></svg>
