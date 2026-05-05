@@ -5,6 +5,7 @@ test-assets/
 *.local
 .env
 .env.*
+!.env.example
 .claude/settings.local.json
 last-openai-body.json
 tmp-*.json
