@@ -26,8 +26,12 @@ $script:SecureOpenAiApiKeyPath = Join-Path $script:SecureStoreRoot "openai_api_k
 $script:SecureGeminiApiKeyPath = Join-Path $script:SecureStoreRoot "gemini_api_key.secure.txt"
 $script:CachedOpenAiApiKey = $null
 $script:CachedGeminiApiKey = $null
+$script:CachedLumaApiKey = $null
+$script:MockVideoJobs = @{}
 $script:OpenAiSecureEntropy = [System.Text.Encoding]::UTF8.GetBytes("RenderAIStudio.OpenAIKey")
 $script:GeminiSecureEntropy = [System.Text.Encoding]::UTF8.GetBytes("RenderAIStudio.GeminiKey")
+$script:ProjectAssetRoot = Join-Path $resolvedRoot "outputs\project-assets"
+$script:ProjectDataRoot = Join-Path $resolvedRoot "outputs\project-data"
 
 function New-RenderAiListener {
   param(
@@ -56,7 +60,7 @@ function Apply-CorsHeaders {
 
   $Response.Headers["Access-Control-Allow-Origin"] = "*"
   $Response.Headers["Access-Control-Allow-Headers"] = "Content-Type"
-  $Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+  $Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
 }
 
 function Write-JsonResponse {
@@ -105,6 +109,13 @@ function Get-PropValue {
   )
 
   if ($null -eq $Object) { return $Default }
+  if ($Object -is [System.Collections.IDictionary]) {
+    if ($Object.Contains($Name)) {
+      $dictionaryValue = $Object[$Name]
+      if ($null -ne $dictionaryValue) { return $dictionaryValue }
+    }
+    return $Default
+  }
   $property = $Object.PSObject.Properties[$Name]
   if ($null -eq $property) { return $Default }
   $value = $property.Value
@@ -292,9 +303,22 @@ function Get-StoredGeminiApiKey {
   }
 }
 
+function Get-StoredLumaApiKey {
+  if (-not [string]::IsNullOrWhiteSpace($script:CachedLumaApiKey)) {
+    return $script:CachedLumaApiKey
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:LUMA_API_KEY)) {
+    $script:CachedLumaApiKey = $env:LUMA_API_KEY
+    return $script:CachedLumaApiKey
+  }
+
+  return $null
+}
+
 function Get-ProviderSecretSource {
   param(
-    [Parameter(Mandatory = $true)][ValidateSet("openai", "gemini")]$Provider,
+    [Parameter(Mandatory = $true)][ValidateSet("openai", "gemini", "luma")]$Provider,
     [string]$ApiKey = ""
   )
 
@@ -307,6 +331,10 @@ function Get-ProviderSecretSource {
   }
 
   if ($Provider -eq "gemini" -and -not [string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)) {
+    return "env"
+  }
+
+  if ($Provider -eq "luma" -and -not [string]::IsNullOrWhiteSpace($env:LUMA_API_KEY)) {
     return "env"
   }
 
@@ -509,6 +537,70 @@ function Invoke-GeminiImageGenerate {
   throw "Gemini did not return an image payload."
 }
 
+function Invoke-OpenAiFidelityCheck {
+  param(
+    [Parameter(Mandatory = $true)][string]$ReferenceDataUrl,
+    [Parameter(Mandatory = $true)][string]$GeneratedDataUrl
+  )
+
+  $apiKey = Get-StoredOpenAiApiKey
+  if ([string]::IsNullOrWhiteSpace($apiKey)) {
+    return @{ fidelity_score = 100; violations = @() }
+  }
+
+  $refPart = Convert-DataUrlToImagePart -DataUrl $ReferenceDataUrl -Index 0
+  $genPart = Convert-DataUrlToImagePart -DataUrl $GeneratedDataUrl -Index 1
+  $refB64 = [Convert]::ToBase64String($refPart.Bytes)
+  $genB64 = [Convert]::ToBase64String($genPart.Bytes)
+
+  $fidelityPrompt = @"
+You are a strict architectural fidelity auditor. Compare these two images:
+IMAGE 1: the REFERENCE (original architectural image that was approved by the user).
+IMAGE 2: the GENERATED result (AI-rendered version that should match the reference).
+
+Check for violations of the following contract:
+- Geometry: rooflines, facades, walls, columns, beams, windows, doors must be identical.
+- Camera: angle, focal length, height, vanishing points must be unchanged.
+- Texts/signage: any visible text in the reference must appear verbatim in the generated image.
+- Objects: furniture, fixtures, vegetation, people distribution must be preserved.
+- Background: visible exterior, sky, landscape must match.
+
+Respond with ONLY valid JSON in this exact format:
+{"fidelity_score": <integer 0-100>, "violations": [<short string per violation>]}
+
+fidelity_score 100 = perfect match. 0 = completely different scene.
+If there are no violations, return: {"fidelity_score": 95, "violations": []}
+"@
+
+  $bodyObject = @{
+    model = "gpt-4o"
+    max_tokens = 512
+    messages = @(
+      @{
+        role = "user"
+        content = @(
+          @{ type = "text"; text = $fidelityPrompt },
+          @{ type = "image_url"; image_url = @{ url = "data:$($refPart.MimeType);base64,$refB64"; detail = "low" } },
+          @{ type = "image_url"; image_url = @{ url = "data:$($genPart.MimeType);base64,$genB64"; detail = "low" } }
+        )
+      }
+    )
+  }
+
+  $body = $bodyObject | ConvertTo-Json -Depth 20
+  $response = Invoke-RestMethod -Method Post -Uri "https://api.openai.com/v1/chat/completions" -Headers @{ Authorization = "Bearer $apiKey"; "Content-Type" = "application/json" } -Body $body -TimeoutSec 60
+  $rawText = [string]($response.choices[0].message.content)
+  $jsonMatch = [regex]::Match($rawText, '\{[\s\S]*\}')
+  if ($jsonMatch.Success) {
+    try {
+      return $jsonMatch.Value | ConvertFrom-Json
+    } catch {
+      return @{ fidelity_score = 80; violations = @("Could not parse fidelity response") }
+    }
+  }
+  return @{ fidelity_score = 80; violations = @() }
+}
+
 function Invoke-OpenAiImageEditApi {
   param(
     [Parameter(Mandatory = $true)][string]$Prompt,
@@ -630,10 +722,35 @@ function Invoke-OpenAiRenderEdit {
   }
 }
 
+function Test-LumaPublicAssetBaseUrl {
+  param([string]$Url = "")
+
+  if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+  try {
+    $uri = [System.Uri]$Url
+  } catch {
+    return $false
+  }
+  if ($uri.Scheme -ne "https") { return $false }
+  $host = $uri.Host.ToLowerInvariant()
+  if ([string]::IsNullOrWhiteSpace($host)) { return $false }
+  if ($host -in @("localhost", "127.0.0.1", "0.0.0.0", "::1")) { return $false }
+  if ($host -match '^(10\.|192\.168\.|169\.254\.)') { return $false }
+  if ($host -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') { return $false }
+  return $true
+}
+
 function Resolve-RenderRuntimeInfo {
   $geminiKey = Get-StoredGeminiApiKey
   $openAiKey = Get-StoredOpenAiApiKey
+  $lumaKey = Get-StoredLumaApiKey
+  $publicAssetBaseUrl = [string]$env:PUBLIC_ASSET_BASE_URL
+  $mockAi = ([string]$env:USE_MOCK_AI).ToLowerInvariant() -eq "true"
   $renderProvider = if (-not [string]::IsNullOrWhiteSpace($geminiKey)) { "gemini" } elseif (-not [string]::IsNullOrWhiteSpace($openAiKey)) { "openai" } else { "local" }
+  $lumaConfigured = -not [string]::IsNullOrWhiteSpace($lumaKey)
+  $publicAssetBaseUrlConfigured = -not [string]::IsNullOrWhiteSpace($publicAssetBaseUrl)
+  $publicAssetBaseUrlUsable = Test-LumaPublicAssetBaseUrl -Url $publicAssetBaseUrl
+  $lumaReady = $lumaConfigured -and $publicAssetBaseUrlUsable
   return @{
     renderProvider = $renderProvider
     renderReady = $renderProvider -ne "local"
@@ -641,9 +758,299 @@ function Resolve-RenderRuntimeInfo {
     analysisReady = -not [string]::IsNullOrWhiteSpace($openAiKey)
     openAiReady = -not [string]::IsNullOrWhiteSpace($openAiKey)
     geminiReady = -not [string]::IsNullOrWhiteSpace($geminiKey)
+    lumaConfigured = $lumaConfigured
+    lumaReady = $lumaReady
+    mockAi = $mockAi
+    publicAssetBaseUrlConfigured = $publicAssetBaseUrlConfigured
+    publicAssetBaseUrlUsable = $publicAssetBaseUrlUsable
+    videoReady = ($lumaReady -or $mockAi)
+    videoProvider = if ($lumaReady) { "luma" } elseif ($mockAi) { "mock" } else { "none" }
     renderSecretSource = if ($renderProvider -eq "gemini") { Get-ProviderSecretSource -Provider "gemini" -ApiKey $geminiKey } elseif ($renderProvider -eq "openai") { Get-ProviderSecretSource -Provider "openai" -ApiKey $openAiKey } else { "none" }
     analysisSecretSource = Get-ProviderSecretSource -Provider "openai" -ApiKey $openAiKey
+    videoSecretSource = if ($lumaConfigured) { Get-ProviderSecretSource -Provider "luma" -ApiKey $lumaKey } else { "none" }
   }
+}
+
+function Get-PublicAssetBaseUrl {
+  if ([string]::IsNullOrWhiteSpace($env:PUBLIC_ASSET_BASE_URL)) { return "" }
+  return ([string]$env:PUBLIC_ASSET_BASE_URL).TrimEnd("/")
+}
+
+function Get-BackendProjectStorePath {
+  New-Item -ItemType Directory -Path $script:ProjectDataRoot -Force | Out-Null
+  return (Join-Path $script:ProjectDataRoot "projects.json")
+}
+
+function Read-BackendProjectStore {
+  $path = Get-BackendProjectStorePath
+  if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+  try {
+    $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+    return @($raw | ConvertFrom-Json)
+  } catch {
+    return @()
+  }
+}
+
+function Write-BackendProjectStore {
+  param([Parameter(Mandatory = $true)]$Projects)
+  $path = Get-BackendProjectStorePath
+  ($Projects | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $path -Encoding UTF8
+}
+
+function New-BackendProjectRecord {
+  param($Payload)
+  $now = (Get-Date).ToString("o")
+  $name = [string](Get-PropValue -Object $Payload -Name "name" -Default "")
+  if ([string]::IsNullOrWhiteSpace($name)) { $name = [string](Get-PropValue -Object $Payload -Name "title" -Default "Proyecto sin titulo") }
+  return @{
+    id = [Guid]::NewGuid().ToString("N")
+    name = $name
+    title = $name
+    description = [string](Get-PropValue -Object $Payload -Name "description" -Default "")
+    projectType = [string](Get-PropValue -Object $Payload -Name "projectType" -Default "")
+    goal = [string](Get-PropValue -Object $Payload -Name "goal" -Default "")
+    createdAt = $now
+    updatedAt = $now
+    coverAssetId = ""
+    messages = @()
+    assets = @()
+    generationJobs = @()
+    videoJobs = @()
+    settings = @{}
+    version = 2
+  }
+}
+
+function Save-ProjectDataUrlAsset {
+  param(
+    [Parameter(Mandatory = $true)][string]$ProjectId,
+    [Parameter(Mandatory = $true)][string]$DataUrl,
+    [string]$Prefix = "asset"
+  )
+
+  if ($DataUrl -notmatch '^data:(?<mime>[^;]+);base64,(?<data>[\s\S]+)$') {
+    throw "Asset must be a data URL."
+  }
+
+  $mime = $Matches.mime
+  $extension = switch ($mime.ToLowerInvariant()) {
+    "image/jpeg" { "jpg" }
+    "image/png" { "png" }
+    "image/webp" { "webp" }
+    default { "bin" }
+  }
+  $safeProjectId = ($ProjectId -replace '[^a-zA-Z0-9_-]', '_')
+  if ([string]::IsNullOrWhiteSpace($safeProjectId)) { $safeProjectId = "project" }
+  $folder = Join-Path $script:ProjectAssetRoot $safeProjectId
+  New-Item -ItemType Directory -Path $folder -Force | Out-Null
+  $fileName = ("{0}-{1}.{2}" -f ($Prefix -replace '[^a-zA-Z0-9_-]', '_'), [Guid]::NewGuid().ToString("N"), $extension)
+  $path = Join-Path $folder $fileName
+  [System.IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($Matches.data))
+
+  $publicBase = Get-PublicAssetBaseUrl
+  $publicUrl = if ([string]::IsNullOrWhiteSpace($publicBase)) { "" } else { "$publicBase/outputs/project-assets/$safeProjectId/$fileName" }
+  return @{
+    path = $path
+    publicUrl = $publicUrl
+    mimeType = $mime
+    fileName = $fileName
+  }
+}
+
+function Convert-InputImageToPublicUrl {
+  param(
+    [Parameter(Mandatory = $true)][string]$ProjectId,
+    [Parameter(Mandatory = $true)][string]$Image,
+    [int]$Index = 0
+  )
+
+  if ($Image -match '^https?://') { return $Image }
+  if ($Image -match '^data:image/') {
+    $saved = Save-ProjectDataUrlAsset -ProjectId $ProjectId -DataUrl $Image -Prefix ("luma-frame-{0}" -f $Index)
+    if ([string]::IsNullOrWhiteSpace($saved.publicUrl)) {
+      throw "PUBLIC_ASSET_BASE_URL is required so Luma can read project images."
+    }
+    return $saved.publicUrl
+  }
+  throw "Unsupported image URL for Luma."
+}
+
+function New-MockVideoResult {
+  param(
+    [string]$ProjectId = "",
+    [string]$Prompt = ""
+  )
+
+  $generationId = "mock-" + [Guid]::NewGuid().ToString("N")
+  $now = Get-Date
+  $script:MockVideoJobs[$generationId] = @{
+    id = $generationId
+    projectId = $ProjectId
+    prompt = $Prompt
+    state = "dreaming"
+    createdAt = $now
+    readyAt = $now.AddSeconds(7.5)
+    assets = @{}
+  }
+
+  return @{
+    ok = $true
+    provider = "mock"
+    status = "dreaming"
+    jobId = $generationId
+    generationId = $generationId
+    videoUrl = ""
+    message = "Mock video queued."
+    prompt = $Prompt
+  }
+}
+
+function Get-MockVideoStatus {
+  param(
+    [Parameter(Mandatory = $true)][string]$GenerationId
+  )
+
+  if (-not $script:MockVideoJobs.ContainsKey($GenerationId)) {
+    $script:MockVideoJobs[$GenerationId] = @{
+      id = $GenerationId
+      projectId = ""
+      prompt = ""
+      state = "dreaming"
+      createdAt = Get-Date
+      readyAt = (Get-Date).AddSeconds(7.5)
+      assets = @{}
+    }
+  }
+
+  $job = $script:MockVideoJobs[$GenerationId]
+  if ((Get-Date) -ge $job.readyAt) {
+    $job.state = "completed"
+    $job.assets = @{
+      video = "data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDFtcDQyaXNvbQAAAAhmcmVlAAAAGG1kYXQAAAAAAAAAAAAAAAAAAAAA"
+    }
+    $script:MockVideoJobs[$GenerationId] = $job
+  }
+
+  return $job
+}
+
+function Invoke-LumaImageToVideo {
+  param(
+    [Parameter(Mandatory = $true)][string]$Prompt,
+    [Parameter(Mandatory = $true)]$ImageUrls,
+    [int]$DurationSeconds = 5,
+    [string]$AspectRatio = "16:9"
+  )
+
+  $apiKey = Get-StoredLumaApiKey
+  if ([string]::IsNullOrWhiteSpace($apiKey)) {
+    throw "Luma no está configurado. Agrega LUMA_API_KEY en el backend para activar generación de video."
+  }
+  $frames = @($ImageUrls)
+  if (-not $frames.Count) { throw "No approved images were provided for Luma." }
+  $duration = if ($DurationSeconds -le 5) { "5s" } else { "9s" }
+  $bodyObject = @{
+    prompt = $Prompt
+    model = "ray-2"
+    resolution = "720p"
+    duration = $duration
+    aspect_ratio = $AspectRatio
+    loop = $false
+    keyframes = @{
+      frame0 = @{
+        type = "image"
+        url = [string]$frames[0]
+      }
+    }
+  }
+  if ($frames.Count -gt 1) {
+    $bodyObject.keyframes["frame1"] = @{
+      type = "image"
+      url = [string]$frames[$frames.Count - 1]
+    }
+  }
+  $body = $bodyObject | ConvertTo-Json -Depth 20
+  $headers = @{
+    Authorization = "Bearer $apiKey"
+    Accept = "application/json"
+  }
+  return Invoke-RestMethod -Method Post -Uri "https://api.lumalabs.ai/dream-machine/v1/generations" -Headers $headers -ContentType "application/json" -Body $body -TimeoutSec 120
+}
+
+function Get-LumaGenerationStatus {
+  param(
+    [Parameter(Mandatory = $true)][string]$GenerationId
+  )
+
+  if ($GenerationId -match '^mock-') {
+    return Get-MockVideoStatus -GenerationId $GenerationId
+  }
+  $apiKey = Get-StoredLumaApiKey
+  if ([string]::IsNullOrWhiteSpace($apiKey)) {
+    throw "Luma no está configurado. Agrega LUMA_API_KEY en el backend para activar generación de video."
+  }
+  return Invoke-RestMethod -Method Get -Uri "https://api.lumalabs.ai/dream-machine/v1/generations/$GenerationId" -Headers @{ Authorization = "Bearer $apiKey"; Accept = "application/json" } -TimeoutSec 60
+}
+
+function Invoke-OpenAiVideoPlan {
+  param(
+    [Parameter(Mandatory = $true)]$Template,
+    [Parameter(Mandatory = $true)]$Settings,
+    $Assets = @()
+  )
+
+  $templateName = [string](Get-PropValue -Object $Template -Name "name" -Default "Video arquitectonico")
+  $templatePrompt = [string](Get-PropValue -Object $Template -Name "lumaPromptTemplate" -Default "")
+  $imagePromptCount = [int](Get-PropValue -Object $Template -Name "imagePromptCount" -Default 5)
+  $includeHumans = [bool](Get-PropValue -Object $Settings -Name "includeHumans" -Default $false)
+  $includeCars = [bool](Get-PropValue -Object $Settings -Name "includeCars" -Default $false)
+  $userPrompt = [string](Get-PropValue -Object $Settings -Name "prompt" -Default "")
+  $fidelity = "Preserve the exact architecture, geometry, proportions, layout, openings, walls, windows, doors, ceiling height, floor plan, material intent, object positions and camera composition from the reference. Do not invent new rooms. Do not change the structural design. Improve realism, lighting, materials and photographic quality only."
+  if (-not $includeHumans) { $fidelity += " No people, no humans, no silhouettes, no crowds." }
+  if (-not $includeCars) { $fidelity += " No cars, no vehicles, no traffic." }
+
+  $messages = @(
+    @{
+      role = "system"
+      content = "You are RENDEAI's architectural video planning agent. Return JSON only with keys: videoPrompt, lumaPrompt, imagePrompts, negativePrompt, fidelityInstructions, notes. Generate 3 to 5 image prompts. Fidelity to architecture is mandatory."
+    },
+    @{
+      role = "user"
+      content = @"
+Template: $templateName
+Template prompt: $templatePrompt
+Requested image prompt count: $imagePromptCount
+Include humans: $includeHumans
+Include cars: $includeCars
+User prompt: $userPrompt
+Fidelity contract: $fidelity
+Asset count: $(@($Assets).Count)
+"@
+    }
+  )
+  $response = Invoke-OpenAiJsonChatCompletion -Messages $messages -MaxTokens 1400
+  return ($response.choices[0].message.content | ConvertFrom-Json)
+}
+
+function Invoke-OpenAiVisualProfile {
+  param(
+    [Parameter(Mandatory = $true)][string]$Prompt
+  )
+
+  $messages = @(
+    @{
+      role = "system"
+      content = "Return JSON only. Convert the user's visual direction into RENDEAI VisualProfile tokens. Never return CSS. Palette values must be 6-digit hex colors. Use only safe typography names from Cormorant Garamond, Playfair Display, Fraunces, Libre Baskerville, Inter, Manrope, Satoshi, Inter Tight, system sans."
+    },
+    @{
+      role = "user"
+      content = $Prompt
+    }
+  )
+  $response = Invoke-OpenAiJsonChatCompletion -Messages $messages -MaxTokens 1000
+  return ($response.choices[0].message.content | ConvertFrom-Json)
 }
 
 function Escape-PdfString {
@@ -707,10 +1114,12 @@ function Invoke-OpenAiJsonChatCompletion {
     messages = $Messages
   } | ConvertTo-Json -Depth 30
 
-  try {
-    Set-Content -Path (Join-Path $resolvedRoot "last-openai-body.json") -Value $body -Encoding UTF8
-  } catch {
-    # Ignore debug file errors.
+  if ($env:RENDERAI_DEBUG_PROMPTS -eq "1") {
+    try {
+      Set-Content -Path (Join-Path $resolvedRoot "last-openai-body.json") -Value $body -Encoding UTF8
+    } catch {
+      # Ignore debug file errors.
+    }
   }
 
   $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
@@ -925,10 +1334,12 @@ function Invoke-OpenAiPresentationOutline {
     "Slide blueprints (respect EXACT order, never reorder):"
     ($blueprintLines -join "`n")
     ""
-    "Deliverable: premium architectural brochure comparable to Canva luxury decks (Sky Garden, Babylon, Silentia, Kommo, Tour Deck). Every slide must feel art-directed, with editorial typography, concrete brand promise, and tangible proof points from the analyzed reference. The selected template is binding: adapt copy and slide hierarchy to its visual personality, never to a generic fallback."
+    "Deliverable: public-ready architectural brochure with a mid-century modern home language: white plaster, polished concrete, walnut, brown leather, olive greenery, warm daylight, quiet editorial spacing, and concrete proof points from the analyzed reference. The selected Canva/PPT template is binding: adapt copy and slide hierarchy to its editable visual system, never to a generic fallback."
     "Rules:"
     "- Use ONLY the requested language. brochureLanguage='es' means all copy in polished Spanish. brochureLanguage='en' means all copy in polished English."
     "- All copy must be human-readable, typo-free, and presentation-ready. Never output pseudo-words, OCR-like fragments, broken compounds, or malformed typography."
+    "- Treat Canva/PPT as modular output: titles, subtitles, bullets, image slots, captions, material swatches and background shapes must remain independently editable outside rendered images."
+    "- Avoid neon, purple/violet, cold blue technology styling, black-glass layouts, generic gradient cards, fake glow, sci-fi cues and over-saturated colors."
     "- tag = short all-caps section label (2-4 words) in the requested language, e.g. 'CONCEPTO' / 'CONCEPT', 'MATERIALIDAD' / 'MATERIALS'."
     "- title = 2-6 words in the requested language, evocative and editorial, never generic, never 'Slide N'."
     "- subtitle = 1 line of 8-16 words continuing the title without repeating it, premium editorial tone, in the requested language."
@@ -945,7 +1356,7 @@ function Invoke-OpenAiPresentationOutline {
   $messages = @(
     @{
       role = "system"
-      content = "Eres un director editorial de brochures arquitectonicos premium. Devuelves SOLO JSON con el esquema {title, summary, slides[{tag, title, subtitle, bullets[], visualRole, layout}]}. Mantienes el numero y orden de slides entregados. Cada slide es corto, visual y cinematografico, con textura editorial de revista (Wallpaper, Cereal, Architectural Digest). Jamas devuelves texto generico tipo 'Slide N'."
+      content = "Eres el director editorial de RenderAI Studio. Devuelves SOLO JSON con el esquema {title, summary, slides[{tag, title, subtitle, bullets[], visualRole, layout}]}. Mantienes el numero y orden de slides entregados. Cada slide debe sentirse como una pieza editable de una casa mid-century moderna: yeso blanco, concreto lujado, nogal, cuero cafe, vegetacion oliva, luz calida y jerarquia limpia. Prohibido regresar a neon, morado, azul frio, black-glass, gradientes genericos o texto tipo 'Slide N'."
     },
     @{
       role = "user"
@@ -1069,10 +1480,11 @@ function Invoke-OpenAiRenderPrompts {
   $briefParts += "- One entry per targetKey in EXACT input order."
   $briefParts += "- geminiPrompt: one concise paragraph (90-150 words) in English, photography/architecture terms, explicitly preserving the referenced photo geometry, camera, crop, facade, roofline, openings, object positions, materials, signage and background."
   $briefParts += "- The referenced image is a LOCKED IMAGE-TO-IMAGE UNDERLAY, not inspiration. The prompt must say: preserve exact composition and silhouette map; improve only realism, lighting, texture depth, glass/reflections, contact shadows and color grading."
+  $briefParts += "- For deck assets, prefer the RenderAI house material language when a style cue is needed: white plaster, polished concrete, walnut, brown leather, olive greenery, natural fibers and warm daylight. Do not use neon, purple/violet, cold blue tech styling, black-glass, generic gradients, fake glow or sci-fi styling."
   $briefParts += "- Respect the slide's framing/treatment (hero, masterplan, mood, texture, detail). A 'mood' target can be atmospheric; a 'texture' target must lock on materials; a 'master' hero must keep full scene lock."
   $briefParts += "- Never invent architecture that is not visible. Never replace signage text. Never add a new facade, roof, plaza, landscape, volcano, furniture set, people distribution, storefront or branding system unless the user explicitly requested that exact change."
   $briefParts += "- PEOPLE RULE IS ABSOLUTE per target: people=none means zero people, silhouettes or reflections; people=few means exactly 1-3 discreet natural secondary people; people=many means multiple natural people and an active scene. If people=inherit, use the global/default project rule."
-  $briefParts += "- The representation and finish values are binding. If representation=linear-drawing, do not make a photoreal render; if representation=photographic, do not make CGI, sketches or collage."
+  $briefParts += "- The representation and finish values are binding. If representation=linear-drawing, do not make a photoreal render; if representation=vector-plan, create clean vectorized architectural line art with separated silhouettes and flat editable color regions; if representation=photographic, do not make CGI, sketches or collage."
   $briefParts += "- negativePrompt: short list of things Gemini must avoid for this particular shot."
   $briefParts += "- materialsToPreserve and textsToPreserve come verbatim from the analysis."
   $briefParts += "Output: JSON puro, sin comentarios, sin markdown."
@@ -1082,7 +1494,7 @@ function Invoke-OpenAiRenderPrompts {
   $messages = @(
     @{
       role = "system"
-      content = "You are the prompt engineer inside RenderAI Studio. You prepare per-shot Gemini render prompts for an architectural brochure. Return JSON only."
+      content = "You are the prompt engineer inside RenderAI Studio. You prepare per-shot Gemini render prompts for a public-ready architectural brochure. Preserve source geometry first, then apply warm mid-century residential material direction only when requested. Return JSON only."
     },
     @{
       role = "user"
@@ -1166,12 +1578,13 @@ function Invoke-OpenAiBoardPrompts {
   $briefParts += "Rules:"
   $briefParts += "- Return JSON: { prompts: [ { targetKey, kind, geminiPrompt, keywords[], materials[] } ] }."
   $briefParts += "- One entry per targetKey in EXACT input order."
-  $briefParts += "- For kind='mood-board': geminiPrompt describes a Pinterest-grade interior architecture VISION BOARD, not a building render collage: one photographed square flatlay/collage with 8-12 layered material samples, furniture/detail objects, plants when relevant, fabric/stone/wood/metal/glass swatches, real shadows, premium editorial composition."
-    $briefParts += "- For kind='materials': geminiPrompt describes a high-end photographed flatlay of real architectural samples: wood veneer, stone slab, concrete, metal, fabric, glass, vegetation accents when present, tactile close-up photography, realistic sample thickness and contact shadows."
-    $briefParts += "- For kind='palette': geminiPrompt describes a refined photographed material palette board with painted color chips and physical samples matching the project palette, similar to a designer specification board."
+  $briefParts += "- For kind='mood-board': geminiPrompt describes a Pinterest-grade interior architecture VISION BOARD, not a building render collage: one photographed square flatlay/collage with 8-12 layered material samples, furniture/detail objects, plants when relevant, white plaster, polished concrete, walnut, brown leather, fabric/stone/wood/metal/glass swatches, real shadows, premium editorial composition."
+    $briefParts += "- For kind='materials': geminiPrompt describes a high-end photographed flatlay of real architectural samples: white plaster, polished concrete, wood veneer, stone slab, brown leather, metal, fabric, glass, vegetation accents when present, tactile close-up photography, realistic sample thickness and contact shadows."
+    $briefParts += "- For kind='palette': geminiPrompt describes a refined photographed material palette board with painted color chips and physical samples matching the project palette: warm whites, stone neutrals, walnut/leather browns and olive greens unless the user palette explicitly says otherwise."
     $briefParts += "- Respect moodBoardLayout literally. grid-separated = isolated square samples with gaps; object-flatlay = conceptual object flatlay; venetian-strips = parallel material slats; open-gallery = sparse negative space; sample-stack = overlapping slabs; material-rail = horizontal sample line; pinboard = pinned clippings without readable text; circular-palette = round chips/discs; architect-desk = plans plus samples on a table; museum-plinths = samples displayed on minimal plinth blocks."
     $briefParts += "- Use selectedMaterials and selectedObjects literally when present. They are user-selected ingredients for the board, not optional suggestions."
   $briefParts += "- The board must feel like a Canva/Pinterest design reference: elegant, composed, tactile, layered, commercial, with generous negative space and realistic materials. Do NOT generate a slide, poster, UI screen, brochure layout, labels, captions or infographic."
+  $briefParts += "- Avoid neon, purple/violet, cold blue technology styling, black-glass, generic gradients, fake glow, sci-fi styling and over-saturated colors."
   $briefParts += "- CRITICAL: Every geminiPrompt must explicitly forbid text, letters, numbers, labels, logos, captions, watermarks and typographic marks inside the generated image."
   $briefParts += "- Prompts in English, photography terms, 50-100 words."
   $briefParts += "- Provide 5-8 keywords and 4-6 materials grounded in the photo analyses."
@@ -1182,7 +1595,7 @@ function Invoke-OpenAiBoardPrompts {
   $messages = @(
     @{
       role = "system"
-      content = "You prepare flatlay/mood-board Gemini prompts for an architectural brochure. Return JSON only."
+      content = "You prepare tactile mid-century material board Gemini prompts for an architectural brochure. Return JSON only."
     },
     @{
       role = "user"
@@ -1379,17 +1792,38 @@ function Build-PdfPageStream {
 
   $titleLines = Wrap-Text -Text $title -Width 24
   $subtitleLines = if ([string]::IsNullOrWhiteSpace($subtitle)) { @() } else { Wrap-Text -Text $subtitle -Width 36 }
-  $stream = @(
-    "q"
-    "0.952 0.937 0.912 rg"
-    "0 0 842 595 re f"
-    "0.37 0.28 0.2 rg"
-    "28 28 786 539 re S"
-    "Q"
-  )
+  # All pages stay in the warm plaster / walnut / olive material system.
+  if ($PageIndex -eq 1 -and $layout -ne "fullbleed") {
+    $stream = @(
+      "q"
+      "0.984 0.980 0.965 rg"
+      "0 0 842 595 re f"
+      "0.435 0.282 0.184 rg"
+      "28 28 4 539 re f"
+      "Q"
+    )
+  } else {
+    $stream = @(
+      "q"
+      "0.984 0.980 0.965 rg"
+      "0 0 842 595 re f"
+      "0.376 0.463 0.310 rg"
+      "28 28 4 539 re f"
+      "Q"
+    )
+  }
+  # Warm residential ink and material accents.
+  $titleColor = "0.165 0.141 0.114 rg"
+  $tagColor = if ($PageIndex -eq 1 -and $layout -ne "fullbleed") { "0.435 0.282 0.184 rg" } else { "0.376 0.463 0.310 rg" }
+  $subtitleColor = "0.435 0.396 0.345 rg"
+  $bulletColor = "0.22 0.17 0.13 rg"
 
-  $stream += New-PdfTextBlock -Font "F2" -Size 10 -X 56 -Y 550 -Lines @("RENDERAI STUDIO") -Leading 12 -Color "0.56 0.41 0.27 rg"
-  $stream += New-PdfTextBlock -Font "F2" -Size 10 -X 720 -Y 550 -Lines @(("Pagina {0}/{1}" -f $PageIndex, $PageCount)) -Leading 12 -Color "0.36 0.29 0.24 rg"
+  # Topbar: project-owned page marker. Do not stamp product branding in user decks.
+  $stream += @("q", "0.376 0.463 0.310 rg", "0 567 842 28 re f", "Q")
+  $projectMark = if ($Title.Length -gt 32) { $Title.Substring(0, 30) + "..." } else { $Title }
+  if ([string]::IsNullOrWhiteSpace($projectMark)) { $projectMark = "PRESENTACION" }
+  $stream += New-PdfTextBlock -Font "F2" -Size 9 -X 56 -Y 572 -Lines @($projectMark.ToUpperInvariant()) -Leading 11 -Color "1 1 1 rg"
+  $stream += New-PdfTextBlock -Font "F2" -Size 9 -X 740 -Y 572 -Lines @(("{0} / {1}" -f $PageIndex, $PageCount)) -Leading 11 -Color "1 0.98 0.94 rg"
 
   if ($layout -eq "fullbleed") {
     if (-not [string]::IsNullOrWhiteSpace($ImageAlias)) {
@@ -1411,11 +1845,11 @@ function Build-PdfPageStream {
       $stream += @("q", "308 0 0 420 460 78 cm", "/$ImageAlias Do", "Q")
     }
     $tagLines = Wrap-Text -Text $tag.ToUpperInvariant() -Width 18
-    $stream += New-PdfTextBlock -Font "F2" -Size 11 -X 56 -Y 492 -Lines $tagLines -Leading 13 -Color "0.56 0.41 0.27 rg"
-    $stream += New-PdfTextBlock -Font "F3" -Size 34 -X 56 -Y 450 -Lines $titleLines -Leading 36 -Color "0.15 0.11 0.09 rg"
+    $stream += New-PdfTextBlock -Font "F2" -Size 11 -X 56 -Y 492 -Lines $tagLines -Leading 13 -Color $tagColor
+    $stream += New-PdfTextBlock -Font "F3" -Size 34 -X 56 -Y 450 -Lines $titleLines -Leading 36 -Color $titleColor
     $subtitleStart = 450 - ($titleLines.Count * 36) - 8
     if ($subtitleLines.Count) {
-      $stream += New-PdfTextBlock -Font "F1" -Size 13 -X 56 -Y $subtitleStart -Lines $subtitleLines -Leading 18 -Color "0.35 0.29 0.24 rg"
+      $stream += New-PdfTextBlock -Font "F1" -Size 13 -X 56 -Y $subtitleStart -Lines $subtitleLines -Leading 18 -Color $subtitleColor
     }
     $bulletY = $subtitleStart - ($subtitleLines.Count * 18) - 22
   } elseif ($layout -eq "board") {
@@ -1423,11 +1857,11 @@ function Build-PdfPageStream {
       $stream += @("q", "738 0 0 246 52 250 cm", "/$ImageAlias Do", "Q")
     }
     $tagLines = Wrap-Text -Text $tag.ToUpperInvariant() -Width 18
-    $stream += New-PdfTextBlock -Font "F2" -Size 11 -X 56 -Y 522 -Lines $tagLines -Leading 13 -Color "0.56 0.41 0.27 rg"
-    $stream += New-PdfTextBlock -Font "F3" -Size 28 -X 56 -Y 484 -Lines $titleLines -Leading 32 -Color "0.15 0.11 0.09 rg"
+    $stream += New-PdfTextBlock -Font "F2" -Size 11 -X 56 -Y 522 -Lines $tagLines -Leading 13 -Color $tagColor
+    $stream += New-PdfTextBlock -Font "F3" -Size 28 -X 56 -Y 484 -Lines $titleLines -Leading 32 -Color $titleColor
     $subtitleStart = 484 - ($titleLines.Count * 32) - 8
     if ($subtitleLines.Count) {
-      $stream += New-PdfTextBlock -Font "F1" -Size 13 -X 56 -Y $subtitleStart -Lines $subtitleLines -Leading 18 -Color "0.35 0.29 0.24 rg"
+      $stream += New-PdfTextBlock -Font "F1" -Size 13 -X 56 -Y $subtitleStart -Lines $subtitleLines -Leading 18 -Color $subtitleColor
     }
     $bulletY = 196
   } else {
@@ -1435,11 +1869,11 @@ function Build-PdfPageStream {
       $stream += @("q", "360 0 0 360 54 116 cm", "/$ImageAlias Do", "Q")
     }
     $tagLines = Wrap-Text -Text $tag.ToUpperInvariant() -Width 18
-    $stream += New-PdfTextBlock -Font "F2" -Size 11 -X 448 -Y 492 -Lines $tagLines -Leading 13 -Color "0.56 0.41 0.27 rg"
-    $stream += New-PdfTextBlock -Font "F3" -Size 28 -X 448 -Y 454 -Lines $titleLines -Leading 32 -Color "0.15 0.11 0.09 rg"
+    $stream += New-PdfTextBlock -Font "F2" -Size 11 -X 448 -Y 492 -Lines $tagLines -Leading 13 -Color $tagColor
+    $stream += New-PdfTextBlock -Font "F3" -Size 28 -X 448 -Y 454 -Lines $titleLines -Leading 32 -Color $titleColor
     $subtitleStart = 454 - ($titleLines.Count * 32) - 8
     if ($subtitleLines.Count) {
-      $stream += New-PdfTextBlock -Font "F1" -Size 13 -X 448 -Y $subtitleStart -Lines $subtitleLines -Leading 18 -Color "0.35 0.29 0.24 rg"
+      $stream += New-PdfTextBlock -Font "F1" -Size 13 -X 448 -Y $subtitleStart -Lines $subtitleLines -Leading 18 -Color $subtitleColor
     }
     $bulletY = $subtitleStart - ($subtitleLines.Count * 18) - 22
   }
@@ -1449,18 +1883,26 @@ function Build-PdfPageStream {
     $bulletX = if ($layout -eq "board") { 72 } elseif ($layout -eq "split") { 462 } else { 72 }
     $indentX = if ($layout -eq "board") { 84 } elseif ($layout -eq "split") { 474 } else { 84 }
     $bulletLines = Wrap-Text -Text ([string]$bullet) -Width $bulletWidth
-    $stream += New-PdfTextBlock -Font "F1" -Size 12 -X $bulletX -Y $bulletY -Lines @("- " + $bulletLines[0]) -Leading 16 -Color "0.18 0.14 0.11 rg"
+    $stream += New-PdfTextBlock -Font "F1" -Size 12 -X $bulletX -Y $bulletY -Lines @("- " + $bulletLines[0]) -Leading 16 -Color $bulletColor
     $bulletY -= 18
     if ($bulletLines.Count -gt 1) {
       foreach ($line in $bulletLines[1..($bulletLines.Count - 1)]) {
-        $stream += New-PdfTextBlock -Font "F1" -Size 12 -X $indentX -Y $bulletY -Lines @($line) -Leading 16 -Color "0.34 0.28 0.23 rg"
+        $stream += New-PdfTextBlock -Font "F1" -Size 12 -X $indentX -Y $bulletY -Lines @($line) -Leading 16 -Color $subtitleColor
         $bulletY -= 16
       }
     }
     $bulletY -= 10
   }
 
-  $stream += New-PdfTextBlock -Font "F2" -Size 9 -X 56 -Y 68 -Lines @("Deck arquitectonico generado por RenderAI Studio") -Leading 12 -Color "0.56 0.41 0.27 rg"
+  # ── Footer bar ─────────────────────────────────────────────
+  $footerBg = if ($PageIndex -eq 1 -and $layout -ne "fullbleed") { "0.055 0.055 0.067 rg" } else { "0.94 0.92 0.90 rg" }
+  $footerText = if ($PageIndex -eq 1 -and $layout -ne "fullbleed") { "0.67 0.64 0.61 rg" } else { "0.25 0.18 0.12 rg" }
+  $footerSub = if ($PageIndex -eq 1 -and $layout -ne "fullbleed") { "0.45 0.42 0.39 rg" } else { "0.45 0.35 0.28 rg" }
+  $stream += @("q", $footerBg, "0 0 842 48 re f", "Q")
+  $footerTitle = if ($title.Length -gt 60) { $title.Substring(0, 58) + "..." } else { $title }
+  $stream += New-PdfTextBlock -Font "F1" -Size 9 -X 56 -Y 18 -Lines @($footerTitle) -Leading 11 -Color $footerText
+  $stream += @("q", "0.851 0.467 0.467 rg", "417 20 6 6 re f", "Q")
+  $stream += New-PdfTextBlock -Font "F2" -Size 8 -X 600 -Y 18 -Lines @("Presentacion editable por capas") -Leading 10 -Color $footerSub
   return $stream -join "`n"
 }
 
@@ -1621,6 +2063,32 @@ function Save-DataUrlToTempImage {
   return $path
 }
 
+function New-PptLayerName {
+  param(
+    [string]$Kind = "Elemento editable"
+  )
+
+  if ($null -eq $script:PptShapeLayerCounter) { $script:PptShapeLayerCounter = 0 }
+  $script:PptShapeLayerCounter += 1
+  return ("Capa {0:00} - {1}" -f $script:PptShapeLayerCounter, $Kind)
+}
+
+function Set-PptShapeName {
+  param(
+    $Shape,
+    [string]$Name = "",
+    [string]$Kind = "Elemento editable"
+  )
+
+  if ($null -eq $Shape) { return $null }
+  $shapeName = $Name
+  if ([string]::IsNullOrWhiteSpace($shapeName)) {
+    $shapeName = New-PptLayerName -Kind $Kind
+  }
+  try { $Shape.Name = $shapeName } catch {}
+  return $Shape
+}
+
 function Add-PptTextBox {
   param(
     [Parameter(Mandatory = $true)]$Slide,
@@ -1633,7 +2101,9 @@ function Add-PptTextBox {
     [double]$FontSize = 24,
     [string]$Color = "#f7f7ed",
     [switch]$Bold,
-    [switch]$Italic
+    [switch]$Italic,
+    [string]$Alignment = "left",
+    [string]$Name = ""
   )
 
   if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
@@ -1651,15 +2121,20 @@ function Add-PptTextBox {
   $range.Font.Color.RGB = Convert-HexColorToOle -Hex $Color
   $range.Font.Bold = if ($Bold) { -1 } else { 0 }
   $range.Font.Italic = if ($Italic) { -1 } else { 0 }
-  $range.ParagraphFormat.Alignment = 1
+  $alignmentValue = switch ($Alignment.ToLowerInvariant()) {
+    "center" { 2 }
+    "right" { 3 }
+    default { 1 }
+  }
+  $range.ParagraphFormat.Alignment = $alignmentValue
   try { $range.Font.Spacing = 0 } catch {}
   try {
     $shape.TextFrame2.TextRange.Font.Spacing = 0
-    $shape.TextFrame2.TextRange.ParagraphFormat.Alignment = 1
+    $shape.TextFrame2.TextRange.ParagraphFormat.Alignment = $alignmentValue
     $shape.TextFrame2.WordWrap = -1
     $shape.TextFrame2.AutoSize = 0
   } catch {}
-  return $shape
+  return (Set-PptShapeName -Shape $shape -Name $Name -Kind "Texto editable")
 }
 
 function Add-PptRect {
@@ -1670,7 +2145,8 @@ function Add-PptRect {
     [double]$Width,
     [double]$Height,
     [string]$Color = "#111314",
-    [double]$Transparency = 0
+    [double]$Transparency = 0,
+    [string]$Name = ""
   )
 
   $shape = $Slide.Shapes.AddShape(1, $X, $Y, $Width, $Height)
@@ -1678,7 +2154,7 @@ function Add-PptRect {
   $shape.Fill.ForeColor.RGB = Convert-HexColorToOle -Hex $Color
   $shape.Fill.Transparency = $Transparency
   $shape.Line.Visible = 0
-  return $shape
+  return (Set-PptShapeName -Shape $shape -Name $Name -Kind "Cuadro editable")
 }
 
 function Add-PptPictureCover {
@@ -1688,11 +2164,86 @@ function Add-PptPictureCover {
     [double]$X,
     [double]$Y,
     [double]$Width,
-    [double]$Height
+    [double]$Height,
+    [string]$Name = ""
   )
 
   $picture = $Slide.Shapes.AddPicture($ImagePath, 0, -1, $X, $Y, $Width, $Height)
-  return $picture
+  return (Set-PptShapeName -Shape $picture -Name $Name -Kind "Foto editable")
+}
+
+function Add-PptEditorLayers {
+  param(
+    [Parameter(Mandatory = $true)]$Slide,
+    [Parameter(Mandatory = $true)]$SlidePayload,
+    [Parameter(Mandatory = $true)][string]$TempRoot,
+    [int]$Index = 0,
+    [string]$TitleFont = "Georgia",
+    [string]$BodyFont = "Arial"
+  )
+
+  $manifest = @((Get-PropValue -Object $SlidePayload -Name "layerManifest" -Default @()))
+  if (-not $manifest.Count) { return $false }
+
+  $canvas = Get-PropValue -Object $SlidePayload -Name "editorCanvas" -Default @{}
+  $canvasWidth = [double](Get-PropValue -Object $canvas -Name "width" -Default 900)
+  $canvasHeight = [double](Get-PropValue -Object $canvas -Name "height" -Default 506)
+  if ($canvasWidth -le 0) { $canvasWidth = 900 }
+  if ($canvasHeight -le 0) { $canvasHeight = 506 }
+  $pptWidth = 1600.0
+  $pptHeight = 900.0
+  $scaleX = $pptWidth / $canvasWidth
+  $scaleY = $pptHeight / $canvasHeight
+
+  Add-PptRect -Slide $Slide -X 0 -Y 0 -Width $pptWidth -Height $pptHeight -Color "#FFFFFF" -Name "Capa 00 - Fondo de slide" | Out-Null
+  $ordered = $manifest | Sort-Object `
+    @{ Expression = { [double](Get-PropValue -Object $_ -Name "zIndex" -Default 0) } }, `
+    @{ Expression = { [double](Get-PropValue -Object $_ -Name "layer" -Default 0) } }
+
+  foreach ($layer in $ordered) {
+    $visible = Get-PropValue -Object $layer -Name "visible" -Default $true
+    if ($visible -eq $false) { continue }
+    $type = ([string](Get-PropValue -Object $layer -Name "type" -Default "shape")).ToLowerInvariant()
+    $style = Get-PropValue -Object $layer -Name "style" -Default @{}
+    $name = [string](Get-PropValue -Object $layer -Name "name" -Default "")
+    $x = [double](Get-PropValue -Object $layer -Name "x" -Default 0) * $scaleX
+    $y = [double](Get-PropValue -Object $layer -Name "y" -Default 0) * $scaleY
+    $width = [Math]::Max(4, [double](Get-PropValue -Object $layer -Name "width" -Default 100) * $scaleX)
+    $height = [Math]::Max(4, [double](Get-PropValue -Object $layer -Name "height" -Default 60) * $scaleY)
+    $opacity = [double](Get-PropValue -Object $layer -Name "opacity" -Default 1)
+    if ($opacity -lt 0) { $opacity = 0 }
+    if ($opacity -gt 1) { $opacity = 1 }
+    $transparency = 1 - $opacity
+
+    if ($type -eq "text") {
+      $text = [string](Get-PropValue -Object $layer -Name "content" -Default "")
+      if ([string]::IsNullOrWhiteSpace($text)) { continue }
+      $preferredFont = [string](Get-PropValue -Object $style -Name "fontFamily" -Default $BodyFont)
+      $fallbackFont = if ($preferredFont -match "Fraunces|Cormorant|Georgia|Baskerville") { $TitleFont } else { $BodyFont }
+      $fontName = Resolve-PptFontName -Preferred $preferredFont -Fallback $fallbackFont
+      $fontSize = [Math]::Max(8, [double](Get-PropValue -Object $style -Name "fontSize" -Default 22) * 1.18)
+      $color = [string](Get-PropValue -Object $style -Name "color" -Default "#181715")
+      $fontWeight = [string](Get-PropValue -Object $style -Name "fontWeight" -Default "400")
+      $align = [string](Get-PropValue -Object $style -Name "textAlign" -Default "left")
+      $isBold = $fontWeight -match "bold|700|800|900"
+      $shape = Add-PptTextBox -Slide $Slide -Text $text -X $x -Y $y -Width $width -Height $height -FontName $fontName -FontSize $fontSize -Color $color -Bold:$isBold -Alignment $align -Name $name
+      if ($null -ne $shape) {
+        try { $shape.Fill.Transparency = 1 } catch {}
+      }
+    } elseif ($type -eq "image") {
+      $src = [string](Get-PropValue -Object $layer -Name "src" -Default "")
+      if ($src -match '^data:image/') {
+        $imagePath = Save-DataUrlToTempImage -DataUrl $src -Folder $TempRoot -Index (($Index * 100) + [int](Get-PropValue -Object $layer -Name "layer" -Default 1))
+        Add-PptPictureCover -Slide $Slide -ImagePath $imagePath -X $x -Y $y -Width $width -Height $height -Name $name | Out-Null
+      } else {
+        Add-PptRect -Slide $Slide -X $x -Y $y -Width $width -Height $height -Color "#D8D5CD" -Transparency 0.18 -Name $name | Out-Null
+      }
+    } else {
+      $color = [string](Get-PropValue -Object $style -Name "backgroundColor" -Default "#F4F1EA")
+      Add-PptRect -Slide $Slide -X $x -Y $y -Width $width -Height $height -Color $color -Transparency $transparency -Name $name | Out-Null
+    }
+  }
+  return $true
 }
 
 function Resolve-PptFontName {
@@ -1733,11 +2284,19 @@ function New-PptxBytes {
     $powerPoint = New-Object -ComObject PowerPoint.Application
     $powerPoint.Visible = -1
     $presentation = $powerPoint.Presentations.Add()
+    $isEditorDeck = $false
+    foreach ($candidateSlide in $slideList) {
+      if ([string](Get-PropValue -Object $candidateSlide -Name "editorSource" -Default "") -eq "creative-deck-editor") {
+        $isEditorDeck = $true
+        break
+      }
+    }
+    $deckSlideHeight = if ($isEditorDeck) { 900 } else { 1131 }
     $presentation.PageSetup.SlideWidth = 1600
-    $presentation.PageSetup.SlideHeight = 1131
+    $presentation.PageSetup.SlideHeight = $deckSlideHeight
 
-    $palette = @((Get-PropValue -Object $Theme -Name "palette" -Default @("#111314", "#d5d319", "#f7f7ed")) | ForEach-Object { [string]$_ })
-    if (-not $palette.Count) { $palette = @("#111314", "#d5d319", "#f7f7ed") }
+    $palette = @((Get-PropValue -Object $Theme -Name "palette" -Default @("#fbfaf6", "#6f482f", "#60764f", "#2a241d")) | ForEach-Object { [string]$_ })
+    if (-not $palette.Count) { $palette = @("#fbfaf6", "#6f482f", "#60764f", "#2a241d") }
     # Exported PPTX must be editable and typo-safe on a normal Windows/Office
     # install. If the web UI uses Google fonts that PowerPoint does not have,
     # fall back to Office-safe fonts instead of letting Office substitute them
@@ -1745,13 +2304,16 @@ function New-PptxBytes {
     $titleFont = Resolve-PptFontName -Preferred ([string](Get-PropValue -Object $Theme -Name "titleFont" -Default "")) -Fallback "Georgia"
     $bodyFont = Resolve-PptFontName -Preferred ([string](Get-PropValue -Object $Theme -Name "bodyFont" -Default "")) -Fallback "Arial"
     $accent = $palette[1]
-    if ([string]::IsNullOrWhiteSpace($accent)) { $accent = "#d5d319" }
-    $dark = "#111314"
-    $paper = "#f7f7ed"
+    if ([string]::IsNullOrWhiteSpace($accent)) { $accent = "#6f482f" }
+    $dark = "#2a241d"
+    $paper = "#fbfaf6"
+    $stone = "#efe8dc"
+    $olive = "#60764f"
 
     for ($index = 0; $index -lt $slideList.Count; $index += 1) {
       $slidePayload = $slideList[$index]
       $slide = $presentation.Slides.Add($index + 1, 12)
+      $script:PptShapeLayerCounter = 0
       $sectionId = [string](Get-PropValue -Object $slidePayload -Name "sectionId" -Default "")
       $role = [string](Get-PropValue -Object $slidePayload -Name "visualRole" -Default "")
       $layout = [string](Get-PropValue -Object $slidePayload -Name "layout" -Default "split")
@@ -1765,53 +2327,61 @@ function New-PptxBytes {
         $imagePath = Save-DataUrlToTempImage -DataUrl $imageDataUrl -Folder $tempRoot -Index $index
       }
 
-      $isBoard = $sectionId -in @("moodboard", "materials", "pantone") -or $role -in @("moodboard", "materials", "board")
+      $editorSource = [string](Get-PropValue -Object $slidePayload -Name "editorSource" -Default "")
+      if ($editorSource -eq "creative-deck-editor") {
+        $renderedEditorLayers = Add-PptEditorLayers -Slide $slide -SlidePayload $slidePayload -TempRoot $tempRoot -Index $index -TitleFont $titleFont -BodyFont $bodyFont
+        if ($renderedEditorLayers) {
+          continue
+        }
+      }
+
+      $isBoard = $sectionId -in @("moodboard", "materials", "pantone", "concept") -or $role -in @("moodboard", "materials", "board", "concept")
       $isCover = $index -eq 0 -or $sectionId -eq "cover"
       $isGallery = $layout -in @("gallery", "board") -or $role -in @("reference", "detail")
 
       if ($isCover) {
-        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $dark | Out-Null
+        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $paper | Out-Null
         if ($imagePath) { Add-PptPictureCover -Slide $slide -ImagePath $imagePath -X 0 -Y 0 -Width 1600 -Height 1131 | Out-Null }
-        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color "#000000" -Transparency 0.28 | Out-Null
-        Add-PptRect -Slide $slide -X 112 -Y 212 -Width 620 -Height 650 -Color "#000000" -Transparency 0.42 | Out-Null
-        Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 118 -Y 74 -Width 320 -Height 32 -FontName $bodyFont -FontSize 17 -Color $paper -Bold | Out-Null
-        Add-PptTextBox -Slide $slide -Text $slideTitle.ToUpperInvariant() -X 130 -Y 270 -Width 610 -Height 260 -FontName $titleFont -FontSize 62 -Color $paper -Bold | Out-Null
-        Add-PptTextBox -Slide $slide -Text $subtitle -X 132 -Y 598 -Width 640 -Height 64 -FontName $bodyFont -FontSize 22 -Color $paper | Out-Null
+        if ($imagePath) { Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $paper -Transparency 0.18 | Out-Null }
+        Add-PptRect -Slide $slide -X 112 -Y 212 -Width 650 -Height 650 -Color $stone -Transparency 0.08 | Out-Null
+        Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 118 -Y 74 -Width 320 -Height 32 -FontName $bodyFont -FontSize 17 -Color $olive -Bold | Out-Null
+        Add-PptTextBox -Slide $slide -Text $slideTitle -X 130 -Y 270 -Width 610 -Height 260 -FontName $titleFont -FontSize 62 -Color $dark -Bold | Out-Null
+        Add-PptTextBox -Slide $slide -Text $subtitle -X 132 -Y 598 -Width 640 -Height 64 -FontName $bodyFont -FontSize 22 -Color "#62584c" | Out-Null
         if ($bullets.Count) {
-          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 3 | ForEach-Object { "• $_" }) -join "`r") -X 132 -Y 700 -Width 560 -Height 160 -FontName $bodyFont -FontSize 19 -Color $paper | Out-Null
+          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 3 | ForEach-Object { "- $_" }) -join "`r") -X 132 -Y 700 -Width 560 -Height 160 -FontName $bodyFont -FontSize 19 -Color "#62584c" | Out-Null
         }
       } elseif ($isBoard) {
-        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $dark | Out-Null
-        Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 76 -Y 74 -Width 300 -Height 28 -FontName $bodyFont -FontSize 14 -Color $paper -Bold | Out-Null
-        Add-PptTextBox -Slide $slide -Text $slideTitle -X 78 -Y 220 -Width 420 -Height 175 -FontName $titleFont -FontSize 46 -Color $paper -Bold | Out-Null
-        Add-PptTextBox -Slide $slide -Text $subtitle -X 84 -Y 428 -Width 430 -Height 70 -FontName $bodyFont -FontSize 20 -Color $paper | Out-Null
+        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $paper | Out-Null
+        Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 76 -Y 74 -Width 300 -Height 28 -FontName $bodyFont -FontSize 14 -Color $olive -Bold | Out-Null
+        Add-PptTextBox -Slide $slide -Text $slideTitle -X 78 -Y 220 -Width 420 -Height 175 -FontName $titleFont -FontSize 46 -Color $dark -Bold | Out-Null
+        Add-PptTextBox -Slide $slide -Text $subtitle -X 84 -Y 428 -Width 430 -Height 70 -FontName $bodyFont -FontSize 20 -Color "#62584c" | Out-Null
         if ($bullets.Count) {
-          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 4 | ForEach-Object { "• $_" }) -join "`r") -X 84 -Y 538 -Width 420 -Height 210 -FontName $bodyFont -FontSize 18 -Color $paper | Out-Null
+          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 4 | ForEach-Object { "- $_" }) -join "`r") -X 84 -Y 538 -Width 420 -Height 210 -FontName $bodyFont -FontSize 18 -Color "#62584c" | Out-Null
         }
-        Add-PptRect -Slide $slide -X 540 -Y 112 -Width 984 -Height 884 -Color $paper | Out-Null
+        Add-PptRect -Slide $slide -X 540 -Y 112 -Width 984 -Height 884 -Color $stone | Out-Null
         if ($imagePath) { Add-PptPictureCover -Slide $slide -ImagePath $imagePath -X 575 -Y 150 -Width 914 -Height 810 | Out-Null }
       } elseif ($isGallery) {
-        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $dark | Out-Null
-        Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 76 -Y 74 -Width 300 -Height 28 -FontName $bodyFont -FontSize 14 -Color $paper -Bold | Out-Null
+        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $paper | Out-Null
+        Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 76 -Y 74 -Width 300 -Height 28 -FontName $bodyFont -FontSize 14 -Color $olive -Bold | Out-Null
         if ($imagePath) { Add-PptPictureCover -Slide $slide -ImagePath $imagePath -X 560 -Y 134 -Width 900 -Height 810 | Out-Null }
-        Add-PptTextBox -Slide $slide -Text $slideTitle -X 82 -Y 214 -Width 390 -Height 150 -FontName $titleFont -FontSize 42 -Color $paper -Bold | Out-Null
-        Add-PptTextBox -Slide $slide -Text $subtitle -X 84 -Y 396 -Width 420 -Height 80 -FontName $bodyFont -FontSize 19 -Color $paper | Out-Null
+        Add-PptTextBox -Slide $slide -Text $slideTitle -X 82 -Y 214 -Width 390 -Height 150 -FontName $titleFont -FontSize 42 -Color $dark -Bold | Out-Null
+        Add-PptTextBox -Slide $slide -Text $subtitle -X 84 -Y 396 -Width 420 -Height 80 -FontName $bodyFont -FontSize 19 -Color "#62584c" | Out-Null
         if ($bullets.Count) {
-          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 4 | ForEach-Object { "• $_" }) -join "`r") -X 84 -Y 515 -Width 390 -Height 220 -FontName $bodyFont -FontSize 17 -Color $paper | Out-Null
+          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 4 | ForEach-Object { "- $_" }) -join "`r") -X 84 -Y 515 -Width 390 -Height 220 -FontName $bodyFont -FontSize 17 -Color "#62584c" | Out-Null
         }
       } else {
-        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color "#f7f5ef" | Out-Null
+        Add-PptRect -Slide $slide -X 0 -Y 0 -Width 1600 -Height 1131 -Color $paper | Out-Null
         Add-PptTextBox -Slide $slide -Text $tag.ToUpperInvariant() -X 78 -Y 74 -Width 300 -Height 28 -FontName $bodyFont -FontSize 14 -Color $dark -Bold | Out-Null
         Add-PptTextBox -Slide $slide -Text $slideTitle -X 86 -Y 210 -Width 470 -Height 160 -FontName $titleFont -FontSize 44 -Color $dark -Bold | Out-Null
         Add-PptTextBox -Slide $slide -Text $subtitle -X 88 -Y 390 -Width 500 -Height 70 -FontName $bodyFont -FontSize 19 -Color $dark | Out-Null
         if ($bullets.Count) {
-          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 4 | ForEach-Object { "• $_" }) -join "`r") -X 88 -Y 500 -Width 470 -Height 240 -FontName $bodyFont -FontSize 17 -Color $dark | Out-Null
+          Add-PptTextBox -Slide $slide -Text (($bullets | Select-Object -First 4 | ForEach-Object { "- $_" }) -join "`r") -X 88 -Y 500 -Width 470 -Height 240 -FontName $bodyFont -FontSize 17 -Color $dark | Out-Null
         }
         if ($imagePath) { Add-PptPictureCover -Slide $slide -ImagePath $imagePath -X 650 -Y 132 -Width 820 -Height 830 | Out-Null }
       }
 
       Add-PptRect -Slide $slide -X 76 -Y 92 -Width 92 -Height 5 -Color $accent | Out-Null
-      Add-PptTextBox -Slide $slide -Text ("{0:00} / {1:00}" -f ($index + 1), $slideList.Count) -X 1415 -Y 70 -Width 130 -Height 30 -FontName $bodyFont -FontSize 15 -Color ($(if ($isCover -or $isBoard -or $isGallery) { $paper } else { $dark })) -Bold | Out-Null
+      Add-PptTextBox -Slide $slide -Text ("{0:00} / {1:00}" -f ($index + 1), $slideList.Count) -X 1415 -Y 70 -Width 130 -Height 30 -FontName $bodyFont -FontSize 15 -Color $dark -Bold | Out-Null
     }
 
     $presentation.SaveAs($pptxPath, 24)
@@ -1914,14 +2484,254 @@ function Handle-ApiRequest {
       analysisProvider = $runtime.analysisProvider
       openAiReady = $runtime.openAiReady
       geminiReady = $runtime.geminiReady
+      lumaConfigured = $runtime.lumaConfigured
+      lumaReady = $runtime.lumaReady
+      mockAi = $runtime.mockAi
+      publicAssetBaseUrlConfigured = $runtime.publicAssetBaseUrlConfigured
+      publicAssetBaseUrlUsable = $runtime.publicAssetBaseUrlUsable
+      videoReady = $runtime.videoReady
+      videoProvider = $runtime.videoProvider
       root = $resolvedRoot
       port = $script:BoundPort
       secretSource = $runtime.renderSecretSource
       renderSecretSource = $runtime.renderSecretSource
       analysisSecretSource = $runtime.analysisSecretSource
+      videoSecretSource = $runtime.videoSecretSource
       authConfigured = (@(Get-RenderAiUsers).Count -gt 0)
       publicDeployment = (Test-RenderAiPublicDeployment)
       timestamp = (Get-Date).ToString("o")
+    }
+    return $true
+  }
+
+  if ($method -eq "GET" -and $path -eq "/api/projects") {
+    Write-JsonResponse -Response $response -Payload @{
+      ok = $true
+      projects = @(Read-BackendProjectStore)
+    }
+    return $true
+  }
+
+  if ($method -eq "POST" -and $path -eq "/api/projects") {
+    $payload = Get-RequestJson -Request $request
+    $projects = @(Read-BackendProjectStore)
+    $record = New-BackendProjectRecord -Payload $payload
+    $projects = @($record) + $projects
+    Write-BackendProjectStore -Projects $projects
+    Write-JsonResponse -Response $response -StatusCode 201 -Payload @{
+      ok = $true
+      project = $record
+    }
+    return $true
+  }
+
+  if ($path -match '^/api/projects/([^/]+)$') {
+    $projectId = [System.Uri]::UnescapeDataString($Matches[1])
+    $projects = @(Read-BackendProjectStore)
+    $record = $projects | Where-Object { [string](Get-PropValue -Object $_ -Name "id" -Default "") -eq $projectId } | Select-Object -First 1
+    if ($method -eq "GET") {
+      if ($null -eq $record) {
+        Write-JsonResponse -Response $response -StatusCode 404 -Payload @{ ok = $false; message = "Project not found." }
+      } else {
+        Write-JsonResponse -Response $response -Payload @{ ok = $true; project = $record }
+      }
+      return $true
+    }
+    if ($method -eq "PATCH") {
+      if ($null -eq $record) {
+        Write-JsonResponse -Response $response -StatusCode 404 -Payload @{ ok = $false; message = "Project not found." }
+        return $true
+      }
+      $payload = Get-RequestJson -Request $request
+      foreach ($property in $payload.PSObject.Properties) {
+        $record | Add-Member -MemberType NoteProperty -Name $property.Name -Value $property.Value -Force
+      }
+      $record.updatedAt = (Get-Date).ToString("o")
+      Write-BackendProjectStore -Projects $projects
+      Write-JsonResponse -Response $response -Payload @{ ok = $true; project = $record }
+      return $true
+    }
+    if ($method -eq "DELETE") {
+      $projects = @($projects | Where-Object { [string](Get-PropValue -Object $_ -Name "id" -Default "") -ne $projectId })
+      Write-BackendProjectStore -Projects $projects
+      Write-JsonResponse -Response $response -Payload @{ ok = $true }
+      return $true
+    }
+  }
+
+  if ($path -match '^/api/projects/([^/]+)/(messages|assets)$') {
+    $projectId = [System.Uri]::UnescapeDataString($Matches[1])
+    $kind = $Matches[2]
+    $projects = @(Read-BackendProjectStore)
+    $record = $projects | Where-Object { [string](Get-PropValue -Object $_ -Name "id" -Default "") -eq $projectId } | Select-Object -First 1
+    if ($null -eq $record) {
+      Write-JsonResponse -Response $response -StatusCode 404 -Payload @{ ok = $false; message = "Project not found." }
+      return $true
+    }
+    if ($method -eq "GET") {
+      Write-JsonResponse -Response $response -Payload @{
+        ok = $true
+        items = @(Get-PropValue -Object $record -Name $kind -Default @())
+      }
+      return $true
+    }
+    if ($method -eq "POST") {
+      $payload = Get-RequestJson -Request $request
+      if (-not $payload.PSObject.Properties["id"]) {
+        $payload | Add-Member -MemberType NoteProperty -Name "id" -Value ([Guid]::NewGuid().ToString("N")) -Force
+      }
+      if (-not $payload.PSObject.Properties["createdAt"]) {
+        $payload | Add-Member -MemberType NoteProperty -Name "createdAt" -Value ((Get-Date).ToString("o")) -Force
+      }
+      $items = @((Get-PropValue -Object $record -Name $kind -Default @()))
+      $items = @($payload) + $items
+      $record | Add-Member -MemberType NoteProperty -Name $kind -Value $items -Force
+      $record.updatedAt = (Get-Date).ToString("o")
+      Write-BackendProjectStore -Projects $projects
+      Write-JsonResponse -Response $response -StatusCode 201 -Payload @{ ok = $true; item = $payload }
+      return $true
+    }
+  }
+
+  if ($method -eq "POST" -and $path -match '^/api/projects/([^/]+)/video/plan$') {
+    $payload = Get-RequestJson -Request $request
+    if ([string]::IsNullOrWhiteSpace((Get-StoredOpenAiApiKey))) {
+      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
+        ok = $false
+        message = "OPENAI_API_KEY is not configured."
+      }
+      return $true
+    }
+    try {
+      $plan = Invoke-OpenAiVideoPlan `
+        -Template (Get-PropValue -Object $payload -Name "template" -Default @{}) `
+        -Settings (Get-PropValue -Object $payload -Name "settings" -Default @{}) `
+        -Assets (Get-PropValue -Object $payload -Name "assets" -Default @())
+      Write-JsonResponse -Response $response -Payload @{
+        ok = $true
+        plan = $plan
+      }
+    } catch {
+      $detailText = Get-ErrorDetailText -ErrorRecord $_
+      Write-JsonResponse -Response $response -StatusCode 500 -Payload @{
+        ok = $false
+        message = $detailText
+      }
+    }
+    return $true
+  }
+
+  if ($method -eq "POST" -and $path -eq "/api/visual-profile/generate") {
+    $payload = Get-RequestJson -Request $request
+    if ([string]::IsNullOrWhiteSpace((Get-StoredOpenAiApiKey))) {
+      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
+        ok = $false
+        message = "OPENAI_API_KEY is not configured."
+      }
+      return $true
+    }
+    try {
+      $profile = Invoke-OpenAiVisualProfile -Prompt ([string](Get-PropValue -Object $payload -Name "prompt" -Default ""))
+      Write-JsonResponse -Response $response -Payload @{
+        ok = $true
+        profile = $profile
+      }
+    } catch {
+      $detailText = Get-ErrorDetailText -ErrorRecord $_
+      Write-JsonResponse -Response $response -StatusCode 500 -Payload @{
+        ok = $false
+        message = $detailText
+      }
+    }
+    return $true
+  }
+
+  if ($method -eq "POST" -and $path -eq "/api/video/luma/image-to-video") {
+    $payload = Get-RequestJson -Request $request
+    $runtime = Resolve-RenderRuntimeInfo
+    $projectId = [string](Get-PropValue -Object $payload -Name "projectId" -Default "project")
+    $prompt = [string](Get-PropValue -Object $payload -Name "prompt" -Default "")
+    if ([string]::IsNullOrWhiteSpace($prompt)) {
+      $prompt = [string](Get-PropValue -Object $payload -Name "lumaPrompt" -Default "Architectural video")
+    }
+    if ($runtime.mockAi -and (-not $runtime.lumaReady -or ([string](Get-PropValue -Object $payload -Name "provider" -Default "") -eq "mock"))) {
+      Write-JsonResponse -Response $response -Payload (New-MockVideoResult -ProjectId $projectId -Prompt $prompt)
+      return $true
+    }
+    if (-not $runtime.lumaConfigured) {
+      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
+        ok = $false
+        message = "Luma no está configurado. Agrega LUMA_API_KEY en el backend para activar generación de video."
+      }
+      return $true
+    }
+    if (-not $runtime.publicAssetBaseUrlConfigured) {
+      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
+        ok = $false
+        message = "PUBLIC_ASSET_BASE_URL is required so Luma can read project images."
+      }
+      return $true
+    }
+    if (-not $runtime.publicAssetBaseUrlUsable) {
+      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
+        ok = $false
+        message = "PUBLIC_ASSET_BASE_URL debe ser una URL publica HTTPS accesible por Luma; localhost o redes privadas no sirven para image-to-video real."
+      }
+      return $true
+    }
+    try {
+      $images = @((Get-PropValue -Object $payload -Name "images" -Default @()) | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+      if (-not $images.Count) { throw "No approved images were provided for Luma." }
+      $publicImages = @()
+      for ($i = 0; $i -lt $images.Count; $i += 1) {
+        $publicImages += Convert-InputImageToPublicUrl -ProjectId $projectId -Image $images[$i] -Index $i
+      }
+      $result = Invoke-LumaImageToVideo `
+        -Prompt $prompt `
+        -ImageUrls $publicImages `
+        -DurationSeconds ([int](Get-PropValue -Object $payload -Name "durationSeconds" -Default 5)) `
+        -AspectRatio ([string](Get-PropValue -Object $payload -Name "aspectRatio" -Default "16:9"))
+      $generationId = [string](Get-PropValue -Object $result -Name "id" -Default "")
+      $stateValue = [string](Get-PropValue -Object $result -Name "state" -Default "queued")
+      $assets = Get-PropValue -Object $result -Name "assets" -Default @{}
+      $videoUrl = [string](Get-PropValue -Object $assets -Name "video" -Default "")
+      Write-JsonResponse -Response $response -Payload @{
+        ok = $true
+        provider = "luma"
+        generationId = $generationId
+        jobId = $generationId
+        status = $stateValue
+        videoUrl = $videoUrl
+      }
+    } catch {
+      $detailText = Get-ErrorDetailText -ErrorRecord $_
+      Write-JsonResponse -Response $response -StatusCode 500 -Payload @{
+        ok = $false
+        message = $detailText
+      }
+    }
+    return $true
+  }
+
+  if ($method -eq "GET" -and $path -match '^/api/video/luma/status/([^/]+)$') {
+    $generationId = [System.Uri]::UnescapeDataString($Matches[1])
+    try {
+      $result = Get-LumaGenerationStatus -GenerationId $generationId
+      $assets = Get-PropValue -Object $result -Name "assets" -Default @{}
+      Write-JsonResponse -Response $response -Payload @{
+        ok = $true
+        provider = if ($generationId -match '^mock-') { "mock" } else { "luma" }
+        generationId = [string](Get-PropValue -Object $result -Name "id" -Default $generationId)
+        status = [string](Get-PropValue -Object $result -Name "state" -Default "processing")
+        failureReason = [string](Get-PropValue -Object $result -Name "failure_reason" -Default "")
+        videoUrl = [string](Get-PropValue -Object $assets -Name "video" -Default "")
+      }
+    } catch {
+      $detailText = Get-ErrorDetailText -ErrorRecord $_
+      Write-JsonResponse -Response $response -StatusCode 500 -Payload @{
+        ok = $false
+        message = $detailText
+      }
     }
     return $true
   }
@@ -1962,9 +2772,17 @@ function Handle-ApiRequest {
       $usedProvider = $provider
       $fallbackReason = ""
 
+      $promptByteLen = [System.Text.Encoding]::UTF8.GetByteCount($prompt)
+      $promptPreview = $prompt.Substring(0, [Math]::Min(600, $prompt.Length))
+      Write-Host "[RENDER] provider=$provider size=$size quality=$quality inputFidelity=$inputFidelity strictFidelity=$strictFidelity prompt_bytes=$promptByteLen images=$(@($images).Count)"
+      if ($env:RENDERAI_DEBUG_PROMPTS -eq "1") {
+        Write-Host "[PROMPT PREVIEW] $promptPreview"
+      }
+
       if ($provider -eq "gemini") {
         try {
           $result = Invoke-GeminiImageGenerate -Prompt $prompt -Images $images -Size $size -Quality $quality
+          Write-Host "[RENDER] Gemini generation OK mimeType=$($result.mimeType)"
         } catch {
           $geminiDetail = Get-ErrorDetailText -ErrorRecord $_
           if (-not $runtime.openAiReady) {
@@ -1995,6 +2813,48 @@ function Handle-ApiRequest {
           -InputFidelity $inputFidelity `
           -OutputFormat $outputFormat `
           -OutputCompression $outputCompression
+        Write-Host "[RENDER] OpenAI generation OK"
+      }
+
+      # ── Fidelity validation (Fase 3) ──────────────────────
+      $fidelityScore = 100
+      $fidelityViolations = @()
+      $fidelityWarnings = ""
+      if ($strictFidelity -and $runtime.openAiReady -and @($images).Count -gt 0) {
+        try {
+          $referenceB64 = [string](@($images)[0])
+          $generatedB64 = "data:$($result.mimeType);base64,$($result.imageBase64)"
+          $fidelityCheckResult = Invoke-OpenAiFidelityCheck -ReferenceDataUrl $referenceB64 -GeneratedDataUrl $generatedB64
+          $fidelityScore = [int](Get-PropValue -Object $fidelityCheckResult -Name "fidelity_score" -Default 100)
+          $fidelityViolations = @(Get-PropValue -Object $fidelityCheckResult -Name "violations" -Default @())
+          Write-Host "[FIDELITY] score=$fidelityScore violations=$($fidelityViolations.Count)"
+          if ($fidelityScore -lt 70) {
+            Write-Host "[FIDELITY] Score below 70 — retrying generation (attempt 2)"
+            $retry1 = Invoke-GeminiImageGenerate -Prompt $prompt -Images $images -Size $size -Quality $quality
+            $retry1Check = Invoke-OpenAiFidelityCheck -ReferenceDataUrl $referenceB64 -GeneratedDataUrl "data:$($retry1.mimeType);base64,$($retry1.imageBase64)"
+            $retry1Score = [int](Get-PropValue -Object $retry1Check -Name "fidelity_score" -Default 0)
+            Write-Host "[FIDELITY] Retry 1 score=$retry1Score"
+            if ($retry1Score -gt $fidelityScore) {
+              $result = $retry1; $fidelityScore = $retry1Score; $fidelityViolations = @(Get-PropValue -Object $retry1Check -Name "violations" -Default @())
+            }
+            if ($fidelityScore -lt 70) {
+              Write-Host "[FIDELITY] Score still below 70 — retrying generation (attempt 3)"
+              $retry2 = Invoke-GeminiImageGenerate -Prompt $prompt -Images $images -Size $size -Quality $quality
+              $retry2Check = Invoke-OpenAiFidelityCheck -ReferenceDataUrl $referenceB64 -GeneratedDataUrl "data:$($retry2.mimeType);base64,$($retry2.imageBase64)"
+              $retry2Score = [int](Get-PropValue -Object $retry2Check -Name "fidelity_score" -Default 0)
+              Write-Host "[FIDELITY] Retry 2 score=$retry2Score"
+              if ($retry2Score -gt $fidelityScore) {
+                $result = $retry2; $fidelityScore = $retry2Score; $fidelityViolations = @(Get-PropValue -Object $retry2Check -Name "violations" -Default @())
+              }
+              if ($fidelityScore -lt 70) {
+                $fidelityWarnings = "Fidelidad por debajo del umbral ($fidelityScore/100) luego de 3 intentos. Violaciones: $($fidelityViolations -join '; ')"
+                Write-Host "[FIDELITY] WARNING: $fidelityWarnings"
+              }
+            }
+          }
+        } catch {
+          Write-Host "[FIDELITY] Check failed (non-blocking): $($_.Exception.Message)"
+        }
       }
 
       Write-JsonResponse -Response $response -Payload @{
@@ -2004,6 +2864,9 @@ function Handle-ApiRequest {
         provider = $usedProvider
         fallbackReason = $fallbackReason
         mimeType = [string](Get-PropValue -Object $result -Name "mimeType" -Default "image/jpeg")
+        fidelityScore = $fidelityScore
+        fidelityViolations = $fidelityViolations
+        fidelityWarnings = $fidelityWarnings
       }
     } catch {
       $statusCode = Get-ErrorStatusCode -ErrorRecord $_ -Default 500
@@ -2137,7 +3000,7 @@ function Handle-ApiRequest {
 
   if ($method -eq "POST" -and $path -eq "/api/export-pdf") {
     $payload = Get-RequestJson -Request $request
-    $title = [string](Get-PropValue -Object $payload -Name "title" -Default "RenderAI Export")
+    $title = [string](Get-PropValue -Object $payload -Name "title" -Default "Proyecto")
     $summary = [string](Get-PropValue -Object $payload -Name "summary" -Default "")
     $fileName = [string](Get-PropValue -Object $payload -Name "fileName" -Default "renderai-export.pdf")
     $slides = Get-PropValue -Object $payload -Name "slides" -Default @()
@@ -2150,7 +3013,7 @@ function Handle-ApiRequest {
 
   if ($method -eq "POST" -and $path -eq "/api/export-pptx") {
     $payload = Get-RequestJson -Request $request
-    $title = [string](Get-PropValue -Object $payload -Name "title" -Default "RenderAI Export")
+    $title = [string](Get-PropValue -Object $payload -Name "title" -Default "Proyecto")
     $summary = [string](Get-PropValue -Object $payload -Name "summary" -Default "")
     $fileName = [string](Get-PropValue -Object $payload -Name "fileName" -Default "renderai-editable.pptx")
     $slides = Get-PropValue -Object $payload -Name "slides" -Default @()
@@ -2230,6 +3093,8 @@ try {
         ".jpeg" { "image/jpeg" }
         ".svg" { "image/svg+xml" }
         ".webp" { "image/webp" }
+        ".mp4" { "video/mp4" }
+        ".webm" { "video/webm" }
         ".ico" { "image/x-icon" }
         default { "application/octet-stream" }
       }

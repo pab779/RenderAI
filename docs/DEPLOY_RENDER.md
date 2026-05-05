@@ -8,6 +8,8 @@ Configura estas variables en el panel del servicio:
 
 - `OPENAI_API_KEY`: analisis, descomposicion, copy, outlines y prompts internos.
 - `GEMINI_API_KEY`: renders, mood boards, material boards y visuales creativos.
+- `LUMA_API_KEY`: generacion real de video image-to-video con Luma.
+- `PUBLIC_ASSET_BASE_URL`: URL publica del servicio para que Luma pueda leer assets servidos desde `/outputs/project-assets/`.
 - `RENDERAI_ADMIN_PASSWORD`: password real para el usuario administrador.
 - `RENDERAI_ARCHITECT_PASSWORD`: password real para el usuario arquitecto.
 
@@ -39,6 +41,9 @@ Cuando el servicio este arriba:
 - `authConfigured` debe ser `true`.
 - `renderReady` debe ser `true` si `GEMINI_API_KEY` u `OPENAI_API_KEY` estan configuradas.
 - `analysisReady` debe ser `true` si `OPENAI_API_KEY` esta configurada.
+- `lumaConfigured` debe ser `true` si `LUMA_API_KEY` esta configurada.
+- `lumaReady` debe ser `true` solo si tambien existe `PUBLIC_ASSET_BASE_URL`.
+- `videoReady` debe ser `true` si Luma esta listo o si `USE_MOCK_AI=true`.
 
 ## Seguridad
 

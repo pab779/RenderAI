@@ -7,22 +7,77 @@ const STORAGE_KEYS = {
   session: "renderai-session-v3",
   settings: "renderai-settings-v3",
   feedback: "renderai-feedback-v3",
+  lastProject: "renderai-last-project-v1",
+  customTemplates: "renderai-custom-templates-v1",
+};
+
+const PROJECT_DB_NAME = "renderai-project-memory-v1";
+const PROJECT_DB_STORE = "projects";
+const PROJECT_SCHEMA_VERSION = 2;
+const LUMA_NOT_CONFIGURED_MESSAGE = "Luma no está configurado. Agrega LUMA_API_KEY en el backend para activar generación de video.";
+const STRICT_ARCHITECTURAL_FIDELITY_PROMPT = "Preserve the exact architectural design from the reference. Do not modify the geometry, proportions, layout, structure, camera composition, openings, windows, doors, walls, ceiling, floor, built-in elements, furniture placement, object positions, signage, colors or main material intent unless the user explicitly requests that change. Improve only realism, lighting, material fidelity, photographic quality, resolution, texture detail and atmosphere. Do not invent new architecture. Do not add or remove design elements. Do not change the identity of the project.";
+
+const PROJECT_TABS = [
+  { id: "assets", label: "Assets" },
+  { id: "images", label: "Imagenes" },
+  { id: "video", label: "Video Studio" },
+  { id: "presentations", label: "Presentaciones" },
+  { id: "conversation", label: "Conversacion" },
+  { id: "settings", label: "Configuracion" },
+];
+
+const QUICK_CHIPS = [
+  "Render hiperrealista",
+  "Video",
+  "Presentacion",
+  "Brochure",
+  "Analizar plano",
+  "Crear moodboard",
+  "Mejorar imagen",
+  "De plano a render",
+  "De render a video",
+];
+
+const DEFAULT_VISUAL_PROFILE = {
+  name: "RENDEAI Premium",
+  mood: ["premium", "arquitectonico", "calido"],
+  palette: {
+    wall: "#F4F1EA",
+    wallSoft: "#F8F6F0",
+    card: "#FFFFFF",
+    cardSoft: "#FBFAF7",
+    stone: "#D8D5CD",
+    muted: "#8C8982",
+    charcoal: "#181715",
+    charcoalSoft: "#24221F",
+    darkWood: "#2A1E16",
+    wood: "#3A2A1D",
+    leather: "#6F4227",
+    deepGreen: "#263423",
+    agedGold: "#B89A5E",
+  },
+  typography: { heading: "Cormorant Garamond", ui: "Inter Tight", labelTracking: "0" },
+  surfaces: { body: "warm-plaster", sidebar: "matte-charcoal", topbar: "dark-wood", cards: "warm-white" },
+  radius: { sm: 8, md: 12, lg: 18, xl: 24 },
+  shadow: { soft: "0 18px 50px rgba(24,23,21,0.06)", panel: "0 24px 70px rgba(24,23,21,0.14)" },
+  density: "comfortable",
+  decorationLevel: "low",
 };
 
 const RENDER_STEPS = [
-  { id: 1, title: "Insumos", copy: "Carga y organiza la escena base." },
-  { id: 2, title: "Descomposicion", copy: "Lee y corrige la imagen con IA." },
-  { id: 3, title: "Direccion", copy: "Define tono, brochure y configuracion final." },
-  { id: 4, title: "Resultado", copy: "Espera una sola corrida, revisa y descarga." },
+  { id: 1, title: "Recibidor", copy: "Carga y ordena las referencias como al entrar a una casa." },
+  { id: 2, title: "Lectura", copy: "Revisa materiales, objetos, textos y riesgos con IA." },
+  { id: 3, title: "Dirección", copy: "Define luz, fidelidad, materialidad y salida final." },
+  { id: 4, title: "Entrega", copy: "Genera, revisa y descarga el render terminado." },
 ];
 
 const PDF_STEPS = [
-  { id: 1, title: "Insumos", copy: "Carga referencias, planos o material base." },
-  { id: 2, title: "Descomposicion", copy: "Lee la escena y corrige materiales, objetos y textos." },
-  { id: 3, title: "Diseno", copy: "Escoge template, tono editorial, idioma, tipografias y paleta." },
-  { id: 4, title: "Diapositivas", copy: "Define cantidad, tipo, orden y amenidades del brochure." },
-  { id: 5, title: "Editor", copy: "Selecciona cada diapositiva y ajusta imagen, layout y tratamiento." },
-  { id: 6, title: "Resultado", copy: "Ejecuta una sola corrida y descarga el brochure final." },
+  { id: 1, title: "Recibidor", copy: "Carga fotos, planos y soporte del proyecto." },
+  { id: 2, title: "Mesa de lectura", copy: "Valida escena, materiales, objetos y textos visibles." },
+  { id: 3, title: "Selector de plantilla", copy: "Escoge Brochure o Presentacion y una base editable." },
+  { id: 4, title: "Caja de diapositivas", copy: "Define cantidad, tipo, orden y amenidades antes de editar." },
+  { id: 5, title: "Canva / PPT", copy: "Edita capas, textos, cuadros, imagenes y render por slot." },
+  { id: 6, title: "Entrega", copy: "Ejecuta una corrida y descarga PDF/PPT final." },
 ];
 
 const FEEDBACK_CATEGORIES = [
@@ -107,7 +162,7 @@ const DECISION_GROUPS = {
         { value: "morning", label: "Manana", description: "Luz fresca y optimista." },
         { value: "midday", label: "Mediodia", description: "Lectura neutra y definida." },
         { value: "golden-hour", label: "Golden hour", description: "Capa calida y comercial." },
-        { value: "blue-hour", label: "Blue hour", description: "Contraste sofisticado interior-exterior." },
+        { value: "blue-hour", label: "Crepusculo calido", description: "Contraste sofisticado interior-exterior sin tinte frio dominante." },
         { value: "night", label: "Noche", description: "Interior protagonista." },
       ],
     },
@@ -161,6 +216,7 @@ const DECISION_GROUPS = {
         { value: "photographic", label: "Fotografia real", description: "La escena debe parecer una foto construida." },
         { value: "three-dimensional", label: "Imagen 3D premium", description: "Render arquitectonico pulido de alta gama." },
         { value: "linear-drawing", label: "Render lineal", description: "Lectura lineal tipo dibujo arquitectonico." },
+        { value: "vector-plan", label: "Vector limpio", description: "Lineas limpias, capas separadas y siluetas listas para editar." },
         { value: "mixed-media", label: "Mixto editorial", description: "Base render con sensibilidad de lamina editorial." },
       ],
     },
@@ -313,7 +369,7 @@ const DECISION_GROUPS = {
         { value: "morning", label: "Manana", description: "Luz fresca y clara." },
         { value: "midday", label: "Mediodia", description: "Lectura neutra y tecnica." },
         { value: "golden-hour", label: "Golden hour", description: "Capa calida y comercial." },
-        { value: "blue-hour", label: "Blue hour", description: "Contraste interior-exterior sofisticado." },
+        { value: "blue-hour", label: "Crepusculo calido", description: "Contraste interior-exterior sofisticado sin tinte frio dominante." },
         { value: "night", label: "Noche", description: "Interior protagonista." },
       ],
     },
@@ -346,6 +402,7 @@ const DECISION_GROUPS = {
         { value: "photographic", label: "Fotografia real", description: "Imagen editorial casi fotografica." },
         { value: "three-dimensional", label: "Imagen 3D premium", description: "Render de alta gama para brochure." },
         { value: "linear-drawing", label: "Render lineal", description: "Lamina lineal o dibujo controlado." },
+        { value: "vector-plan", label: "Vector limpio", description: "Contornos limpios, objetos separados y lectura tipo archivo editable." },
         { value: "mixed-media", label: "Mixto editorial", description: "Collage editorial con base arquitectonica fiel." },
       ],
     },
@@ -449,26 +506,14 @@ const PDF_IMAGE_MODE_OPTIONS = [
 ];
 
 const BROCHURE_STYLE_FAMILIES = [
-  { value: "monolith", label: "Monolith", description: "Grandes masas, jerarquia clara y presencia sobria.", preview: "feature", template: "monolith" },
-  { value: "folio", label: "Folio", description: "Catalogo premium con aire editorial y margenes generosos.", preview: "split", template: "folio" },
-  { value: "magazine", label: "Magazine", description: "Ritmo de revista, capas, titulares y lectura viva.", preview: "board", template: "magazine" },
-  { value: "poster", label: "Poster", description: "Portadas fuertes, titulos grandes y gesto grafico.", preview: "feature", template: "poster" },
-  { value: "mosaic", label: "Mosaic", description: "Composicion modular, recortes y collage visual.", preview: "gallery", template: "mosaic" },
-  { value: "gallery-wall", label: "Gallery wall", description: "Imagenes curadas como una exposicion arquitectonica.", preview: "gallery", template: "gallery-wall" },
-  { value: "storyboard", label: "Storyboard", description: "Secuencia visual dinamica y explicativa.", preview: "gallery", template: "storyboard" },
-  { value: "atelier", label: "Atelier", description: "Refinado, creativo y con tactilidad visual.", preview: "board", template: "atelier" },
-  { value: "urban-grid", label: "Urban grid", description: "Mas grafico, contemporaneo y arquitectonico.", preview: "technical", template: "urban-grid" },
-  { value: "technical-sheet", label: "Technical sheet", description: "Tecnico, limpio y con precision de lamina.", preview: "technical", template: "technical-sheet" },
-  { value: "resort", label: "Resort", description: "Hospitality, atmosfera y visuales amplias.", preview: "feature", template: "resort" },
-  { value: "manifest", label: "Manifest", description: "Mas vanguardista, asimetrico y con bloques fuertes.", preview: "split", template: "manifest" },
-  { value: "obsidian", label: "Obsidian", description: "Fondo oscuro premium, tipografia dorada y elegancia nocturna.", preview: "feature", template: "obsidian" },
-  { value: "ivory", label: "Ivory", description: "Blanco puro, margenes amplios, minimalismo radical y silencio visual.", preview: "split", template: "ivory" },
-  { value: "aurora", label: "Aurora", description: "Degradados suaves tipo cielo, tonos pastel HD y fluidez cromática.", preview: "feature", template: "aurora" },
-  { value: "onyx", label: "Onyx", description: "Negro absoluto, acento neon y estetica high-tech futurista.", preview: "technical", template: "onyx" },
-  { value: "velvet", label: "Velvet", description: "Tonos borgoña y durazno, textura tactil y calidez premium.", preview: "board", template: "velvet" },
-  { value: "prism", label: "Prism", description: "Prismatico, multi-cromatico, efecto cristal y luz difractada.", preview: "gallery", template: "prism" },
-  { value: "dune", label: "Dune", description: "Arena, terracota y piedra calida, hospitalidad y resort de lujo.", preview: "feature", template: "dune" },
-  { value: "slate", label: "Slate", description: "Gris antracita, acero y concreto, brutalismo refinado.", preview: "technical", template: "slate" },
+  { value: "plaster-house", label: "Plaster House", description: "Yeso blanco texturizado, aire residencial y orden sereno.", preview: "split", template: "plaster-house" },
+  { value: "walnut-folio", label: "Walnut Folio", description: "Madera nogal, cuero cafe y ritmo editorial contenido.", preview: "feature", template: "walnut-folio" },
+  { value: "concrete-gallery", label: "Concrete Gallery", description: "Concreto lujado, sombra suave y lectura de galeria doméstica.", preview: "gallery", template: "concrete-gallery" },
+  { value: "vine-atrium", label: "Vine Atrium", description: "Blanco cálido con enredadera verde y atmósfera interior-exterior.", preview: "board", template: "vine-atrium" },
+  { value: "turntable-deck", label: "Selector Deck", description: "Selector de plantillas, modulos circulares y tactilidad mid-century.", preview: "gallery", template: "turntable-deck" },
+  { value: "case-study", label: "Case Study", description: "Minimalismo residencial, retícula fina y espacios para renders grandes.", preview: "technical", template: "case-study" },
+  { value: "material-library", label: "Material Library", description: "Tableros de muestras, cuero, piedra, madera y vegetación real.", preview: "board", template: "material-library" },
+  { value: "garden-room", label: "Garden Room", description: "Interior luminoso, verde oliva, fibras naturales y calma habitable.", preview: "split", template: "garden-room" },
 ];
 
 const BROCHURE_STYLE_VARIANTS = [
@@ -479,24 +524,31 @@ const BROCHURE_STYLE_VARIANTS = [
 ];
 
 const BROCHURE_STYLE_ALIASES = {
-  dynamic: "canva-EAGHvxr_154",
-  colorful: "canva-EAGnoGixvFY",
-  minimal: "canva-EAGV4SKvtkI",
-  luxury: "canva-EAFPf0Mf_YI",
+  dynamic: "canva-EAGdcTUYU1s",
+  colorful: "canva-EAFNfbb5KQs",
+  minimal: "canva-EAGdcTUYU1s",
+  luxury: "canva-EAGsAh-OVLo",
   "luxury-sand": "canva-EAFJITWQWWk",
   "minimal-ivory": "canva-EAGdcTUYU1s",
   "editorial-terracotta": "canva-EAGTkH8WXi4",
-  dark: "canva-EAGrLDwPJo0",
-  "dark-gold": "canva-EAFPf0Mf_YI",
-  neon: "canva-EAGHvxr_154",
-  futuristic: "canva-EAGHvxr_154",
+  dark: "canva-EAGdcTUYU1s",
+  "dark-gold": "canva-EAGsAh-OVLo",
+  neon: "canva-EAGdcTUYU1s",
+  futuristic: "canva-EAGdcTUYU1s",
   pastel: "canva-EAGr_RR-y1A",
-  gradient: "canva-EAGHvxr_154",
+  gradient: "canva-EAGdcTUYU1s",
   warm: "canva-EAGtNZBHprc",
   "warm-luxury": "canva-EAGsAh-OVLo",
-  brutalist: "canva-EAGTP-02p34",
-  crystal: "canva-EAGTP-02p34",
+  brutalist: "canva-EAGn3Fr3fd4",
+  crystal: "canva-EAGdcTUYU1s",
   "pure-white": "canva-EAGdcTUYU1s",
+  obsidian: "canva-EAGdcTUYU1s",
+  onyx: "canva-EAGdcTUYU1s",
+  aurora: "canva-EAGdcTUYU1s",
+  prism: "canva-EAGdcTUYU1s",
+  blue: "canva-EAGdcTUYU1s",
+  purple: "canva-EAGdcTUYU1s",
+  violet: "canva-EAGdcTUYU1s",
 };
 
 const BROCHURE_STYLE_MARKET_GROUPS = [
@@ -505,57 +557,33 @@ const BROCHURE_STYLE_MARKET_GROUPS = [
   { value: "pitch", label: "Pitch deck" },
   { value: "editorial", label: "Editorial" },
   { value: "minimal", label: "Minimal" },
-  { value: "dark", label: "Dark" },
+  { value: "material", label: "Materiales" },
+  { value: "home", label: "Casa" },
   { value: "brand", label: "Marca / guia" },
   { value: "hospitality", label: "Hospitality" },
-  { value: "experimental", label: "Experimental" },
 ];
 
 const BROCHURE_STYLE_MARKET_META = {
-  monolith: { collection: "Portfolio base", groups: ["portfolio", "minimal"], tags: ["clean", "architectural"] },
-  folio: { collection: "Luxury folio", groups: ["portfolio", "editorial"], tags: ["serif", "premium"] },
-  magazine: { collection: "Creative portfolio", groups: ["editorial", "portfolio"], tags: ["magazine", "story"] },
-  poster: { collection: "Pitch impact", groups: ["pitch", "editorial"], tags: ["bold", "graphic"] },
-  mosaic: { collection: "Mood board", groups: ["editorial", "experimental"], tags: ["collage", "materials"] },
-  "gallery-wall": { collection: "Image wall", groups: ["portfolio", "editorial"], tags: ["curated", "grid"] },
-  storyboard: { collection: "Narrative deck", groups: ["editorial", "pitch"], tags: ["sequence", "story"] },
-  atelier: { collection: "Studio book", groups: ["portfolio", "editorial"], tags: ["art", "tactile"] },
-  "urban-grid": { collection: "Urban proposal", groups: ["pitch", "portfolio"], tags: ["grid", "city"] },
-  "technical-sheet": { collection: "Design manual", groups: ["brand", "minimal"], tags: ["manual", "system"] },
-  resort: { collection: "Resort brochure", groups: ["hospitality", "portfolio"], tags: ["warm", "immersive"] },
-  manifest: { collection: "Creative brief", groups: ["experimental", "pitch"], tags: ["vanguard", "statement"] },
-  obsidian: { collection: "Dark luxury", groups: ["dark", "pitch"], tags: ["premium", "night"] },
-  ivory: { collection: "Quiet minimal", groups: ["minimal", "portfolio"], tags: ["white", "elegant"] },
-  aurora: { collection: "Gradient deck", groups: ["experimental", "editorial"], tags: ["soft", "glow"] },
-  onyx: { collection: "Tech pitch", groups: ["dark", "pitch"], tags: ["neon", "future"] },
-  velvet: { collection: "Warm luxury", groups: ["editorial", "hospitality"], tags: ["fashion", "soft"] },
-  prism: { collection: "Creative color", groups: ["experimental", "editorial"], tags: ["colorful", "energy"] },
-  dune: { collection: "Hospitality warm", groups: ["hospitality", "minimal"], tags: ["sand", "resort"] },
-  slate: { collection: "Project proposal", groups: ["pitch", "minimal"], tags: ["urban", "refined"] },
+  "plaster-house": { collection: "Mid-century home", groups: ["home", "minimal", "portfolio"], tags: ["plaster", "white", "quiet"] },
+  "walnut-folio": { collection: "Walnut folio", groups: ["home", "editorial", "hospitality"], tags: ["walnut", "leather", "warm"] },
+  "concrete-gallery": { collection: "Concrete gallery", groups: ["portfolio", "material", "minimal"], tags: ["concrete", "gallery", "polished"] },
+  "vine-atrium": { collection: "Garden atrium", groups: ["home", "hospitality", "editorial"], tags: ["green", "vine", "daylight"] },
+  "turntable-deck": { collection: "Turntable selector", groups: ["pitch", "editorial", "home"], tags: ["record", "selector", "mid-century"] },
+  "case-study": { collection: "Residential case study", groups: ["portfolio", "brand", "minimal"], tags: ["case-study", "grid", "clean"] },
+  "material-library": { collection: "Material library", groups: ["material", "editorial", "hospitality"], tags: ["samples", "texture", "board"] },
+  "garden-room": { collection: "Garden room", groups: ["home", "hospitality", "portfolio"], tags: ["olive", "plants", "residential"] },
 };
 
 function buildBrochureStyleOptions() {
   const neutrals = {
-    monolith: { paper: "#f8f4ef", ink: "#1d1917", accent: "#8d6d52" },
-    folio: { paper: "#fcfaf6", ink: "#201b17", accent: "#9a7657" },
-    magazine: { paper: "#f7f2eb", ink: "#191512", accent: "#7b4b39" },
-    poster: { paper: "#f5f1ea", ink: "#141414", accent: "#b54e37" },
-    mosaic: { paper: "#f7f4ef", ink: "#191717", accent: "#79645a" },
-    "gallery-wall": { paper: "#f7f6f2", ink: "#181714", accent: "#6a5548" },
-    storyboard: { paper: "#f5f5f3", ink: "#151515", accent: "#8b6a4a" },
-    atelier: { paper: "#fbf6ef", ink: "#221b16", accent: "#90725c" },
-    "urban-grid": { paper: "#f1f2f4", ink: "#16181d", accent: "#5a6370" },
-    "technical-sheet": { paper: "#f8f8f8", ink: "#16181c", accent: "#6f7c8d" },
-    resort: { paper: "#f8f5ef", ink: "#1d1a17", accent: "#8a7659" },
-    manifest: { paper: "#f4f1eb", ink: "#161310", accent: "#8f5d45" },
-    obsidian: { paper: "#1a1720", ink: "#f0eae0", accent: "#c9a96e" },
-    ivory: { paper: "#fdfcfa", ink: "#1a1a1a", accent: "#b8a08a" },
-    aurora: { paper: "#f0f0fa", ink: "#1a1824", accent: "#8b7ec8" },
-    onyx: { paper: "#0e0e14", ink: "#e8e8f0", accent: "#00d4aa" },
-    velvet: { paper: "#f8f0f0", ink: "#2a1820", accent: "#9e5a6e" },
-    prism: { paper: "#f5f2fa", ink: "#18161e", accent: "#7c6bb8" },
-    dune: { paper: "#f8f2ea", ink: "#2a2018", accent: "#c49a6c" },
-    slate: { paper: "#f0f0f2", ink: "#1a1c20", accent: "#6a7080" },
+    "plaster-house": { paper: "#fbfaf6", ink: "#2a241d", accent: "#8b6a4c" },
+    "walnut-folio": { paper: "#f8f2e8", ink: "#261a12", accent: "#7a4f34" },
+    "concrete-gallery": { paper: "#f2f0ea", ink: "#23221f", accent: "#777063" },
+    "vine-atrium": { paper: "#fbfbf3", ink: "#243022", accent: "#5f7a55" },
+    "turntable-deck": { paper: "#f6efe3", ink: "#2b2118", accent: "#94643e" },
+    "case-study": { paper: "#fdfbf6", ink: "#22201b", accent: "#a08a67" },
+    "material-library": { paper: "#f7f1e7", ink: "#241b14", accent: "#6f7057" },
+    "garden-room": { paper: "#f9f8ef", ink: "#22291f", accent: "#6d8155" },
   };
 
   return BROCHURE_STYLE_FAMILIES.flatMap((family) => BROCHURE_STYLE_VARIANTS.map((variant) => ({
@@ -587,7 +615,7 @@ function buildBrochureStyleOptions() {
 
 const BROCHURE_STYLE_OPTIONS = buildBrochureStyleOptions();
 const LOCAL_TEMPLATE_TARGET_COUNT = 28;
-const CANVA_TEMPLATE_DEFAULT = "canva-EAGrLDwPJo0";
+const CANVA_TEMPLATE_DEFAULT = "canva-EAGdcTUYU1s";
 
 function getBaseBrochureStyleProfile(value) {
   return BROCHURE_STYLE_OPTIONS.find((option) => option.value === value) || BROCHURE_STYLE_OPTIONS[0];
@@ -626,7 +654,49 @@ function buildBrochureTemplateLibrary() {
     { value: "velvet-airy",      label: "Canva · Black Pink Clean",       collection: "Canva reference", description: "Portafolio moderno y limpio en negro y rosa.",                                         groups: ["editorial", "portfolio"],              tags: ["canva", "pink", "portfolio"],             thumbnail: "assets/template-previews/canva/EAGnaH1PQ5c.webp", canvaId: "EAGnaH1PQ5c", canvaUrl: "https://www.canva.com/templates/EAGnaH1PQ5c/" },
   ];
 
-  const canvaReferenceEntries = entries.filter((entry) => entry.canvaId);
+  const forbiddenTemplateTokens = /\b(neon|gradient|blue|azul|purple|violet|morado|pink|rosa|black|negro|dark|onyx|obsidian|futuristic)\b/i;
+  const preferredStyleByCanvaId = {
+    EAGdcTUYU1s: "plaster-house-airy",
+    EAGr_RR_y1A: "walnut-folio-airy",
+    EAGr_RR: "walnut-folio-airy",
+    EAFw_orjpUY: "garden-room-airy",
+    EAFikiuuzhg: "concrete-gallery-airy",
+    EAFNfbb5KQs: "vine-atrium-airy",
+    EAGn3Fr3fd4: "concrete-gallery-airy",
+    EAF2x8BSmSs: "case-study-airy",
+    EAGtNZBHprc: "walnut-folio-spread",
+    EAGTkH8WXi4: "turntable-deck-graphic",
+    EAGsAh_OVLo: "walnut-folio-spread",
+    EAFJITWQWWk: "material-library-spread",
+    EAGV4SKvtkI: "case-study-airy",
+    EAGubEOQn8Y: "plaster-house-airy",
+    EAFZccmrE1U: "vine-atrium-stacked",
+  };
+  const styleSequence = [
+    "plaster-house-airy",
+    "walnut-folio-airy",
+    "garden-room-airy",
+    "concrete-gallery-airy",
+    "vine-atrium-airy",
+    "case-study-airy",
+    "material-library-spread",
+    "turntable-deck-graphic",
+  ];
+  const normalizeCanvaIdKey = (id) => String(id || "").replace(/[^a-z0-9]/gi, "_");
+  const canvaReferenceEntries = entries
+    .filter((entry) => entry.canvaId)
+    .filter((entry) => {
+      const haystack = [entry.label, entry.description, ...(entry.groups || []), ...(entry.tags || [])].join(" ");
+      return !forbiddenTemplateTokens.test(haystack);
+    })
+    .map((entry, index) => ({
+      ...entry,
+      baseStyle: preferredStyleByCanvaId[entry.canvaId]
+        || preferredStyleByCanvaId[normalizeCanvaIdKey(entry.canvaId)]
+        || styleSequence[index % styleSequence.length],
+      groups: unique(["home", ...(entry.groups || []).filter((group) => group !== "dark" && group !== "experimental"), entry.tags?.includes("green") ? "hospitality" : "", entry.tags?.includes("beige") || entry.tags?.includes("brown") ? "material" : ""]).filter(Boolean),
+      tags: unique([...(entry.tags || []).filter((tag) => !forbiddenTemplateTokens.test(tag)), "mid-century", "editable"]),
+    }));
   const curatedEntries = canvaReferenceEntries.slice(0, LOCAL_TEMPLATE_TARGET_COUNT);
   const valueCounts = new Map();
 
@@ -722,9 +792,61 @@ function requestLocalTemplateObjectsHydration() {
   });
 }
 
+function persistCustomTemplates() {
+  saveJson(STORAGE_KEYS.customTemplates, safeArray(state.customTemplates).slice(0, 40));
+}
+
+async function handleCustomTemplateFiles(fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!files.length) return;
+  const allowed = /\.(pptx|potx|zip|rar)$/i;
+  const next = [];
+  files.forEach((file) => {
+    if (!allowed.test(file.name || "")) return;
+    const extension = (file.name.split(".").pop() || "").toLowerCase();
+    const label = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Layout cargado";
+    next.push({
+      id: `custom-${Date.now()}-${slugify(file.name)}-${Math.round(Math.random() * 9999)}`,
+      type: state.settings.templateType || "ppt",
+      label,
+      description: extension === "zip" || extension === "rar"
+        ? "Paquete de layouts cargado por el usuario. Disponible como base editable en blanco."
+        : "Layout PPT cargado por el usuario. Disponible como base editable por capas.",
+      slideCount: 12,
+      slidePreviews: [],
+      blank: true,
+      userUploaded: true,
+      fileName: file.name,
+      fileSize: file.size || 0,
+      uploadedAt: new Date().toISOString(),
+    });
+  });
+  if (!next.length) {
+    toast("Carga un layout .pptx, .potx, .zip o .rar.", "warn");
+    return;
+  }
+  const current = safeArray(state.customTemplates).filter((item) => item.type !== state.settings.templateType || !next.some((entry) => entry.fileName === item.fileName));
+  state.customTemplates = [...next, ...current].slice(0, 40);
+  state.settings.localTemplate = next[0].id;
+  if (!state.settings.pdfSlideLayouts) state.settings.pdfSlideLayouts = {};
+  computePdfSlideBlueprints().forEach((bp) => {
+    state.settings.pdfSlideLayouts[bp.key] = "blank-canvas";
+  });
+  persistCustomTemplates();
+  persistSettings();
+  renderAll();
+  toast("Layout cargado y listo como base editable.", "ok");
+  if (elements.customTemplateInput) elements.customTemplateInput.value = "";
+}
+
 function getAllLocalTemplates() {
   const catalog = LOCAL_TEMPLATE_CATALOG || { brochure: [], ppt: [] };
-  return [...BLANK_LOCAL_TEMPLATES, ...safeArray(catalog.brochure), ...safeArray(catalog.ppt)];
+  return [
+    ...BLANK_LOCAL_TEMPLATES,
+    ...safeArray(state?.customTemplates),
+    ...safeArray(catalog.brochure),
+    ...safeArray(catalog.ppt),
+  ];
 }
 
 function getSelectedLocalTemplateEntry() {
@@ -835,7 +957,7 @@ function templateSlotFallbackIndex(slot = {}, index = 0) {
 function resolveTemplateEditableObjects(entry, activeLayout, config = {}) {
   const isBlankCanvas = String(activeLayout || "") === "blank-canvas";
   const objects = getLocalTemplateSlideObjects(entry, activeLayout);
-  const textObjects = objects
+  let textObjects = objects
     .filter(isTemplateTextObject)
     .sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
     .slice(0, 18);
@@ -846,6 +968,64 @@ function resolveTemplateEditableObjects(entry, activeLayout, config = {}) {
       .sort((a, b) => templateObjectArea(b) - templateObjectArea(a))
       .slice(0, 8)
       .map((obj, index) => ({ ...obj, id: obj.id || `slot-${index + 1}` }));
+
+  if (isBlankCanvas && !imageSlots.length) {
+    imageSlots = resolveTemplatePhotoFrames(config, activeLayout, Math.max(1, resolveSlideImageCount(config))).map((frame, index) => ({
+      id: `blank-photo-${index + 1}`,
+      kind: "image",
+      role: index === 0 ? "hero" : "support",
+      name: index === 0 ? "Cuadro principal" : `Cuadro ${index + 1}`,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      z: 120 + index,
+    }));
+  }
+
+  if (isBlankCanvas && !textObjects.length) {
+    textObjects = [
+      {
+        id: "blank-title",
+        kind: "text",
+        role: "title",
+        name: "Titulo principal",
+        text: "Project title",
+        x: 8,
+        y: 13,
+        width: 36,
+        height: 18,
+        z: 260,
+        style: { fontSize: 40, color: "#241b14" },
+      },
+      {
+        id: "blank-subtitle",
+        kind: "text",
+        role: "subtitle",
+        name: "Subtitulo",
+        text: "Subtitle",
+        x: 8,
+        y: 34,
+        width: 34,
+        height: 8,
+        z: 261,
+        style: { fontSize: 17, color: "#6f6257" },
+      },
+      {
+        id: "blank-body",
+        kind: "text",
+        role: "body",
+        name: "Texto descriptivo",
+        text: "Description text",
+        x: 8,
+        y: 48,
+        width: 36,
+        height: 28,
+        z: 262,
+        style: { fontSize: 15, color: "#3a3028" },
+      },
+    ];
+  }
 
   if (!imageSlots.length && !isBlankCanvas) {
     imageSlots = resolveTemplatePhotoFrames(config, activeLayout, resolveSlideImageCount(config)).map((frame, index) => ({
@@ -1081,18 +1261,13 @@ const SLIDE_TEXT_MODE_OPTIONS = [
 ];
 
 const SLIDE_BACKGROUND_OPTIONS = [
-  { value: "inherit", label: "Segun estilo", description: "Hereda el degradado del estilo de brochure seleccionado." },
-  { value: "dark-luxury", label: "Oscuro premium", description: "Fondo negro mate con acento dorado sutil." },
-  { value: "warm-sand", label: "Arena calida", description: "Degradado arena a beige con luz natural." },
-  { value: "cool-mist", label: "Niebla fria", description: "Azul gris suave con transicion a blanco." },
-  { value: "deep-forest", label: "Bosque profundo", description: "Verde oscuro a esmeralda con atmosfera." },
-  { value: "rose-dusk", label: "Atardecer rosa", description: "Rosa palido a durazno con calidez suave." },
-  { value: "midnight", label: "Medianoche", description: "Azul noche profundo con sutil brillo." },
-  { value: "pure-white", label: "Blanco puro", description: "Fondo limpio sin degradado." },
-  { value: "charcoal", label: "Carbon", description: "Gris oscuro elegante y sobrio." },
-  { value: "aurora-pastel", label: "Aurora pastel", description: "Degradado multicolor suave tipo cielo nordico." },
-  { value: "terracotta", label: "Terracota", description: "Naranja tierra a crema calido." },
-  { value: "ocean", label: "Oceano", description: "Azul profundo a turquesa con movimiento." },
+  { value: "inherit", label: "Segun estilo", description: "Hereda el material base de la plantilla." },
+  { value: "plaster-white", label: "Yeso blanco", description: "Pared blanca con textura sutil de casa." },
+  { value: "polished-concrete", label: "Concreto lujado", description: "Gris calido, sobrio y arquitectonico." },
+  { value: "walnut-leather", label: "Cuero nogal", description: "Cafe cuero con profundidad residencial." },
+  { value: "vine-wall", label: "Enredadera", description: "Blanco calido con verde organico y fresco." },
+  { value: "warm-stone", label: "Piedra calida", description: "Caliza suave, neutra y premium." },
+  { value: "pure-white", label: "Blanco limpio", description: "Fondo luminoso sin saturacion." },
 ];
 
 const SLIDE_IMAGE_REPRESENTATION_OPTIONS = DECISION_GROUPS.pdf.find((group) => group.key === "representationStyle")?.options || [];
@@ -1128,8 +1303,8 @@ const DEFAULT_SETTINGS = {
   pdfImageMode: "rendered",
   brochureStyle: CANVA_TEMPLATE_DEFAULT,
   brochureLanguage: "es",
-  titleFont: "Cormorant Garamond",
-  bodyFont: "Manrope",
+  titleFont: "Fraunces",
+  bodyFont: "Albert Sans",
   colorMode: "suggested",
   selectedPalette: [],
   selectedAmenities: [],
@@ -1138,7 +1313,19 @@ const DEFAULT_SETTINGS = {
   pdfSections: ["cover", "concept", "moodboard", "materials", "amenities", "plan-2d", "closing"],
   localTemplate: "",
   pdfSlideConfigs: {},
+  deckEditor: null,
 };
+
+function createPdfBuilderState() {
+  return {
+    availableSelection: [],
+    chosenSelection: [],
+    currentSlideKey: null,
+    resultSlideIndex: 0,
+    styleFilter: "all",
+    styleSearch: "",
+  };
+}
 
 const state = {
   session: null,
@@ -1149,8 +1336,25 @@ const state = {
   mainId: null,
   settings: { ...DEFAULT_SETTINGS, ...loadJson(STORAGE_KEYS.settings, {}) },
   feedback: loadJson(STORAGE_KEYS.feedback, []),
+  customTemplates: loadJson(STORAGE_KEYS.customTemplates, []),
   feedbackDraft: { category: "render", rating: 4, message: "" },
-  server: { healthy: false, aiReady: false, analysisReady: false, renderProvider: "local", analysisProvider: "none", secretSource: "none", baseUrl: "", port: "" },
+  server: {
+    healthy: false,
+    aiReady: false,
+    analysisReady: false,
+    renderProvider: "local",
+    analysisProvider: "none",
+    videoProvider: "none",
+    lumaConfigured: false,
+    lumaReady: false,
+    mockAi: false,
+    publicAssetBaseUrlConfigured: false,
+    publicAssetBaseUrlUsable: false,
+    videoReady: false,
+    secretSource: "none",
+    baseUrl: "",
+    port: "",
+  },
   adminDrawerOpen: false,
   analysisBusy: false,
   analysisRerunRequested: false,
@@ -1172,12 +1376,55 @@ const state = {
     dragging: false,
     draft: null,
   },
-  pdfBuilder: {
-    availableSelection: [],
-    chosenSelection: [],
-    currentSlideKey: null,
-    styleFilter: "all",
-    styleSearch: "",
+  pdfBuilder: createPdfBuilderState(),
+  projects: {
+    items: [],
+    activeId: "",
+    search: "",
+    busy: false,
+    status: "Memoria lista",
+  },
+  project: {
+    messages: [],
+    assets: [],
+    generationJobs: [],
+    videoJobs: [],
+    videoProductions: [],
+    coverAssetId: "",
+    settings: {},
+  },
+  projectUi: {
+    tab: "assets",
+    assetFilter: "all",
+    dashboardFilter: "all",
+    createModalOpen: false,
+    imageSelectedAssetIds: [],
+    presentationSelectedAssetIds: [],
+    imagePrompt: "",
+    imageVariationsPerAsset: 1,
+    videoSelectedAssetIds: [],
+    videoGeneratedAssetIds: [],
+    videoApprovedAssetIds: [],
+    videoTemplateId: "drone-tour",
+    videoDurationSeconds: 9,
+    videoAspectRatio: "16:9",
+    videoIncludeHumans: false,
+    videoIncludeCars: false,
+    videoMotionIntensity: "medium",
+    videoCameraMotion: "",
+    videoStyle: "cinematic architectural realism",
+    videoPrompt: "",
+    videoProvider: "auto",
+    imageProvider: "auto",
+    activeVideoJobId: "",
+    activeVideoProductionId: "",
+    videoInputFilter: "all",
+    videoFidelityLevel: "strict",
+    videoBaseImageProgress: null,
+    videoClipProgress: null,
+    variationsPerImage: 1,
+    renderVariationJobs: [],
+    visualProfilePrompt: "",
   },
   ai: {
     cocoModel: null,
@@ -1188,16 +1435,29 @@ const state = {
 
 const elements = {};
 let assetDropzoneDragDepth = 0;
+let projectAssetDropzoneDragDepth = 0;
 let apiHealthTimer = null;
 let canvasObjectDrag = null;
+let projectDbPromise = null;
+let projectAutosaveTimer = null;
+let projectRestoreInProgress = false;
 
 const ELEMENT_IDS = [
   "authScreen", "loginForm", "loginUsername", "loginPassword", "loginError",
   "appShell", "apiHealthChip", "sessionChip", "adminToggleBtn", "logoutBtn",
+  "projectSidebar", "projectSearchInput", "projectList", "projectMemoryStatus", "projectMemoryMeta",
+  "projectNewBtn", "projectSaveBtn",
+  "projectDashboard", "dashboardNewProjectBtn", "dashboardSearchInput", "dashboardFilterSelect", "projectDashboardGrid",
+  "conversationShell", "activeProjectStatus", "activeProjectTitle", "activeProjectSubtitle", "projectTabs",
+  "projectConversationView", "projectConversationMessages", "projectQuickChips", "projectComposer", "conversationFileInput",
+  "conversationAttachBtn", "conversationActionSelect", "conversationPromptInput", "projectAssetsView",
+  "projectImagesView", "projectVideoStudioView", "projectPresentationsView", "projectSettingsView", "projectProviderPanel",
+  "projectAssetRail", "projectCreateModal", "projectCreateForm", "modalProjectName", "modalProjectType",
+  "modalProjectGoal", "modalProjectDescription", "projectCreateCancelBtn",
   "flowScreen", "flowRenderCard", "flowPdfCard", "wizardShell", "backToFlowsBtn",
   "wizardFlowLabel", "wizardFlowTitle", "wizardFlowSummary", "stepper", "step1Panel",
   "step2Panel", "step3Panel", "step4Panel", "assetSummary", "assetDropzone", "assetDropzoneTitle",
-  "assetDropzoneHint", "imageInput", "documentInput", "primaryGallery", "supportGallery",
+  "assetDropzoneHint", "imageInput", "documentInput", "customTemplateInput", "primaryGallery", "supportGallery",
   "analysisStatus", "refreshAnalysisBtn", "analysisPreviewEmpty", "analysisPreview", "analysisOverlay",
   "analysisCanvas", "analysisInteractionLayer", "annotationDraft", "annotationCategory", "annotationLabel",
   "annotationToggleBtn", "annotationResetBtn", "annotationHelp",
@@ -1224,6 +1484,7 @@ function init() {
   elements.feedbackMessage.value = state.feedbackDraft.message || "";
   applySession();
   renderAll();
+  hydrateProjectsForSession();
   loadLocalTemplateCatalog().then(() => renderDecisions());
   loadLocalTemplateObjects().then(() => {
     if (state.flow === "pdf") renderAll();
@@ -1236,6 +1497,30 @@ function init() {
 function bindEvents() {
   elements.loginForm.addEventListener("submit", handleLogin);
   elements.logoutBtn.addEventListener("click", logout);
+  elements.projectNewBtn.addEventListener("click", openProjectCreateModal);
+  elements.projectSaveBtn.addEventListener("click", () => saveCurrentProject({ silent: false }));
+  elements.dashboardNewProjectBtn.addEventListener("click", openProjectCreateModal);
+  elements.projectCreateCancelBtn.addEventListener("click", closeProjectCreateModal);
+  elements.projectCreateForm.addEventListener("submit", createProjectFromModal);
+  elements.dashboardSearchInput.addEventListener("input", (event) => {
+    state.projects.search = event.target.value || "";
+    if (elements.projectSearchInput) elements.projectSearchInput.value = state.projects.search;
+    renderProjectDashboard();
+    renderProjectSidebar();
+  });
+  elements.dashboardFilterSelect.addEventListener("change", (event) => {
+    state.projectUi.dashboardFilter = event.target.value || "all";
+    renderProjectDashboard();
+  });
+  elements.conversationAttachBtn.addEventListener("click", () => elements.conversationFileInput.click());
+  elements.conversationFileInput.addEventListener("change", (event) => handleConversationFiles(event.target.files));
+  elements.projectComposer.addEventListener("submit", handleProjectComposerSubmit);
+  elements.projectSearchInput.addEventListener("input", (event) => {
+    state.projects.search = event.target.value || "";
+    if (elements.dashboardSearchInput) elements.dashboardSearchInput.value = state.projects.search;
+    renderProjectSidebar();
+    renderProjectDashboard();
+  });
   elements.flowRenderCard.addEventListener("click", () => selectFlow("render"));
   elements.flowPdfCard.addEventListener("click", () => selectFlow("pdf"));
   elements.backToFlowsBtn.addEventListener("click", goBackToFlows);
@@ -1251,6 +1536,9 @@ function bindEvents() {
   elements.assetDropzone.addEventListener("drop", handleAssetDrop);
   elements.imageInput.addEventListener("change", (event) => handleImageFiles(event.target.files));
   elements.documentInput.addEventListener("change", (event) => handleMixedFiles(event.target.files));
+  if (elements.customTemplateInput) {
+    elements.customTemplateInput.addEventListener("change", (event) => handleCustomTemplateFiles(event.target.files));
+  }
   elements.refreshAnalysisBtn.addEventListener("click", () => runProjectAnalyses(true));
   elements.contextBrief.addEventListener("input", handleContextChange);
   elements.changeRequest.addEventListener("input", handleChangeRequest);
@@ -1283,6 +1571,10 @@ function bindEvents() {
   document.addEventListener("change", handleDelegatedChange);
   document.addEventListener("input", handleDelegatedInput);
   document.addEventListener("focusin", handleDelegatedFocusIn);
+  document.addEventListener("dragenter", handleProjectAssetsDragEnter);
+  document.addEventListener("dragover", handleProjectAssetsDragOver);
+  document.addEventListener("dragleave", handleProjectAssetsDragLeave);
+  document.addEventListener("drop", handleProjectAssetsDrop);
 }
 
 function hydrateSession() {
@@ -1329,6 +1621,7 @@ async function handleLogin(event) {
     toast(`Sesion iniciada como ${user.name}.`, "ok");
     applySession();
     renderAll();
+    hydrateProjectsForSession();
   } catch (error) {
     elements.loginError.classList.remove("hidden");
     elements.loginError.textContent = error.message || "No se pudo iniciar sesion.";
@@ -1343,6 +1636,11 @@ async function handleLogin(event) {
 function logout() {
   state.session = null;
   state.adminDrawerOpen = false;
+  state.projects.items = [];
+  state.projects.activeId = "";
+  state.projects.search = "";
+  state.projects.status = "Sin sesion";
+  if (projectAutosaveTimer) clearTimeout(projectAutosaveTimer);
   localStorage.removeItem(STORAGE_KEYS.session);
   resetFlowRuntime({ preserveAssets: false, clearFlow: true });
   applySession();
@@ -1353,13 +1651,14 @@ function applySession() {
   const loggedIn = Boolean(state.session);
   elements.authScreen.classList.toggle("hidden", loggedIn);
   elements.appShell.classList.toggle("hidden", !loggedIn);
+  if (elements.projectSidebar) elements.projectSidebar.classList.toggle("hidden", !loggedIn);
   elements.sessionChip.textContent = loggedIn ? `${state.session.name} · ${state.session.username}` : "Sin sesion";
   elements.adminToggleBtn.classList.toggle("hidden", !(loggedIn && state.session.role === "admin"));
   elements.promptDebugBlock.classList.toggle("hidden", !(loggedIn && state.session.role === "admin"));
   if (!loggedIn) toggleAdminDrawer(false);
 }
 
-function selectFlow(flow) {
+function selectFlow(flow, options = {}) {
   state.flow = flow === "pdf" ? "pdf" : "render";
   state.currentStep = 1;
   state.generation.busy = false;
@@ -1372,11 +1671,13 @@ function selectFlow(flow) {
   state.annotation.dragging = false;
   state.annotation.draft = null;
   renderAll();
-  if (state.images.some((image) => !image.analysis)) runProjectAnalyses(false);
+  scheduleProjectAutosave("flow");
+  if (!options.skipAnalysis && state.images.some((image) => !image.analysis)) runProjectAnalyses(false);
 }
 
 function goBackToFlows() {
   resetFlowRuntime({ preserveAssets: true, clearFlow: true });
+  state.projectUi.tab = "assets";
   renderAll();
 }
 
@@ -1391,6 +1692,7 @@ async function moveStep(direction) {
   const targetStep = clamp(state.currentStep + direction, 1, steps.length);
   if (direction > 0 && !validateStep(state.currentStep)) return;
   state.currentStep = targetStep;
+  scheduleProjectAutosave("step");
   if (direction < 0 && state.currentStep < steps.length) {
     state.generation.stage = "";
   }
@@ -1438,6 +1740,9 @@ function validateStep(step) {
 function renderAll() {
   renderWorkspaceVisibility();
   renderHeader();
+  renderProjectSidebar();
+  renderProjectDashboard();
+  renderProjectWorkspace();
   renderStepper();
   renderStepPanels();
   renderAssets();
@@ -1479,10 +1784,13 @@ function renderIntroGoals() {
 }
 
 function renderWorkspaceVisibility() {
-  const showWizard = Boolean(state.session && state.flow);
-  const showFlowScreen = Boolean(state.session && !state.flow);
-  elements.flowScreen.classList.toggle("hidden", !showFlowScreen);
-  elements.wizardShell.classList.toggle("hidden", !showWizard);
+  const loggedIn = Boolean(state.session);
+  const hasActiveProject = Boolean(loggedIn && state.projects.activeId);
+  const showLegacyWizard = Boolean(loggedIn && hasActiveProject && state.flow && state.projectUi.tab === "legacy");
+  elements.projectDashboard.classList.toggle("hidden", !loggedIn || hasActiveProject || showLegacyWizard);
+  elements.conversationShell.classList.toggle("hidden", !loggedIn || !hasActiveProject || showLegacyWizard);
+  elements.flowScreen.classList.add("hidden");
+  elements.wizardShell.classList.toggle("hidden", !showLegacyWizard);
 }
 
 function renderHeader() {
@@ -1492,9 +1800,9 @@ function renderHeader() {
     elements.wizardFlowTitle.textContent = "Render fotorrealista";
     elements.wizardFlowSummary.textContent = "Sube una referencia, corrige la lectura IA y genera una imagen arquitectonica premium.";
   } else {
-    elements.wizardFlowLabel.textContent = "Brochure";
-    elements.wizardFlowTitle.textContent = "Brochure PDF";
-    elements.wizardFlowSummary.textContent = "Sube fotos, configura tono y secciones, personaliza cada diapositiva y exporta un deck profesional.";
+    elements.wizardFlowLabel.textContent = "Presentaciones";
+    elements.wizardFlowTitle.textContent = "Brochure o PPT editable";
+    elements.wizardFlowSummary.textContent = "Sube fotos, escoge plantilla, define la caja de diapositivas, edita capas y exporta PDF/PPT profesional.";
   }
 }
 
@@ -1509,11 +1817,11 @@ function renderStepper() {
   elements.stepper.innerHTML = steps.map((step) => {
     const classes = ["step-item", step.id === state.currentStep ? "active" : "", step.id < state.currentStep ? "complete" : ""].filter(Boolean).join(" ");
     return `
-      <li class="${classes}">
+      <li class="${classes}" title="${escapeHtml(step.copy)}">
         <div class="step-badge"><span>${step.id}</span></div>
         <div class="step-copy">
           <strong>${escapeHtml(step.title)}</strong>
-          <span>${escapeHtml(step.copy)}</span>
+          <span>${step.id === state.currentStep ? escapeHtml(step.copy) : ""}</span>
         </div>
       </li>
     `;
@@ -1545,10 +1853,10 @@ function renderStepPanels() {
   if (state.flow === "pdf") {
     elements.step3Panel.classList.toggle("hidden", !(state.currentStep === 3 || state.currentStep === 4));
     elements.step3Eyebrow.textContent = state.currentStep === 4 ? "Paso 4" : "Paso 3";
-    elements.step3Title.textContent = state.currentStep === 4 ? "Cantidad y tipo de diapositivas" : "Diseno editorial y contexto";
+    elements.step3Title.textContent = state.currentStep === 4 ? "Caja de diapositivas" : "Selector de plantilla";
     elements.step4Panel.classList.toggle("hidden", !(state.currentStep === 5 || state.currentStep === 6));
     elements.step4Eyebrow.textContent = state.currentStep === 5 ? "Paso 5" : "Paso 6";
-    elements.step4Title.textContent = state.currentStep === 5 ? "Editor de diapositiva" : "Resultado final";
+    elements.step4Title.textContent = state.currentStep === 5 ? "Canva / PPT por capas" : "Entrega final";
     elements.pdfSectionStudio.classList.toggle("hidden", state.currentStep !== 5);
     elements.resultView.classList.toggle("hidden", state.currentStep !== 6);
   } else {
@@ -1605,6 +1913,51 @@ async function handleAssetDrop(event) {
   await handleImageFiles(imageFiles);
 }
 
+function getProjectAssetsDropzone(event) {
+  return event.target?.closest?.("[data-project-assets-dropzone]") || null;
+}
+
+function handleProjectAssetsDragEnter(event) {
+  const zone = getProjectAssetsDropzone(event);
+  if (!zone) return;
+  event.preventDefault();
+  projectAssetDropzoneDragDepth += 1;
+  zone.classList.add("is-dragging");
+}
+
+function handleProjectAssetsDragOver(event) {
+  const zone = getProjectAssetsDropzone(event);
+  if (!zone) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  zone.classList.add("is-dragging");
+}
+
+function handleProjectAssetsDragLeave(event) {
+  const zone = getProjectAssetsDropzone(event);
+  if (!zone) return;
+  event.preventDefault();
+  projectAssetDropzoneDragDepth = Math.max(0, projectAssetDropzoneDragDepth - 1);
+  if (projectAssetDropzoneDragDepth === 0 || !zone.contains(event.relatedTarget)) {
+    projectAssetDropzoneDragDepth = 0;
+    zone.classList.remove("is-dragging");
+  }
+}
+
+async function handleProjectAssetsDrop(event) {
+  const zone = getProjectAssetsDropzone(event);
+  if (!zone) return;
+  event.preventDefault();
+  projectAssetDropzoneDragDepth = 0;
+  zone.classList.remove("is-dragging");
+  const files = Array.from(event.dataTransfer?.files || []);
+  if (!files.length) {
+    toast("No se detectaron archivos en el arrastre.", "warn");
+    return;
+  }
+  await handleConversationFiles(files, { origin: "assets-dropzone", analyze: true });
+}
+
 async function handleImageFiles(fileList) {
   const files = Array.from(fileList || []).filter((file) => file.type.startsWith("image/"));
   if (!files.length) return;
@@ -1633,10 +1986,36 @@ async function addImageFile(file) {
   const item = { id: cryptoRandom(), name: file.name, size: file.size, type: file.type, url, analysis: null };
   state.images.unshift(item);
   if (!state.mainId) state.mainId = item.id;
+  upsertProjectAsset({
+    id: item.id,
+    type: "image",
+    name: item.name,
+    url: item.url,
+    mimeType: item.type,
+    size: item.size,
+    source: "uploaded",
+    provider: "manual",
+    metadata: { legacyImageId: item.id },
+  });
+  scheduleProjectAutosave("image");
+  return item;
 }
 
 function addDocumentFile(file) {
-  state.documents.unshift({ id: cryptoRandom(), name: file.name, size: file.size, type: file.type || "application/octet-stream" });
+  const item = { id: cryptoRandom(), name: file.name, size: file.size, type: file.type || "application/octet-stream" };
+  state.documents.unshift(item);
+  upsertProjectAsset({
+    id: item.id,
+    type: inferAssetType(item.name, item.type),
+    name: item.name,
+    mimeType: item.type,
+    size: item.size,
+    source: "uploaded",
+    provider: "manual",
+    metadata: { legacyDocumentId: item.id },
+  });
+  scheduleProjectAutosave("document");
+  return item;
 }
 
 function renderAssets() {
@@ -1666,7 +2045,9 @@ function renderPrimaryGallery() {
 
   elements.primaryGallery.innerHTML = state.images.map((item) => {
     const isMain = item.id === state.mainId;
-    const analysisLabel = item.analysis ? `${item.analysis.objects.length} objetos · ${item.analysis.texts.length} textos` : "Lectura pendiente";
+    const analysisObjects = safeArray(item.analysis?.objects);
+    const analysisTexts = safeArray(item.analysis?.texts);
+    const analysisLabel = item.analysis ? `${analysisObjects.length} objetos · ${analysisTexts.length} textos` : "Lectura pendiente";
     return `
       <article class="asset-card">
         <img src="${item.url}" alt="${escapeHtml(item.name)}" />
@@ -1725,6 +2106,7 @@ async function runMainAnalysis(forceRemote) {
   } finally {
     state.analysisBusy = false;
     renderAll();
+    scheduleProjectAutosave("analysis");
   }
 }
 
@@ -1753,6 +2135,7 @@ async function runProjectAnalyses(forceRemote = false) {
       renderAnalysis();
       await analyzeImageReference(image, forceRemote).catch(() => {
         image.analysis = image.analysis || buildAnalysisFallback();
+        syncProjectAssetAnalysisFromImage(image);
       });
       completed += 1;
       renderAssets();
@@ -1764,6 +2147,7 @@ async function runProjectAnalyses(forceRemote = false) {
     state.analysisBusy = false;
     renderAll();
     updatePromptText();
+    scheduleProjectAutosave("analysis");
     if (state.analysisRerunRequested || state.images.some((image) => !image.analysis)) {
       state.analysisRerunRequested = false;
       runProjectAnalyses(forceRemote);
@@ -1782,6 +2166,7 @@ async function analyzeImageReference(image, forceRemote = false) {
     }
   }
   image.analysis = mergeAnalyses(localAnalysis, remoteAnalysis);
+  syncProjectAssetAnalysisFromImage(image);
   return image.analysis;
 }
 
@@ -1959,12 +2344,21 @@ function buildAnalysisEditors(analysis) {
 
   return cards.map((card) => {
     const values = analysis[card.key] || [];
-    const tokenMarkup = (values.length ? values : ["Sin datos"]).map((value) => `
-      <span class="token-pill">
-        ${escapeHtml(value)}
-        <button type="button" aria-label="Eliminar" data-token-remove="${card.key}" data-token-value="${escapeHtml(value)}">×</button>
-      </span>
-    `).join("");
+    const visibleValues = values.slice(0, 12);
+    const overflowCount = Math.max(0, values.length - visibleValues.length);
+    const tokenMarkup = values.length
+      ? `
+        <div class="analysis-bubble-grid">
+          ${visibleValues.map((value) => `
+            <span class="token-pill analysis-bubble" title="${escapeHtml(value)}">
+              <span>${escapeHtml(value)}</span>
+              <button type="button" aria-label="Eliminar ${escapeHtml(value)}" data-token-remove="${card.key}" data-token-value="${escapeHtml(value)}">&times;</button>
+            </span>
+          `).join("")}
+          ${overflowCount ? `<span class="token-pill analysis-bubble muted">+${overflowCount} mas</span>` : ""}
+        </div>
+      `
+      : `<div class="analysis-bubble-grid"><span class="token-pill analysis-bubble muted">Sin datos</span></div>`;
 
     const actionMarkup = card.type === "select"
       ? `
@@ -1984,8 +2378,9 @@ function buildAnalysisEditors(analysis) {
         <div class="mini-head">
           <span class="eyebrow">${escapeHtml(card.eyebrow)}</span>
           <strong>${escapeHtml(card.label)}</strong>
+          <small>${values.length ? `${values.length} lectura${values.length === 1 ? "" : "s"}` : "Pendiente"}</small>
         </div>
-        <div class="token-cloud">${tokenMarkup}</div>
+        <div class="token-cloud token-cloud-bubbles">${tokenMarkup}</div>
         <div class="token-editor-actions">${actionMarkup}</div>
       </article>
     `;
@@ -2084,11 +2479,19 @@ function handleIntroContextChange(event) {
 
 function renderPdfSectionStudio() {
   if (state.flow !== "pdf" || state.currentStep !== 5) {
+    if (window._renderAIEditorInst) {
+      window._renderAIEditorInst.unmount();
+      window._renderAIEditorInst = null;
+    }
+    if (window._creativeDeckEditorInst) {
+      window._creativeDeckEditorInst.unmount();
+      window._creativeDeckEditorInst = null;
+    }
     elements.pdfSectionStudio.innerHTML = "";
     return;
   }
 
-  renderPdfSectionStudioEditor();
+  mountCanvaEditor();
   return;
 
   ensurePdfBuilderDefaults();
@@ -2517,14 +2920,21 @@ function renderPdfSectionStudioEditor() {
   const styleProfile = getBrochureStyleProfile(state.settings.brochureStyle);
   const activeTemplateEntry = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   const slideLayoutOptions = getSlideLayoutVariantsForTemplate(activeTemplateEntry, currentBlueprint);
-  const activeSlideLayout = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[currentBlueprint.key]) || slideLayoutOptions[0]?.value || currentConfig.layout || currentBlueprint.layout;
+  const selectedLocalTemplate = getSelectedLocalTemplateEntry();
+  const isBlankLocalTemplate = selectedLocalTemplate && !safeArray(selectedLocalTemplate.slidePreviews).length;
+  let activeSlideLayout = (state.settings.pdfSlideLayouts && state.settings.pdfSlideLayouts[currentBlueprint.key]) || slideLayoutOptions[0]?.value || currentConfig.layout || currentBlueprint.layout;
+  if (isBlankLocalTemplate) {
+    activeSlideLayout = "blank-canvas";
+    if (!state.settings.pdfSlideLayouts || typeof state.settings.pdfSlideLayouts !== "object") state.settings.pdfSlideLayouts = {};
+    state.settings.pdfSlideLayouts[currentBlueprint.key] = activeSlideLayout;
+  }
   const activeImageId = resolveSlideActiveImageId(currentConfig);
   const activeImage = state.images.find((image) => image.id === activeImageId) || null;
   const palette = resolveEditorPalette(analysis);
   const isBoardSlide = isMoodBoardBlueprint(currentBlueprint, currentConfig);
   const moodBoardLayout = String(currentConfig.moodBoardLayout || inferMoodBoardLayout(currentBlueprint));
-  const selectedLocalTemplate = getSelectedLocalTemplateEntry();
   if (selectedLocalTemplate && !LOCAL_TEMPLATE_OBJECTS) requestLocalTemplateObjectsHydration();
+  const selectedTemplateLabel = selectedLocalTemplate?.label || "Base editable";
 
   elements.pdfSectionStudio.innerHTML = `
     <article class="pdf-section-shell slide-studio-v2">
@@ -2533,6 +2943,7 @@ function renderPdfSectionStudioEditor() {
         <div class="slide-studio-title">
           <span class="eyebrow">Paso 5 · Editor</span>
           <strong>Diapositiva ${currentIndex + 1} de ${blueprints.length} · ${escapeHtml(currentBlueprint.sectionLabel)}</strong>
+          <small>${escapeHtml(selectedTemplateLabel)} · ${escapeHtml(styleProfile.label || state.settings.brochureStyle || "Estilo editorial")}</small>
         </div>
         <div class="slide-studio-nav-btns">
           <button type="button" class="button button-ghost btn-sm" data-slide-nav-shift="-1" ${currentIndex === 0 ? "disabled" : ""}>← Anterior</button>
@@ -2564,9 +2975,9 @@ function renderPdfSectionStudioEditor() {
           ${buildEditableSlideCanvas(currentBlueprint, currentConfig, slideText, activeSlideLayout, styleProfile, palette)}
         </div>
 
-      </section>
+        ${renderTemplateImageMapper(currentBlueprint, currentConfig, activeSlideLayout)}
 
-      ${renderTemplateImageMapper(currentBlueprint, currentConfig, activeSlideLayout)}
+      </section>
 
     </article>
   `;
@@ -2694,10 +3105,16 @@ function renderCanvasSlotSidebar(blueprint, config, activeLayout) {
   return `
     <aside class="canvas-slot-sidebar" aria-label="Capas de imagen de la diapositiva">
       <div class="slot-sidebar-head">
-        <span class="eyebrow">Capas imagen</span>
-        <strong>Asigna fotos al canvas</strong>
-        <small>Fondo, marcos y cuadros se reemplazan desde aqui.</small>
+        <span class="eyebrow">Capas editables</span>
+        <strong>Que se renderiza y como</strong>
+        <small>Selecciona una capa, asigna foto y define si ese slot usa render IA, foto cruda o vector limpio.</small>
       </div>
+      <div class="slot-render-guide">
+        <span><strong>1</strong> Capa/foto</span>
+        <span><strong>2</strong> Tratamiento</span>
+        <span><strong>3</strong> Orden PPT</span>
+      </div>
+      ${renderTemplateLayerStack(blueprint, config, activeLayout)}
       <div class="slot-sidebar-list">
         ${slots.map((slot, index) => {
           const assigned = resolveTemplateAssignedImage(config, slot.id, templateSlotFallbackIndex(slot, index));
@@ -2726,6 +3143,40 @@ function renderCanvasSlotSidebar(blueprint, config, activeLayout) {
       </div>
       <button type="button" class="slot-sidebar-add" data-template-add-object="${blueprint.key}" data-template-add-kind="image">+ Nuevo cuadro de imagen</button>
     </aside>
+  `;
+}
+
+function renderTemplateLayerStack(blueprint, config, activeLayout) {
+  const { textObjects, imageSlots } = resolveTemplateEditableObjects(getSelectedLocalTemplateEntry(), activeLayout, config);
+  const rows = [
+    ...safeArray(imageSlots).map((slot, index) => ({
+      id: slot.id,
+      kind: slot.id === "__background__" ? "Fondo" : "Foto",
+      label: labelTemplateImageSlot(slot, index),
+      active: config.activeTemplateObject === slot.id || config.activeTemplateSlot === slot.id,
+      attrs: `data-template-slot-active="${blueprint.key}" data-template-slot-id="${escapeHtml(slot.id)}"`,
+    })),
+    ...safeArray(textObjects).map((obj, index) => ({
+      id: obj.id,
+      kind: "Texto",
+      label: obj.name || (index === 0 ? "Titulo" : `Texto ${index + 1}`),
+      active: config.activeTemplateObject === obj.id,
+      attrs: `data-template-object-key="${blueprint.key}" data-template-object-id="${escapeHtml(obj.id)}"`,
+    })),
+  ];
+  if (!rows.length) {
+    return `<div class="template-layer-stack empty"><strong>Capas automaticas</strong><span>El canvas en blanco permite crear cuadros nuevos.</span></div>`;
+  }
+  return `
+    <div class="template-layer-stack" aria-label="Capas editables de PowerPoint">
+      ${rows.map((row, index) => `
+        <button type="button" class="template-layer-row ${row.active ? "active" : ""}" ${row.attrs}>
+          <span class="template-layer-index">Capa ${String(index + 1).padStart(2, "0")}</span>
+          <strong>${escapeHtml(row.kind)}</strong>
+          <small>${escapeHtml(row.label)}</small>
+        </button>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -2785,7 +3236,7 @@ function buildTemplateObjectTextStyle(obj, config, titleFontFamily, bodyFontFami
     `top:${rect.y}%`,
     `width:${rect.width}%`,
     `height:${rect.height}%`,
-    `z-index:${30 + index}`,
+    `z-index:${clamp(Number(style.zIndex || (30 + index)), 1, 99)}`,
     `font-family:${family}`,
     `font-size:${size}px`,
     `font-weight:${style.bold ? 800 : index === 0 ? 700 : 500}`,
@@ -2798,7 +3249,9 @@ function buildTemplateObjectTextStyle(obj, config, titleFontFamily, bodyFontFami
 
 function buildTemplateObjectImageStyle(obj, config = {}) {
   const rect = resolveTemplateObjectRect(config, obj);
-  return `left:${rect.x}%;top:${rect.y}%;width:${rect.width}%;height:${rect.height}%;`;
+  const overrideStyle = config.templateObjectStyles?.[obj.id] || {};
+  const zIndex = clamp(Number(overrideStyle.zIndex || (obj.id === "__background__" || obj.role === "background" ? 1 : 10)), 1, 99);
+  return `left:${rect.x}%;top:${rect.y}%;width:${rect.width}%;height:${rect.height}%;z-index:${zIndex};`;
 }
 
 function buildTemplateEditableObjectLayer(blueprint, config, slideText, activeLayout, title, subtitle, bullets, titleFontFamily, bodyFontFamily) {
@@ -2830,7 +3283,6 @@ function buildTemplateEditableObjectLayer(blueprint, config, slideText, activeLa
     const rect = resolveTemplateObjectRect(config, slot);
     const isBackground = slot.id === "__background__" || slot.role === "background";
     const label = labelTemplateImageSlot(slot, index);
-    const zIndex = isBackground ? 1 : 8 + index;
     return `
       <button type="button" class="tpl-edit-object tpl-edit-image-slot ${isBackground ? "tpl-background-slot" : ""} ${isActive ? "active" : ""} ${image ? "has-image" : "is-empty"}"
         data-template-slot-active="${blueprint.key}"
@@ -2841,7 +3293,7 @@ function buildTemplateEditableObjectLayer(blueprint, config, slideText, activeLa
         data-object-y="${rect.y}"
         data-object-width="${rect.width}"
         data-object-height="${rect.height}"
-        style="${buildTemplateObjectImageStyle(slot, config)}z-index:${zIndex};">
+        style="${buildTemplateObjectImageStyle(slot, config)}">
         <span class="tpl-object-handle" data-template-object-drag-handle>MOVE</span>
         ${image ? `<img src="${image.url}" alt="${escapeHtml(image.name)}" loading="lazy" draggable="false" />` : `<span>${isBackground ? "Fondo sin reemplazar" : "Asignar imagen"}</span>`}
         <small>${escapeHtml(label)}</small>
@@ -3127,12 +3579,27 @@ function renderEditorCommandBar(blueprint, config, activeLayout, palette, active
         <button type="button" class="editor-command-chip ${config.textMode === "custom" ? "active" : ""}" data-slide-text-mode="${key}" data-slide-text-mode-value="custom">Editable</button>
       </div>
       <div class="editor-command-group">
+        <span>Alineacion</span>
+        ${["left", "center", "right"].map((align) => `
+          <button type="button" class="editor-command-chip ${String(activeObjectStyle.align || "left") === align ? "active" : ""}" data-template-active-align="${key}" data-template-active-align-value="${align}">
+            ${align === "left" ? "Izq." : align === "center" ? "Centro" : "Der."}
+          </button>
+        `).join("")}
+      </div>
+      <div class="editor-command-group">
         <span>Objeto activo</span>
         <button type="button" class="editor-command-chip" data-template-active-size="${key}" data-template-active-size-delta="-4">Reducir</button>
         <button type="button" class="editor-command-chip" data-template-active-size="${key}" data-template-active-size-delta="4">Agrandar</button>
         <button type="button" class="editor-command-chip" data-template-active-font-size="${key}" data-template-active-font-size-delta="-2">A-</button>
         <button type="button" class="editor-command-chip" data-template-active-font-size="${key}" data-template-active-font-size-delta="2">A+</button>
         <button type="button" class="editor-command-chip danger" data-template-active-delete="${key}" ${activeObjectId ? "" : "disabled"}>Eliminar</button>
+      </div>
+      <div class="editor-command-group">
+        <span>Capas</span>
+        <button type="button" class="editor-command-chip" data-template-active-depth="${key}" data-template-active-depth-delta="-5">Atras</button>
+        <button type="button" class="editor-command-chip" data-template-active-depth="${key}" data-template-active-depth-delta="5">Adelante</button>
+        <button type="button" class="editor-command-chip" data-template-active-depth="${key}" data-template-active-depth-value="1">Fondo</button>
+        <button type="button" class="editor-command-chip" data-template-active-depth="${key}" data-template-active-depth-value="95">Frente</button>
       </div>
       <div class="editor-command-group editor-command-current">
         <span>Foto activa abajo</span>
@@ -3398,7 +3865,7 @@ function renderTemplateImageMapper(blueprint, config, activeLayout) {
           ${activeSlotId ? `
             ${renderTemplateSlotOptionGroup("Origen", SLIDE_IMAGE_SOURCE_OPTIONS, slotRender.sourceMode, blueprint.key, activeSlotId, "sourceMode", ["rendered", "raw"])}
             ${renderTemplateSlotOptionGroup("Estilo", SLIDE_RENDER_TREATMENT_OPTIONS, slotRender.renderTreatment, blueprint.key, activeSlotId, "renderTreatment", ["master", "editorial", "warm", "moody", "linear", "technical"])}
-            ${renderTemplateSlotOptionGroup("Representacion", SLIDE_IMAGE_REPRESENTATION_OPTIONS, slotRender.imageRepresentation, blueprint.key, activeSlotId, "imageRepresentation", ["photographic", "three-dimensional", "linear-drawing", "mixed-media"])}
+            ${renderTemplateSlotOptionGroup("Representacion", SLIDE_IMAGE_REPRESENTATION_OPTIONS, slotRender.imageRepresentation, blueprint.key, activeSlotId, "imageRepresentation", ["photographic", "three-dimensional", "linear-drawing", "vector-plan", "mixed-media"])}
             ${renderTemplateSlotOptionGroup("Acabado", SLIDE_IMAGE_FINISH_OPTIONS, slotRender.imageFinish, blueprint.key, activeSlotId, "imageFinish", ["crisp", "filmic-grain", "soft-film", "contrast-rich"])}
             ${renderTemplateSlotOptionGroup("Personas", SLIDE_IMAGE_OCCUPANCY_OPTIONS, slotRender.imageOccupancy, blueprint.key, activeSlotId, "imageOccupancy", ["none", "few", "many"])}
             <label class="slot-render-prompt">
@@ -3747,11 +4214,29 @@ function renderPdfDeckBuilder() {
     return `
       <article class="pdf-builder-shell template-market-shell slide-plan-shell">
         <div class="mini-head">
-          <span class="eyebrow">Paso 4 · Mapa del brochure</span>
-          <strong>Arma la secuencia de diapositivas</strong>
+          <span class="eyebrow">Paso 4 · Caja de diapositivas</span>
+          <strong>Define la estructura antes de entrar al editor por capas</strong>
+        </div>
+        <div class="slide-plan-steps" aria-label="Orden de trabajo">
+          <article>
+            <span>01</span>
+            <strong>Agrega secciones</strong>
+            <p>Portada, moodboard, materiales, planos, renders o cierre.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <strong>Ordena la narrativa</strong>
+            <p>Sube o baja paginas para que el deck tenga lectura clara.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <strong>Edita cada hoja</strong>
+            <p>En el paso 5 cada texto, foto y cuadro se vuelve capa editable.</p>
+          </article>
         </div>
         <div class="slide-plan-summary">
           <span class="status-chip status-soft">Plantilla · ${escapeHtml(activeTemplateLabel)}</span>
+          <span class="status-chip status-soft">${state.settings.templateType === "brochure" ? "Brochure" : "Presentacion PPT"}</span>
           <span class="status-chip status-soft">${blueprints.length} pagina${blueprints.length === 1 ? "" : "s"}</span>
         </div>
         <div class="slide-plan-grid-simple">
@@ -3763,16 +4248,25 @@ function renderPdfDeckBuilder() {
 
   const localCatalog = LOCAL_TEMPLATE_CATALOG || { brochure: [], ppt: [] };
   const blankTemplates = BLANK_LOCAL_TEMPLATES.filter((item) => item.type === state.settings.templateType);
-  const localTemplates = state.settings.templateType === "brochure"
-    ? [...blankTemplates, ...safeArray(localCatalog.brochure)]
-    : [...blankTemplates, ...safeArray(localCatalog.ppt)];
+  const localTemplateQuery = styleSearch.trim().toLowerCase();
+  const customTemplates = safeArray(state.customTemplates).filter((item) => item.type === state.settings.templateType);
+  const rawLocalTemplates = state.settings.templateType === "brochure"
+    ? [...customTemplates, ...blankTemplates, ...safeArray(localCatalog.brochure)]
+    : [...customTemplates, ...blankTemplates, ...safeArray(localCatalog.ppt)];
+  const localTemplates = rawLocalTemplates.filter((template) => {
+    if (template.blank) return true;
+    const haystack = [template.label, template.description, template.category, template.pptxPath].join(" ");
+    const matchesQuery = !localTemplateQuery || haystack.toLowerCase().includes(localTemplateQuery);
+    return matchesQuery;
+  });
+  const canvaGenerationBrief = buildCanvaGenerationBrief(buildTemplateReferenceBlock() || activeTemplate);
 
   const localTemplateMarkup = `
-    <section class="pdf-builder-card local-tpl-section">
+    <section class="pdf-builder-card local-tpl-section turntable-template-selector">
       <div class="local-tpl-section-head">
         <div>
-          <span class="eyebrow">Biblioteca visual local</span>
-          <strong>Escoge un unico layout base para el brochure</strong>
+          <span class="eyebrow">Selector de plantilla</span>
+          <strong>Escoge Brochure o Presentacion y luego la base editable</strong>
         </div>
         <div class="template-type-pill">
           ${TEMPLATE_TYPE_OPTIONS.map(opt => `
@@ -3780,7 +4274,23 @@ function renderPdfDeckBuilder() {
           `).join('')}
         </div>
       </div>
-      <div class="style-library-grid template-browser-gallery local-tpl-gallery">
+      <div class="template-control-bar">
+        <label class="template-search-field">
+          <span>Buscar plantilla</span>
+          <input type="text" data-style-search value="${escapeHtml(styleSearch)}" placeholder="Ej: interior, beige, green, minimal, presentacion..." />
+        </label>
+        <button type="button" class="button button-secondary template-upload-btn" data-custom-template-picker>Subir layout PPT/ZIP</button>
+        <div class="template-utility-metrics">
+          <span>${localTemplates.length}/${rawLocalTemplates.length} compatibles</span>
+          <span>${selectedLocalTemplate ? "base seleccionada" : "elige una base"}</span>
+          <span>${activeTitleFont.label} + ${activeBodyFont.label}</span>
+        </div>
+      </div>
+      <details class="canva-brief-card">
+        <summary>Brief interno Canva editable</summary>
+        <pre>${escapeHtml(canvaGenerationBrief)}</pre>
+      </details>
+      <div class="style-library-grid template-browser-gallery local-tpl-gallery turntable-template-gallery">
         ${localTemplates.length ? localTemplates.map(t => {
           const thumbSrc = (t.slidePreviews && t.slidePreviews[0] && t.slidePreviews[0].path) ? t.slidePreviews[0].path + '?v=2' : t.thumbnail;
           const extraSlides = t.slidePreviews ? t.slidePreviews.slice(1, 4) : [];
@@ -3788,19 +4298,21 @@ function renderPdfDeckBuilder() {
           <button type="button" class="style-card style-card-market ${state.settings.localTemplate === t.id ? "active" : ""}" data-local-template="${t.id}">
             <div class="style-card-preview style-card-preview-art">
               <div class="style-card-thumb-frame">
-                ${t.blank
+                ${t.userUploaded
+                  ? `<span class="style-card-upload-thumb"><b>${escapeHtml(t.fileName?.split(".").pop()?.toUpperCase() || "PPT")}</b><small>${escapeHtml(t.fileName || t.label)}</small></span>`
+                  : t.blank
                   ? `<span class="style-card-blank-thumb"><b>BLANC</b><small>canvas editable</small></span>`
                   : `<img class="style-card-thumb" src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(t.label)}" loading="lazy" />`}
-                ${state.settings.localTemplate === t.id ? '<span class="tpl-check-badge">✓</span>' : ''}
+                ${state.settings.localTemplate === t.id ? '<span class="tpl-check-badge">OK</span>' : ''}
               </div>
             </div>
             ${extraSlides.length ? `<div class="local-tpl-strip">${extraSlides.map(s => `<img src="${escapeHtml(s.path + '?v=2')}" alt="" loading="lazy" />`).join('')}</div>` : ''}
             <div class="style-card-copy">
               <strong>${escapeHtml(t.label)}</strong>
-              <p>${t.slideCount ? t.slideCount + ' hojas disponibles' : 'Layout editable'}</p>
+              <p>${t.userUploaded ? "Layout cargado por usuario" : t.slideCount ? t.slideCount + ' hojas disponibles' : 'Layout editable'} · capas, texto, imagenes y fondos por slot</p>
             </div>
           </button>
-        `;}).join('') : '<div class="empty-state compact-empty"><strong>No hay plantillas locales disponibles</strong></div>'}
+        `;}).join('') : '<div class="empty-state compact-empty"><strong>No hay plantillas compatibles con ese filtro</strong><span>Prueba con interior, beige, green, minimal o usa Blanc PPT.</span></div>'}
       </div>
     </section>
   `;
@@ -3808,23 +4320,21 @@ function renderPdfDeckBuilder() {
   return `
     <article class="pdf-builder-shell template-market-shell pdf-step3-shell">
       <div class="mini-head">
-        <span class="eyebrow">Paso 3 · Diseño base</span>
-        <strong>Define la estrategia editorial y escoge la plantilla</strong>
+        <span class="eyebrow">Paso 3 · Template</span>
+        <strong>Selecciona la plantilla base antes de definir las paginas</strong>
       </div>
 
-      <!-- ESTRATEGIA EDITORIAL — always visible at top -->
+      ${localTemplateMarkup}
+
       <section class="pdf-builder-card pdf-strategy-open-card">
         <div class="step3-strategy-head">
-          <span class="eyebrow">Estrategia editorial</span>
-          <strong>Define tono, audiencia, narrativa e idioma antes de elegir el layout</strong>
+          <span class="eyebrow">Brief editorial</span>
+          <strong>Define tono, audiencia, narrativa e idioma para adaptar la plantilla elegida</strong>
         </div>
         <div class="template-strategy-grid step3-strategy-grid">
           ${strategyBlocks}
         </div>
       </section>
-
-      <!-- Una sola biblioteca: brochure o PPT, sin galeria duplicada -->
-      ${localTemplateMarkup}
 
     </article>
   `;
@@ -3843,6 +4353,9 @@ function ensurePdfBuilderDefaults() {
   state.settings.selectedAmenities = safeArray(state.settings.selectedAmenities).slice(0, Number(state.settings.amenityCount || 0));
   if (!state.settings.pdfSlideConfigs || typeof state.settings.pdfSlideConfigs !== "object") {
     state.settings.pdfSlideConfigs = {};
+  }
+  if (state.settings.deckEditor && (typeof state.settings.deckEditor !== "object" || !Array.isArray(state.settings.deckEditor.slides))) {
+    state.settings.deckEditor = null;
   }
   if (!state.settings.pdfSlideLayouts || typeof state.settings.pdfSlideLayouts !== "object") {
     state.settings.pdfSlideLayouts = {};
@@ -4201,28 +4714,16 @@ function renderCompactChoiceSet(key, title, description, options, currentValue) 
 
 function getBrochureStylePreviewCopy(option) {
   const library = {
-    monolith: { kicker: "architectural monograph", title: ["ARCHITECTURE", "PORTFOLIO"], subtitle: "Large image, restrained text, premium silence.", metaLeft: "Studio deck", metaRight: "Vol. 01" },
-    folio: { kicker: "curated portfolio", title: ["PORTFOLIO"], subtitle: "Elegant margins and editorial sequencing.", metaLeft: "Architecture", metaRight: "Edition" },
-    magazine: { kicker: "creative portfolio", title: ["Creative", "Portfolio"], subtitle: "Magazine rhythm with layered storytelling.", metaLeft: "Visual issue", metaRight: "Preview" },
-    poster: { kicker: "brand impact", title: ["PITCH", "DECK"], subtitle: "Bold headlines and graphic hierarchy.", metaLeft: "Concept", metaRight: "Cover" },
-    mosaic: { kicker: "material board", title: ["MOOD", "BOARD"], subtitle: "Collage, crops and multiple visual readings.", metaLeft: "Palette", metaRight: "Objects" },
-    "gallery-wall": { kicker: "curated imagery", title: ["GALLERY", "SERIES"], subtitle: "Exhibition-like layout with strong curation.", metaLeft: "Sequence", metaRight: "Wall" },
-    storyboard: { kicker: "project narrative", title: ["PROJECT", "STORY"], subtitle: "Frames, beats and visual storytelling.", metaLeft: "Narrative", metaRight: "Flow" },
-    atelier: { kicker: "studio collection", title: ["ATELIER", "BOOK"], subtitle: "Tactile, refined and art-directed.", metaLeft: "Studio", metaRight: "Curated" },
-    "urban-grid": { kicker: "urban proposal", title: ["URBAN", "PORTFOLIO"], subtitle: "Graphic city energy and modular structure.", metaLeft: "Grid", metaRight: "Issue" },
-    "technical-sheet": { kicker: "design manual", title: ["DESIGN", "MANUAL"], subtitle: "Technical precision with blueprint logic.", metaLeft: "System", metaRight: "Sheet" },
-    resort: { kicker: "hospitality brochure", title: ["RESORT", "DECK"], subtitle: "Warm, immersive and experience-driven.", metaLeft: "Hospitality", metaRight: "Edition" },
-    manifest: { kicker: "creative brief", title: ["CREATIVE", "BRIEF"], subtitle: "Asymmetric, expressive and vanguard.", metaLeft: "Manifesto", metaRight: "Draft" },
-    obsidian: { kicker: "night editorial", title: ["PORTFOLIO."], subtitle: "Dark premium cover with restrained gold accents.", metaLeft: "Nocturne", metaRight: "Lux" },
-    ivory: { kicker: "minimal profile", title: ["PROJECT", "PROFILE"], subtitle: "White space, restraint and quiet authority.", metaLeft: "Minimal", metaRight: "Profile" },
-    aurora: { kicker: "gradient collection", title: ["BRAND", "DECK"], subtitle: "Soft atmospheres with luminous color flow.", metaLeft: "Gradient", metaRight: "Aura" },
-    onyx: { kicker: "high-tech pitch", title: ["PITCH", "DECK"], subtitle: "Futuristic dark deck with sharp glow.", metaLeft: "Signal", metaRight: "Beta" },
-    velvet: { kicker: "mood collection", title: ["MOOD", "BOOK"], subtitle: "Textural warmth, luxury and softness.", metaLeft: "Texture", metaRight: "Warmth" },
-    prism: { kicker: "multi-color deck", title: ["PRISM", "PORTFOLIO"], subtitle: "Color-drenched, bright and expressive.", metaLeft: "Spectrum", metaRight: "Mix" },
-    dune: { kicker: "hospitality identity", title: ["INTERIOR", "DESIGN"], subtitle: "Sand, terracotta and resort warmth.", metaLeft: "Warm stone", metaRight: "Resort" },
-    slate: { kicker: "architecture proposal", title: ["PROJECT", "PROPOSAL"], subtitle: "Brutalist clarity with concrete restraint.", metaLeft: "Proposal", metaRight: "Urban" },
+    "plaster-house": { kicker: "white plaster wall", title: ["CASA", "ESTUDIO"], subtitle: "Textured white walls, quiet rhythm and residential calm.", metaLeft: "Plaster", metaRight: "Home" },
+    "walnut-folio": { kicker: "walnut and leather", title: ["WALNUT", "FOLIO"], subtitle: "Warm wood, leather depth and restrained editorial hierarchy.", metaLeft: "Leather", metaRight: "Folio" },
+    "concrete-gallery": { kicker: "polished concrete", title: ["CONCRETE", "GALLERY"], subtitle: "Smooth concrete, gallery spacing and grounded material weight.", metaLeft: "Concrete", metaRight: "Gallery" },
+    "vine-atrium": { kicker: "interior garden", title: ["VINE", "ATRIUM"], subtitle: "White surfaces with curated greenery and natural light.", metaLeft: "Vines", metaRight: "Atrium" },
+    "turntable-deck": { kicker: "record selector", title: ["SLIDE", "SELECTOR"], subtitle: "Circular rhythm, disc-like choices and mid-century tactility.", metaLeft: "Turntable", metaRight: "Deck" },
+    "case-study": { kicker: "residential case study", title: ["CASE", "STUDY"], subtitle: "Precise grid, soft paper and generous render fields.", metaLeft: "Grid", metaRight: "Study" },
+    "material-library": { kicker: "material library", title: ["MATERIAL", "BOARD"], subtitle: "Physical samples, leather, concrete, stone, wood and greenery.", metaLeft: "Samples", metaRight: "Library" },
+    "garden-room": { kicker: "garden room", title: ["GARDEN", "ROOM"], subtitle: "Olive accents, fibers and a calm residential atmosphere.", metaLeft: "Garden", metaRight: "Room" },
   };
-  return library[option.template] || library.monolith;
+  return library[option.template] || library["plaster-house"];
 }
 
 function buildBrochureStylePreview(option) {
@@ -4367,7 +4868,7 @@ function renderSlideQuickEditor(blueprint, values) {
       ${renderSlideQuickOptionGroup("Formato", "Proporcion", SLIDE_IMAGE_ASPECT_OPTIONS, values.imageAspect, key, "slide-image-aspect", ["landscape", "square", "portrait", "panoramic"])}
       ${renderSlideQuickOptionGroup("Composicion", "Una, collage, cortes", SLIDE_IMAGE_ARRANGEMENT_OPTIONS, values.imageArrangement, key, "slide-image-arrangement", ["single", "pair", "triptych", "collage", "divisions"])}
       ${renderSlideQuickOptionGroup("Recorte", "Como entra", SLIDE_IMAGE_FRAMING_OPTIONS, values.imageFraming, key, "slide-image-framing", ["clean", "zoom", "cropped", "blurred"])}
-      ${renderSlideQuickOptionGroup("Fondo", "Degradado", SLIDE_BACKGROUND_OPTIONS, values.slideBackground, key, "slide-background", ["inherit", "pure-white", "warm-sand", "dark-luxury", "deep-forest", "aurora-pastel"])}
+      ${renderSlideQuickOptionGroup("Fondo", "Material", SLIDE_BACKGROUND_OPTIONS, values.slideBackground, key, "slide-background", ["inherit", "plaster-white", "polished-concrete", "walnut-leather", "vine-wall", "warm-stone", "pure-white"])}
       ${renderSlideQuickOptionGroup("Tratamiento", "Estilo IA", SLIDE_RENDER_TREATMENT_OPTIONS, values.renderTreatment, key, "slide-render-treatment", ["master", "editorial", "warm", "moody", "linear", "technical"])}
     </div>
   `;
@@ -4923,6 +5424,7 @@ function buildRenderPrompt() {
   lines.push(buildGeometryLockDirective(analysis, Boolean(changeRequest)));
   lines.push("Resolve the whole image at the same quality level: foreground, midground, background, glass, signage, micro-objects, materials, and visible exterior.");
   lines.push(buildAiRoleAndSkillContract("render"));
+  lines.push(buildPublicReleaseQualityContract("render"));
   lines.push(buildRenderDecisionManifest());
   lines.push(buildStrictStyleDirective());
 
@@ -4995,6 +5497,23 @@ function buildAiRoleAndSkillContract(mode = "render") {
   ].join("\n");
 }
 
+function buildPublicReleaseQualityContract(mode = "render") {
+  const editableClause = mode === "pdf"
+    ? "- Brochure/PPT output must stay modular: slide text, image slots, render treatment, palette, and typography must remain independently editable in RenderAI."
+    : "- Image output must be a single faithful visual result; do not bake in UI chrome, captions, watermarks, mockup frames or presentation graphics.";
+  return [
+    "PUBLIC-RELEASE QUALITY CONTRACT:",
+    "- Prioritize a production-ready result over exploratory creativity. The output should be clean enough for a client-facing launch.",
+    "- Preserve original image identity: do not swap source photos, do not invent alternate renders, do not reorder project references without a slide-level instruction.",
+    "- Separate responsibilities: analysis describes constraints, prompt planning selects only necessary operations, image generation executes only the requested target.",
+    "- Every visible text decision must be intentional. Preserve source signage inside renders; keep brochure copy editable outside rendered images.",
+    "- Use a mid-century modern residential material language when designing boards/decks: white plaster, polished concrete, walnut, brown leather, olive greenery, natural fibers, soft daylight.",
+    "- Avoid neon, purple/violet, cold blue tech palettes, black-glass UI aesthetics, generic gradients, fake glow, sci-fi styling, and over-saturated colors.",
+    "- Validate before final: geometry locked, camera locked, occupancy exact, materials plausible, no hallucinated logos, no malformed text, no missing image slots.",
+    editableClause,
+  ].join("\n");
+}
+
 function buildStrictStyleDirective(overrides = {}) {
   const representation = overrides.representationStyle || state.settings.representationStyle;
   const mood = overrides.imageMood || state.settings.imageMood;
@@ -5009,6 +5528,7 @@ function buildStrictStyleDirective(overrides = {}) {
     photographic: "OUTPUT STYLE MUST BE REAL ARCHITECTURAL PHOTOGRAPHY: natural optics, believable exposure, real material response, no CGI sheen.",
     "three-dimensional": "OUTPUT STYLE MUST BE PREMIUM 3D ARCHVIZ: polished physically based rendering, crisp edges, refined shadows, but still faithful to the source.",
     "linear-drawing": "OUTPUT STYLE MUST BE ARCHITECTURAL LINEAR DRAWING: clean contour hierarchy, precise black/graphite linework, controlled material hints, no photoreal textures.",
+    "vector-plan": "OUTPUT STYLE MUST BE CLEAN VECTORIZED ARCHITECTURAL LINE ART: precise contours, separated object silhouettes, flat editable color regions, no texture noise, no painterly effects.",
     "mixed-media": "OUTPUT STYLE MUST BE EDITORIAL MIXED MEDIA: faithful architectural base with tasteful collage/print sensibility, never changing the design.",
   };
   const moodRules = {
@@ -5033,7 +5553,7 @@ function buildStrictStyleDirective(overrides = {}) {
     morning: "TIME/LIGHT: morning freshness, soft optimistic daylight, natural direction.",
     midday: "TIME/LIGHT: balanced midday clarity, neutral exposure, accurate colors.",
     "golden-hour": "TIME/LIGHT: golden hour warmth, long soft highlights, commercial hospitality glow.",
-    "blue-hour": "TIME/LIGHT: blue hour balance, interior warmth against cool exterior, elegant contrast.",
+    "blue-hour": "TIME/LIGHT: warm dusk balance, interior warmth against softly dim exterior, elegant contrast without blue cast.",
     night: "TIME/LIGHT: night/interior protagonist, warm artificial light, controlled dark exterior.",
   };
   const lightRules = {
@@ -5143,7 +5663,7 @@ function buildTemplateReferenceBlock() {
     return {
       label: localTemplate.label || "",
       description: `${localTemplate.category || "local"} editable con ${localTemplate.slideCount || safeArray(localTemplate.slidePreviews).length || 1} hoja(s) de referencia.`,
-      collection: "Plantilla PPT local RenderAI",
+      collection: "Plantilla PPT local",
       thumbnailPath: previewPath,
       thumbnailUrl: absThumb,
       canvaId: "",
@@ -5209,6 +5729,7 @@ function buildPdfBrief() {
     templateRef?.canvaUrl ? `  • Canva source: ${templateRef.canvaUrl}` : null,
     templateRef?.paletteHints?.length ? `  • Template palette hints (paper/ink/accent): ${templateRef.paletteHints.join(", ")}` : null,
     templateRef ? `  • Slides must inherit this template's palette, layout direction, typographic vibe, whitespace, and grid rhythm.` : null,
+    buildPublicReleaseQualityContract("pdf"),
     `Visual: ${labelForDecision("renderLanguage")}, ${labelForDecision("imageMood")}, ${labelForDecision("timeOfDay")}, ${labelForDecision("lightScenario")}.`,
     palette ? `Palette: ${palette}` : null,
     "Images: configured per slide and per template image slot. Only slots marked as rendered should be rendered; raw slots must remain untouched.",
@@ -5246,6 +5767,7 @@ function buildOccupancyDirective() {
 function buildRepresentationDirective() {
   const representation = state.settings.representationStyle;
   if (representation === "linear-drawing") return "STYLE: Architectural line drawing, precise contours, suggested materials, geometry locked. Not a photograph.";
+  if (representation === "vector-plan") return "STYLE: Clean vectorized architectural line art, separated silhouettes and flat editable color regions, geometry locked. Not a photograph.";
   if (representation === "three-dimensional") return "STYLE: Premium 3D architectural render, physically credible, refined materials, controlled lighting.";
   if (representation === "mixed-media") return "STYLE: Editorial mixed-media, architectural fidelity with brochure sensibility.";
   return "STYLE: Real architectural photograph, premium editorial, must not read as CGI.";
@@ -5289,6 +5811,7 @@ async function handleGenerateResult(forceRegenerate = false) {
     state.generation.kind = null;
     state.generation.stage = "";
     renderAll();
+    scheduleProjectAutosave("result");
   }
 }
 
@@ -5573,7 +6096,7 @@ function collectPdfBoardTargets() {
         || role === "moodboard"
         || role === "materials"
         || role === "palette"
-        || ["moodboard", "materials", "pantone"].includes(blueprint.sectionId);
+        || ["moodboard", "materials", "pantone", "concept"].includes(blueprint.sectionId);
       if (!isBoard) return null;
       const kind = role === "materials" || blueprint.sectionId === "materials"
         ? "materials"
@@ -5811,6 +6334,7 @@ function buildPdfProjectRenderPrompt(image, blueprint = null, config = {}) {
   if (details.length) lines.push(details.join(". ") + ".");
   lines.push(buildGeometryLockDirective(analysis, false));
   lines.push(buildAiRoleAndSkillContract("pdf-slide"));
+  lines.push(buildPublicReleaseQualityContract("render"));
   lines.push(buildRenderDecisionManifest({
     representationStyle: representation,
     imageFinish: finish,
@@ -5994,6 +6518,7 @@ function buildPdfVisualPrompt(kind, moodBoardLayout = "") {
       layoutPrompt,
       `Style: ${labelForDecision("imageMood")}, ${labelForDecision("renderLanguage")}`,
       buildOccupancyDirective(),
+      buildPublicReleaseQualityContract("pdf"),
       antiTextClause,
     ].filter(Boolean).join("\n");
   }
@@ -6009,6 +6534,7 @@ function buildPdfVisualPrompt(kind, moodBoardLayout = "") {
     templateHint,
     layoutPrompt,
     buildOccupancyDirective(),
+    buildPublicReleaseQualityContract("pdf"),
     antiTextClause,
   ].filter(Boolean).join("\n");
 }
@@ -6032,6 +6558,11 @@ async function pickSlideVisual(slide, visualKit, main, index, projectVisuals) {
   const sourceMode = resolveSlideImageSourceMode(config);
   const projectUrls = resolveProjectImageList(projectVisuals, sourceMode);
   const customBoard = visualKit?.boardsBySlideKey?.[slide.key];
+  const boardLikeSlide = role === "moodboard"
+    || role === "materials"
+    || role === "palette"
+    || slide.layout === "board"
+    || ["moodboard", "materials", "pantone", "concept"].includes(slide.sectionId);
   if (customBoard && (role === "moodboard" || role === "materials" || role === "palette" || slide.layout === "board")) {
     return customBoard;
   }
@@ -6041,6 +6572,15 @@ async function pickSlideVisual(slide, visualKit, main, index, projectVisuals) {
       .filter((image) => config.imageIds.includes(image.id))
       .map((image) => resolveProjectImageUrl(image.id, projectVisuals, sourceMode, slide.key) || image.url)
       .filter(Boolean);
+    if (boardLikeSlide && selectedImages.length) {
+      const boardSources = unique([
+        ...selectedImages,
+        visualKit.materials?.url,
+        visualKit.moodboard?.url,
+        visualKit.reference?.url,
+      ]).filter(Boolean).slice(0, 4);
+      return buildEditorialBoard(boardSources, slide.title || slide.tag || "mood");
+    }
     if (selectedImages.length > 1) {
       return buildEditorialBoard(selectedImages, slide.title || slide.tag || "slide");
     }
@@ -6140,7 +6680,7 @@ function buildLocalDeck() {
   return { title, summary, slides, source: "local" };
 }
 
-async function composeDeckSlides(slides, deckTitle = "RenderAI Studio") {
+async function composeDeckSlides(slides, deckTitle = "Proyecto") {
   const safeSlides = safeArray(slides);
   const palette = state.settings.selectedPalette?.length
     ? state.settings.selectedPalette
@@ -6470,31 +7010,23 @@ async function drawLocalTemplateImageSlot(context, imageUrl, frame, options = {}
 
 function resolveSlideBackgroundStops(slideBg, styleProfile) {
   const presets = {
-    "dark-luxury": ["#1a1714", "#201c18", "#2a2420"],
-    "warm-sand": ["#f8f0e0", "#efe4d0", "#e8d8c0"],
-    "cool-mist": ["#e8eef4", "#dce6f0", "#f2f4f6"],
-    "deep-forest": ["#1a2e24", "#162820", "#24382c"],
-    "rose-dusk": ["#f8ece8", "#f4e0dc", "#f0d4d0"],
-    "midnight": ["#0e1220", "#121828", "#1a2038"],
-    "pure-white": ["#ffffff", "#fefefe", "#fcfcfc"],
-    "charcoal": ["#2a2a30", "#242428", "#1e1e24"],
-    "aurora-pastel": ["#e8e0f8", "#f0e4ec", "#e0ecf4"],
-    "terracotta": ["#f0dcc8", "#e8ceb4", "#f4e6d8"],
-    "ocean": ["#142838", "#1a3040", "#0e2030"],
+    "plaster-white": ["#fbfaf6", "#f4f0e8", "#fffdf8"],
+    "polished-concrete": ["#efeee8", "#d8d3c9", "#f7f5ef"],
+    "walnut-leather": ["#efe2d1", "#b88962", "#f8efe5"],
+    "vine-wall": ["#fbfbf2", "#e8eadc", "#dfe8d5"],
+    "warm-stone": ["#f6efe4", "#e6d8c3", "#fbf7ef"],
+    "pure-white": ["#ffffff", "#fbfaf6", "#f6f1e8"],
   };
   if (slideBg !== "inherit" && presets[slideBg]) return presets[slideBg];
   const familyPresets = {
-    obsidian: ["#121015", "#17131b", "#241e26"],
-    ivory: ["#ffffff", "#fcfbf8", "#f5efe6"],
-    aurora: ["#ede3fb", "#f7e5ef", "#daeaf8"],
-    onyx: ["#090d13", "#0d1119", "#12192a"],
-    velvet: ["#2c1620", "#6d394d", "#f2d6ca"],
-    prism: ["#f7eefc", "#f3ebff", "#dbf0ff"],
-    dune: ["#f5ecdf", "#ead7c2", "#d3b391"],
-    slate: ["#eef0f4", "#dde3ea", "#c9d0da"],
-    resort: ["#faf5ec", "#eee4d6", "#dcc7ae"],
-    poster: ["#f8f1ea", "#f0e0d4", "#ddac8b"],
-    manifest: ["#f5efe8", "#ead9cd", "#d0a58b"],
+    "plaster-house": ["#ffffff", "#f6f0e6", "#fbfaf6"],
+    "walnut-folio": ["#f7ead8", "#d8b68f", "#fff7ef"],
+    "concrete-gallery": ["#f1f0eb", "#d9d4c9", "#f8f6f1"],
+    "vine-atrium": ["#fbfbf2", "#e7ebdc", "#d9e5ce"],
+    "turntable-deck": ["#f5ead8", "#e2c39b", "#fbf4ea"],
+    "case-study": ["#ffffff", "#f4f0e7", "#fbfaf6"],
+    "material-library": ["#f8efe1", "#dfc6a5", "#f4efe5"],
+    "garden-room": ["#f8f8ef", "#e5ead9", "#dbe7d0"],
   };
   if (familyPresets[styleProfile.template]) return familyPresets[styleProfile.template];
   return [styleProfile.paper, styleProfile.palette?.[0] || styleProfile.paper, styleProfile.palette?.[1] || styleProfile.accent];
@@ -6578,10 +7110,11 @@ async function composeBrochureSlide(slide, index, pageCount, deckTitle, palette)
   const defaultTitleColor = isDarkBg ? "#f0eae0" : "#1f1712";
   const defaultBodyColor = isDarkBg ? "rgba(240, 234, 224, 0.76)" : "rgba(61, 49, 38, 0.86)";
 
-  // Editorial header: brand mark + deck title + page marker + thin rule
+  // Editorial header: project mark + deck title + page marker + thin rule.
+  // The exported deck belongs to the user, so the product brand is kept out.
   context.fillStyle = headerColor;
   context.font = `700 22px "${bodyFont}", sans-serif`;
-  const brandMark = "RENDERAI · STUDIO";
+  const brandMark = sanitizeVisibleDeckText(deckTitle, "PROYECTO").slice(0, 34).toUpperCase();
   context.fillText(brandMark, 72, 76);
   // Accent dot
   context.beginPath();
@@ -6723,7 +7256,7 @@ async function composeBrochureSlide(slide, index, pageCount, deckTitle, palette)
   context.fillText(footerLabel, width - 72 - context.measureText(footerLabel).width, height - 72);
   context.font = `500 12px "${bodyFont}", sans-serif`;
   context.fillStyle = isDarkBg ? "rgba(240, 234, 224, 0.4)" : "rgba(80, 62, 48, 0.6)";
-  const subFooter = "RENDERAI STUDIO · EDITORIAL DECK";
+  const subFooter = "PRESENTACION EDITABLE · CAPAS PPT";
   context.fillText(subFooter, width - 72 - context.measureText(subFooter).width, height - 52);
 
   return { url: canvas.toDataURL("image/jpeg", 0.92), width, height };
@@ -6963,58 +7496,61 @@ async function composeCanvaReferenceSlide(slide, index, pageCount, deckTitle, pa
 function resolveCanvaReferenceRecipe(styleProfile) {
   const id = styleProfile.canvaId || "";
   const modes = {
-    "EAGrLDwPJo0": "mono-index",
+    "EAGdcTUYU1s": "clean-grid",
     "EAGr_RR-y1A": "warm-interior",
     "EAFw_orjpUY": "proposal-columns",
-    "EAFikiuuzhg": "gradient-pop",
-    "EAFNfbb5KQs": "warm-interior",
-    "EAGn3Fr3fd4": "clean-grid",
+    "EAFikiuuzhg": "concrete-gallery",
+    "EAFNfbb5KQs": "green-catalog",
+    "EAGn3Fr3fd4": "concrete-gallery",
     "EAF2x8BSmSs": "brand-manual",
-    "EAFPf0Mf_YI": "luxury-gold",
-    "EAGdcTUYU1s": "clean-grid",
     "EAGtNZBHprc": "earth-editorial",
-    "EAGTkH8WXi4": "orange-motion",
+    "EAGTkH8WXi4": "earth-editorial",
     "EAGsAh-OVLo": "earth-editorial",
     "EAGhhyrjjkg": "minimal-index",
     "EAHFf3kj4iA": "clean-grid",
     "EAGRNMmnuaA": "proposal-columns",
     "EAGhDLLD7O4": "minimal-index",
-    "EAFLv0V_9Ho": "gradient-pop",
-    "EAGsW4hEJkw": "red-pitch",
-    "EAGTP-02p34": "geometric-marble",
+    "EAGTP-02p34": "concrete-gallery",
     "EAFJITWQWWk": "warm-interior",
-    "EAGHvxr_154": "blue-gradient",
-    "EAGubEOQn8Y": "mono-index",
+    "EAGubEOQn8Y": "clean-grid",
     "EAGV4SKvtkI": "brand-manual",
-    "EAFy6z9zO0k": "dark-poster",
     "EAFZccmrE1U": "green-catalog",
-    "EAG1o5cfZP0": "orange-motion",
-    "EAGnoGixvFY": "yellow-portfolio",
-    "EAGnaH1PQ5c": "pink-portfolio",
   };
-  const mode = modes[id] || "portfolio-editorial";
+  const mode = normalizeCanvaRecipeMode(modes[id] || styleProfile.template || "clean-grid");
   const presets = {
-    "dark-poster": { mode, paper: "#0f0f10", ink: "#f8f4ee", accent: "#c7a46c", titleFont: "Inter Tight", bodyFont: "Manrope", radius: 10, referenceOpacity: 0.04 },
-    "warm-interior": { mode, paper: "#f3eadf", ink: "#211a15", accent: "#9a7657", titleFont: "Cormorant Garamond", bodyFont: "Nunito Sans", radius: 36, referenceOpacity: 0.045 },
-    "clean-grid": { mode, paper: "#fbfbfa", ink: "#121212", accent: "#808080", titleFont: "Space Grotesk", bodyFont: "Manrope", radius: 3, referenceOpacity: 0.035 },
-    "gradient-pop": { mode, paper: "#1a1028", ink: "#ffffff", accent: "#ff4e50", accent2: "#6be3ff", titleFont: "Syne", bodyFont: "Outfit", radius: 28, referenceOpacity: 0.075 },
-    "orange-editorial": { mode, paper: "#faf7f2", ink: "#161616", accent: "#ef6c2f", titleFont: "Inter Tight", bodyFont: "Outfit", radius: 18, referenceOpacity: 0.04 },
-    "red-pitch": { mode, paper: "#fbfaf7", ink: "#111111", accent: "#d71920", titleFont: "Inter Tight", bodyFont: "Manrope", radius: 0, referenceOpacity: 0.035 },
-    "brand-manual": { mode, paper: "#ffffff", ink: "#161616", accent: "#2f6f8f", titleFont: "Space Grotesk", bodyFont: "Manrope", radius: 0, referenceOpacity: 0.03 },
-    "portfolio-editorial": { mode, paper: "#f7f2ea", ink: "#181512", accent: "#8f6046", titleFont: "Playfair Display", bodyFont: "Nunito Sans", radius: 24, referenceOpacity: 0.045 },
-    "mono-index": { mode, paper: "#f6f3ee", ink: "#111111", accent: "#a63632", titleFont: "Inter Tight", bodyFont: "Manrope", radius: 0, referenceOpacity: 0.035 },
-    "proposal-columns": { mode, paper: "#fbfbfa", ink: "#161616", accent: "#9b1c1f", titleFont: "Space Grotesk", bodyFont: "Manrope", radius: 0, referenceOpacity: 0.03 },
-    "luxury-gold": { mode, paper: "#0f0c09", ink: "#f7eee1", accent: "#c9a25d", titleFont: "Playfair Display", bodyFont: "Nunito Sans", radius: 3, referenceOpacity: 0.04 },
-    "orange-motion": { mode, paper: "#fbfaf7", ink: "#111111", accent: "#ef5b22", titleFont: "Inter Tight", bodyFont: "Outfit", radius: 18, referenceOpacity: 0.045 },
-    "earth-editorial": { mode, paper: "#efe1d1", ink: "#1f1712", accent: "#95613f", titleFont: "Cormorant Garamond", bodyFont: "Nunito Sans", radius: 36, referenceOpacity: 0.04 },
-    "minimal-index": { mode, paper: "#ffffff", ink: "#111111", accent: "#595959", titleFont: "Space Grotesk", bodyFont: "Manrope", radius: 0, referenceOpacity: 0.028 },
-    "geometric-marble": { mode, paper: "#f8f7f4", ink: "#181818", accent: "#7c7f87", titleFont: "Space Grotesk", bodyFont: "Manrope", radius: 6, referenceOpacity: 0.035 },
-    "blue-gradient": { mode, paper: "#07121f", ink: "#ffffff", accent: "#1677ff", accent2: "#66e5ff", titleFont: "Syne", bodyFont: "Outfit", radius: 28, referenceOpacity: 0.07 },
-    "green-catalog": { mode, paper: "#f8f5ee", ink: "#132d24", accent: "#0f6b45", titleFont: "Libre Baskerville", bodyFont: "Manrope", radius: 16, referenceOpacity: 0.035 },
-    "yellow-portfolio": { mode, paper: "#f7df31", ink: "#111111", accent: "#111111", titleFont: "Inter Tight", bodyFont: "Outfit", radius: 0, referenceOpacity: 0.03 },
-    "pink-portfolio": { mode, paper: "#0d0d0f", ink: "#ffffff", accent: "#ff5aaa", titleFont: "Syne", bodyFont: "Outfit", radius: 30, referenceOpacity: 0.055 },
+    "plaster-house": { mode: "clean-grid", paper: "#fbfaf6", ink: "#2a241d", accent: "#8b6a4c", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.03 },
+    "walnut-folio": { mode: "warm-interior", paper: "#f7ead8", ink: "#261a12", accent: "#7a4f34", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.04 },
+    "concrete-gallery": { mode: "concrete-gallery", paper: "#f1f0eb", ink: "#23221f", accent: "#777063", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 4, referenceOpacity: 0.03 },
+    "vine-atrium": { mode: "green-catalog", paper: "#fbfbf2", ink: "#243022", accent: "#5f7a55", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.035 },
+    "turntable-deck": { mode: "earth-editorial", paper: "#f5ead8", ink: "#2b2118", accent: "#94643e", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.04 },
+    "case-study": { mode: "brand-manual", paper: "#ffffff", ink: "#22201b", accent: "#a08a67", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 3, referenceOpacity: 0.028 },
+    "material-library": { mode: "warm-interior", paper: "#f8efe1", ink: "#241b14", accent: "#6f7057", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.04 },
+    "garden-room": { mode: "green-catalog", paper: "#f8f8ef", ink: "#22291f", accent: "#6d8155", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.035 },
+    "warm-interior": { mode, paper: "#f3eadf", ink: "#211a15", accent: "#9a7657", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.04 },
+    "clean-grid": { mode, paper: "#fbfbfa", ink: "#22201b", accent: "#a08a67", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 4, referenceOpacity: 0.03 },
+    "brand-manual": { mode, paper: "#ffffff", ink: "#22201b", accent: "#a08a67", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 4, referenceOpacity: 0.03 },
+    "portfolio-editorial": { mode, paper: "#f7f2ea", ink: "#241b14", accent: "#8f6046", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.04 },
+    "mono-index": { mode, paper: "#f6f3ee", ink: "#22201b", accent: "#8b6a4c", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 4, referenceOpacity: 0.03 },
+    "proposal-columns": { mode, paper: "#fbfbfa", ink: "#22201b", accent: "#8b6a4c", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 4, referenceOpacity: 0.03 },
+    "earth-editorial": { mode, paper: "#efe1d1", ink: "#241b14", accent: "#95613f", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.04 },
+    "minimal-index": { mode, paper: "#ffffff", ink: "#22201b", accent: "#777063", titleFont: "Tenor Sans", bodyFont: "Albert Sans", radius: 2, referenceOpacity: 0.028 },
+    "green-catalog": { mode, paper: "#f8f8ef", ink: "#243022", accent: "#5f7a55", titleFont: "Fraunces", bodyFont: "Albert Sans", radius: 8, referenceOpacity: 0.035 },
   };
-  return presets[mode] || presets["portfolio-editorial"];
+  return presets[mode] || presets[styleProfile.template] || presets["clean-grid"];
+}
+
+function normalizeCanvaRecipeMode(mode) {
+  const safeMode = String(mode || "clean-grid");
+  const forbiddenModeMap = {
+    "dark-poster": "earth-editorial",
+    "gradient-pop": "warm-interior",
+    "blue-gradient": "clean-grid",
+    "pink-portfolio": "warm-interior",
+    "yellow-portfolio": "clean-grid",
+    "orange-motion": "turntable-deck",
+    "luxury-gold": "walnut-folio",
+  };
+  return forbiddenModeMap[safeMode] || safeMode;
 }
 
 async function drawTemplateReferenceGhost(context, thumbnail, options = {}) {
@@ -7024,7 +7560,7 @@ async function drawTemplateReferenceGhost(context, thumbnail, options = {}) {
     const image = await loadImage(thumbnail);
     context.save();
     context.globalAlpha = opacity;
-    context.filter = mode.includes("gradient") || mode.includes("blue") ? "blur(22px) saturate(1.2)" : "blur(18px) saturate(0.92)";
+    context.filter = "blur(18px) saturate(0.88)";
     drawCoverImage(context, image, { x: 0, y: 0, width, height });
     context.restore();
   } catch {
@@ -7033,21 +7569,12 @@ async function drawTemplateReferenceGhost(context, thumbnail, options = {}) {
 }
 
 function drawCanvaRecipeBackground(context, recipe, { width, height, paper, ink, accent, accent2 }) {
-  if (recipe.mode === "gradient-pop") {
-    drawGradientNoise(context, { width, height, accent, accent2, ink });
-    return;
-  }
   const gradient = context.createLinearGradient(0, 0, width, height);
   gradient.addColorStop(0, paper);
-  gradient.addColorStop(0.55, colorMixHex(paper, accent, recipe.mode === "dark-poster" ? 0.16 : 0.08));
-  gradient.addColorStop(1, colorMixHex(paper, accent2 || accent, recipe.mode === "dark-poster" ? 0.1 : 0.05));
+  gradient.addColorStop(0.55, colorMixHex(paper, accent, 0.08));
+  gradient.addColorStop(1, colorMixHex(paper, accent2 || accent, 0.05));
   context.fillStyle = gradient;
   context.fillRect(0, 0, width, height);
-  if (recipe.mode === "dark-poster") {
-    context.fillStyle = "rgba(255,255,255,0.035)";
-    context.fillRect(78, 116, 520, 6);
-    context.fillRect(78, 140, 360, 6);
-  }
 }
 
 function drawGradientNoise(context, { width, height, accent, accent2, ink }) {
@@ -7088,7 +7615,7 @@ function drawCanvaDeckChrome(context, { tag, deckTitle, index, pageCount, width,
   context.save();
   context.fillStyle = ink;
   context.font = `800 15px "${bodyFont}", sans-serif`;
-  context.fillText("RENDERAI", 76, 72);
+  context.fillText(sanitizeVisibleDeckText(deckTitle, "PROYECTO").slice(0, 24).toUpperCase(), 76, 72);
   context.fillStyle = accent;
   context.fillRect(76, 84, minimal ? 46 : 92, 4);
   context.font = `600 13px "${bodyFont}", sans-serif`;
@@ -8393,7 +8920,7 @@ function resolveConfiguredSlideLayout(blueprint, config = {}) {
 function deriveDeckTitle() {
   const context = (state.settings.contextBrief || "").trim();
   const firstLine = context.split("\n").find((line) => line.trim().length > 0);
-  return firstLine ? firstLine.slice(0, 68) : "Deck arquitectonico RenderAI";
+  return firstLine ? firstLine.slice(0, 68) : "Deck arquitectonico";
 }
 
 function normalizeSlide(slide, index = 0) {
@@ -8450,7 +8977,7 @@ function pickDeckSettings() {
   payload.brochureTemplateCanvaBridge = brochureTemplate?.canvaBridge || "local-preview-from-canva-reference";
   if (localTemplate) {
     payload.brochureTemplateLabel = localTemplate.label || payload.brochureTemplateLabel;
-    payload.brochureTemplateCollection = "Plantilla PPT local RenderAI";
+    payload.brochureTemplateCollection = "Plantilla PPT local";
     payload.brochureTemplateDescription = templateReference?.description || payload.brochureTemplateDescription;
     payload.brochureTemplateTags = [localTemplate.category || state.settings.templateType || "local"];
     payload.brochureTemplateValue = localTemplate.id || "";
@@ -8547,7 +9074,7 @@ function buildCanvaGenerationBrief(template) {
   const activeTemplate = template || buildTemplateReferenceBlock() || getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
   const language = state.settings.brochureLanguage === "en" ? "English" : "Spanish";
   return [
-    `Create an editable Canva presentation inspired by the local RenderAI template "${activeTemplate?.label || "RenderAI template"}".`,
+    `Create an editable Canva presentation inspired by the local editable template "${activeTemplate?.label || "project template"}".`,
     activeTemplate?.canvaUrl ? `Canva visual reference URL: ${activeTemplate.canvaUrl}` : null,
     activeTemplate?.thumbnailUrl ? `Template visual reference image: ${activeTemplate.thumbnailUrl}` : null,
     activeTemplate?.localTemplatePptxPath ? `Local PPTX source path: ${activeTemplate.localTemplatePptxPath}` : null,
@@ -8555,13 +9082,16 @@ function buildCanvaGenerationBrief(template) {
     `Use ${language} only for all visible text.`,
     `Deck type: ${labelForProjectType()}. Tone: ${labelForDecision("pdfTone")}. Narrative: ${labelForDecision("narrative")}.`,
     `Use project colors/palette when provided, otherwise derive a premium architectural palette from the uploaded renders.`,
-    "Keep text editable and typo-free. Do not rasterize copy into images. Use image placeholders for project renders, mood boards and material boards.",
-    "Make the result feel like a high-end architecture brochure, not a generic report.",
+    "Keep every title, subtitle, bullet, caption, image slot, logo placeholder, material swatch, and background shape as its own editable object.",
+    "Do not rasterize copy into images. Do not flatten the deck into screenshots. Use placeholders for project renders, mood boards and material boards.",
+    "Use a mid-century modern home language: white plaster wall texture, polished concrete, walnut, brown leather, olive/vine greenery, soft daylight and calm spacing.",
+    "Avoid neon, violet/purple, cold blue technology styling, black-glass layouts, generic gradient cards, fake glow and sci-fi visual language.",
+    "Make the result feel like a high-end architecture brochure that can be edited slide by slide, not a generic report.",
   ].filter(Boolean).join("\n");
 }
 
 function getRenderRequestProfile() {
-  if (state.settings.representationStyle === "linear-drawing") {
+  if (["linear-drawing", "vector-plan"].includes(state.settings.representationStyle)) {
     return { quality: "medium", inputFidelity: "high", outputCompression: 94, providerPreference: "auto-strict", strictFidelity: true };
   }
   if (state.settings.fidelity === "absolute" && state.settings.detailPriority !== "materials") {
@@ -8673,14 +9203,36 @@ function renderPdfResult() {
     return;
   }
 
-  const [first, ...rest] = deck.slides;
+  const slides = safeArray(deck.slides);
+  const activeIndex = clamp(Number(state.pdfBuilder.resultSlideIndex || 0), 0, Math.max(0, slides.length - 1));
+  const activeSlide = slides[activeIndex] || slides[0];
   elements.resultPrimary.className = "result-primary";
-  elements.resultPrimary.innerHTML = buildSlidePreview(first, true);
-  elements.resultSecondary.innerHTML = rest.map((slide) => buildSlidePreview(slide, false)).join("");
+  elements.resultPrimary.innerHTML = `
+    <div class="result-slide-toolbar">
+      <button type="button" class="button button-ghost btn-sm" data-result-slide-shift="-1" ${activeIndex === 0 ? "disabled" : ""}>Anterior</button>
+      <span class="status-chip status-soft">Diapositiva ${activeIndex + 1} / ${slides.length}</span>
+      <button type="button" class="button button-ghost btn-sm" data-result-slide-shift="1" ${activeIndex >= slides.length - 1 ? "disabled" : ""}>Siguiente</button>
+    </div>
+    ${buildSlidePreview(activeSlide, true)}
+  `;
+  elements.resultSecondary.innerHTML = `
+    <div class="result-slide-strip" aria-label="Navegar diapositivas generadas">
+      ${slides.map((slide, index) => {
+        const previewImage = slide.composedPageDataUrl || slide.imageDataUrl || "";
+        return `
+          <button type="button" class="result-slide-thumb ${index === activeIndex ? "active" : ""}" data-result-slide-index="${index}">
+            ${previewImage ? `<img src="${previewImage}" alt="${escapeHtml(slide.title || `Slide ${index + 1}`)}" loading="lazy" />` : ""}
+            <span>${String(index + 1).padStart(2, "0")}</span>
+            <strong>${escapeHtml(slide.tag || slide.title || `Slide ${index + 1}`)}</strong>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
   elements.resultMeta.innerHTML = buildResultMeta([
     ["Flujo", "PDF"],
     ["Origen", deck.source === "openai" ? "Outline IA" : "Outline local"],
-    ["Paginas", String(deck.slides.length)],
+    ["Paginas", String(slides.length)],
     ["Tono", labelForDecision("pdfTone")],
     ["Imagenes", state.settings.pdfImageMode === "rendered" ? "Renderizadas" : "Crudas"],
   ]);
@@ -8833,6 +9385,9 @@ async function downloadRenderVariant(kind) {
 }
 
 async function downloadPdfVariant(kind) {
+  if (state.flow === "pdf" && state.settings.deckEditor?.slides?.length) {
+    state.result.deck = await buildDeckFromCreativeEditorExportDeck(state.settings.deckEditor);
+  }
   const deck = state.result.deck;
   if (!deck) {
     toast("Genera primero el deck antes de descargar.", "warn");
@@ -8857,7 +9412,7 @@ async function downloadPdfVariant(kind) {
       title: deck.title,
       summary: deck.summary,
       slides,
-      fileName: `${slugify(deck.title || "renderai-deck")}-${kind === "alternate" ? "resumen" : "deck"}.pdf`,
+      fileName: `${slugify(deck.title || "proyecto-deck")}-${kind === "alternate" ? "resumen" : "deck"}.pdf`,
       theme: {
         flow: state.flow,
         tone: state.flow === "pdf" ? state.settings.pdfTone : state.settings.renderLanguage,
@@ -8874,7 +9429,7 @@ async function downloadPdfVariant(kind) {
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
-  const name = `${slugify(deck.title || "renderai-deck")}-${kind === "alternate" ? "resumen" : "deck"}.pdf`;
+  const name = `${slugify(deck.title || "proyecto-deck")}-${kind === "alternate" ? "resumen" : "deck"}.pdf`;
   triggerDownload(url, name);
   setTimeout(() => URL.revokeObjectURL(url), 0);
   toast("PDF exportado.", "ok");
@@ -8889,7 +9444,7 @@ async function downloadEditablePptx(deck) {
     body: JSON.stringify({
       title: deck.title,
       summary: deck.summary,
-      fileName: `${slugify(deck.title || "renderai-deck")}-editable.pptx`,
+      fileName: `${slugify(deck.title || "proyecto-deck")}-editable.pptx`,
       slides,
       template: {
         value: template?.value || state.settings.brochureStyle,
@@ -8913,7 +9468,7 @@ async function downloadEditablePptx(deck) {
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
-  triggerDownload(url, `${slugify(deck.title || "renderai-deck")}-editable.pptx`);
+  triggerDownload(url, `${slugify(deck.title || "proyecto-deck")}-editable.pptx`);
   setTimeout(() => URL.revokeObjectURL(url), 0);
   toast("PPT editable exportado.", "ok");
 }
@@ -8940,6 +9495,26 @@ async function prepareSlidesForPdfExport(slides) {
   }));
 }
 
+function buildPptLayerManifest(slide, index) {
+  if (safeArray(slide.layerManifest).length) {
+    return slide.layerManifest;
+  }
+  const sectionId = slide.sectionId || slide.key || "";
+  const role = slide.visualRole || "";
+  const layout = slide.layout || "split";
+  const isBoard = ["moodboard", "materials", "pantone", "concept"].includes(sectionId) || ["moodboard", "materials", "board", "concept"].includes(role);
+  const isCover = index === 0 || sectionId === "cover";
+  const isGallery = ["gallery", "board"].includes(layout) || ["reference", "detail"].includes(role);
+  const imageLabel = isBoard ? "Moodboard editable" : isCover ? "Foto principal editable" : isGallery ? "Galeria editable" : "Imagen editable";
+  return [
+    { layer: 1, name: "Capa 01 - Fondo editable", type: "background" },
+    { layer: 2, name: `Capa 02 - ${imageLabel}`, type: "image" },
+    { layer: 3, name: "Capa 03 - Cuadros y contenedores", type: "shape" },
+    { layer: 4, name: "Capa 04 - Titulos y textos", type: "text" },
+    { layer: 5, name: "Capa 05 - Marcadores y folio", type: "metadata" },
+  ];
+}
+
 async function prepareSlidesForPptExport(slides) {
   return Promise.all(safeArray(slides).map(async (slide, index) => {
     const candidateVisual = slide.imageDataUrl || slide.composedPageDataUrl || "";
@@ -8962,17 +9537,410 @@ async function prepareSlidesForPptExport(slides) {
       imageDataUrl,
       imageWidth: dimensions.width,
       imageHeight: dimensions.height,
+      editorSource: slide.editorSource || "",
+      editorCanvas: slide.editorCanvas || null,
+      layerManifest: await preparePptLayerManifestForExport(buildPptLayerManifest(slide, index)),
     };
+  }));
+}
+
+async function preparePptLayerManifestForExport(layers) {
+  return Promise.all(safeArray(layers).map(async (layer) => {
+    const prepared = { ...layer, style: { ...(layer.style || {}) } };
+    if (prepared.type === "image" && prepared.src) {
+      try {
+        prepared.src = await dataUrlToJpeg(prepared.src, 0.9, 1800);
+      } catch {
+        prepared.src = prepared.src || "";
+      }
+    }
+    return prepared;
   }));
 }
 
 function handleDelegatedClick(event) {
   const target = event.target;
 
+  if (target.closest("[data-open-create-project]")) {
+    openProjectCreateModal();
+    return;
+  }
+
+  if (target.closest("[data-open-dashboard]")) {
+    state.projects.activeId = "";
+    saveJson(STORAGE_KEYS.lastProject, null);
+    resetFlowRuntime({ preserveAssets: false, clearFlow: true });
+    renderAll();
+    return;
+  }
+
+  if (target.closest("[data-project-save-current]")) {
+    saveCurrentProject({ silent: false });
+    return;
+  }
+
+  const projectTabButton = target.closest("[data-project-tab]");
+  if (projectTabButton) {
+    state.projectUi.tab = projectTabButton.dataset.projectTab || "assets";
+    if (state.projectUi.tab !== "legacy") state.flow = state.flow || null;
+    renderAll();
+    return;
+  }
+
+  const quickChipButton = target.closest("[data-quick-chip]");
+  if (quickChipButton) {
+    const value = quickChipButton.dataset.quickChip || "";
+    elements.conversationPromptInput.value = value;
+    if (/video/i.test(value)) elements.conversationActionSelect.value = "video";
+    else if (/present|brochure/i.test(value)) elements.conversationActionSelect.value = "presentation";
+    else if (/analizar|plano/i.test(value)) elements.conversationActionSelect.value = "analyze";
+    else elements.conversationActionSelect.value = "image";
+    elements.conversationPromptInput.focus();
+    return;
+  }
+
+  const projectOpenButton = target.closest("[data-project-open]");
+  if (projectOpenButton) {
+    const record = state.projects.items.find((item) => item.id === projectOpenButton.dataset.projectOpen);
+    applyProjectRecord(record);
+    return;
+  }
+
+  const projectDuplicateButton = target.closest("[data-project-duplicate]");
+  if (projectDuplicateButton) {
+    duplicateProjectRecord(projectDuplicateButton.dataset.projectDuplicate);
+    return;
+  }
+
+  const projectDeleteButton = target.closest("[data-project-delete]");
+  if (projectDeleteButton) {
+    removeProjectFromMemory(projectDeleteButton.dataset.projectDelete);
+    return;
+  }
+
+  const projectRenameButton = target.closest("[data-project-rename]");
+  if (projectRenameButton) {
+    renameProjectRecord(projectRenameButton.dataset.projectRename);
+    return;
+  }
+
+  const assetFilterButton = target.closest("[data-asset-filter]");
+  if (assetFilterButton) {
+    state.projectUi.assetFilter = assetFilterButton.dataset.assetFilter || "all";
+    renderProjectAssetsView();
+    return;
+  }
+
+  const assetDownloadButton = target.closest("[data-asset-download]");
+  if (assetDownloadButton) {
+    const asset = state.project.assets.find((item) => item.id === assetDownloadButton.dataset.assetDownload);
+    if (asset?.url) triggerDownload(asset.url, asset.name || "asset");
+    return;
+  }
+
+  if (target.closest("[data-assets-upload]")) {
+    elements.conversationFileInput?.click();
+    return;
+  }
+
+  if (target.closest("[data-project-assets-dropzone]")) {
+    elements.conversationFileInput?.click();
+    return;
+  }
+
+  const assetDeleteButton = target.closest("[data-asset-delete]");
+  if (assetDeleteButton) {
+    removeProjectAsset(assetDeleteButton.dataset.assetDelete);
+    return;
+  }
+
+  const assetRenameButton = target.closest("[data-asset-rename]");
+  if (assetRenameButton) {
+    const asset = getAssetById(assetRenameButton.dataset.assetRename);
+    if (!asset) return;
+    const nextName = window.prompt("Nuevo nombre del asset", asset.name || "");
+    if (!nextName || !nextName.trim()) return;
+    asset.name = nextName.trim();
+    state.project.updatedAt = new Date().toISOString();
+    renderAll();
+    scheduleProjectAutosave("rename-asset");
+    return;
+  }
+
+  const assetPreviewButton = target.closest("[data-asset-preview]");
+  if (assetPreviewButton) {
+    const asset = state.project.assets.find((item) => item.id === assetPreviewButton.dataset.assetPreview);
+    if (asset?.url) window.open(asset.url, "_blank", "noopener");
+    return;
+  }
+
+  const assetPresentationButton = target.closest("[data-asset-use-presentation]");
+  if (assetPresentationButton) {
+    toggleProjectAssetSelection("presentationSelectedAssetIds", assetPresentationButton.dataset.assetUsePresentation);
+    state.projectUi.tab = "presentations";
+    renderAll();
+    return;
+  }
+
+  const setMainAssetButton = target.closest("[data-project-set-main-asset]");
+  if (setMainAssetButton) {
+    setProjectMainImageAsset(setMainAssetButton.dataset.projectSetMainAsset);
+    return;
+  }
+
+  if (target.closest("[data-assets-analyze]")) {
+    handleAnalyzeProjectAssets(Boolean(target.closest("[data-assets-analyze-force]")));
+    return;
+  }
+
+  const projectTokenRemoveButton = target.closest("[data-project-token-remove][data-project-token-value][data-asset-id]");
+  if (projectTokenRemoveButton) {
+    removeProjectAssetAnalysisToken(
+      projectTokenRemoveButton.dataset.assetId,
+      projectTokenRemoveButton.dataset.projectTokenRemove,
+      projectTokenRemoveButton.dataset.projectTokenValue,
+    );
+    return;
+  }
+
+  const projectTokenEditButton = target.closest("[data-project-token-edit][data-project-token-value][data-asset-id]");
+  if (projectTokenEditButton) {
+    editProjectAssetAnalysisToken(
+      projectTokenEditButton.dataset.assetId,
+      projectTokenEditButton.dataset.projectTokenEdit,
+      projectTokenEditButton.dataset.projectTokenValue,
+    );
+    return;
+  }
+
+  const projectAnalysisAddButton = target.closest("[data-project-analysis-add][data-asset-id]");
+  if (projectAnalysisAddButton) {
+    addProjectAssetAnalysisToken(projectAnalysisAddButton.dataset.assetId, projectAnalysisAddButton.dataset.projectAnalysisAdd);
+    return;
+  }
+
+  const imageToggleButton = target.closest("[data-image-toggle-asset]");
+  if (imageToggleButton) {
+    const assetId = imageToggleButton.dataset.imageToggleAsset;
+    const wasSelected = state.projectUi.imageSelectedAssetIds.includes(assetId);
+    toggleProjectAssetSelection("imageSelectedAssetIds", assetId);
+    const asset = getAssetById(assetId);
+    if (!wasSelected && asset?.type === "image") {
+      ensureLegacyImagesFromAssets([assetId]);
+      state.mainId = assetId;
+    } else if (wasSelected && state.mainId === assetId) {
+      state.mainId = state.projectUi.imageSelectedAssetIds[0] || state.images[0]?.id || null;
+    }
+    renderAll();
+    return;
+  }
+
+  const presentationToggleButton = target.closest("[data-presentation-toggle-asset]");
+  if (presentationToggleButton) {
+    toggleProjectAssetSelection("presentationSelectedAssetIds", presentationToggleButton.dataset.presentationToggleAsset);
+    renderAll();
+    return;
+  }
+
+  const videoTemplateButton = target.closest("[data-video-template]");
+  if (videoTemplateButton) {
+    state.projectUi.videoTemplateId = videoTemplateButton.dataset.videoTemplate;
+    const template = getVideoTemplates().find((item) => item.id === state.projectUi.videoTemplateId);
+    if (template) {
+      state.projectUi.videoDurationSeconds = Number(template.defaultDurationSeconds || 9);
+      state.projectUi.videoAspectRatio = template.defaultAspectRatio || "16:9";
+      state.projectUi.videoCameraMotion = template.defaultCameraMotion || "";
+    }
+    updateActiveVideoProductionFromUi({ create: false });
+    renderVideoStudio();
+    return;
+  }
+
+  const videoToggleButton = target.closest("[data-video-toggle-asset]");
+  if (videoToggleButton) {
+    const assetId = videoToggleButton.dataset.videoToggleAsset;
+    if (!isProjectVideoInputAsset(getAssetById(assetId))) {
+      toast("Solo los assets cargados por el usuario pueden iniciar Video Studio. Los outputs IA quedan como transitorios del proceso.", "warn");
+      return;
+    }
+    state.projectUi.videoSelectedAssetIds = state.projectUi.videoSelectedAssetIds.includes(assetId)
+      ? state.projectUi.videoSelectedAssetIds.filter((id) => id !== assetId)
+      : [...state.projectUi.videoSelectedAssetIds, assetId];
+    updateActiveVideoProductionFromUi({ create: false });
+    renderAll();
+    return;
+  }
+
+  if (target.closest("[data-video-new-production]")) {
+    const template = getSelectedVideoTemplate();
+    const production = createVideoProduction({
+      templateId: template?.id || "drone-tour",
+      sourceAssetIds: safeArray(state.projectUi.videoSelectedAssetIds),
+      settings: getCurrentVideoProductionSettings(),
+    });
+    state.project.videoProductions.unshift(production);
+    state.projectUi.activeVideoProductionId = production.id;
+    addProjectMessage({ role: "system", type: "job_status", content: "Nueva produccion de video creada. Selecciona fotos fuente, plantilla y configuracion antes de generar imagenes base.", jobId: production.id });
+    renderAll();
+    scheduleProjectAutosave("video-production-new");
+    return;
+  }
+
+  if (target.closest("[data-video-continue-sources]")) {
+    handleVideoSourceSelection();
+    return;
+  }
+
+  if (target.closest("[data-video-edit-inputs]")) {
+    const production = getActiveVideoProduction();
+    if (production) {
+      production.status = "draft";
+      production.baseImages = [];
+      production.clips = [];
+      production.finalVideoAssetId = "";
+      production.updatedAt = new Date().toISOString();
+      state.projectUi.videoSelectedAssetIds = safeArray(production.sourceAssetIds);
+      addProjectMessage({ role: "system", type: "job_status", content: "Inputs desbloqueados. Las piezas anteriores quedan como assets del proyecto, pero esta produccion volvera a empezar desde la seleccion de inputs.", assetIds: production.sourceAssetIds, jobId: production.id });
+      scheduleProjectAutosave("video-edit-inputs");
+    }
+    renderAll();
+    return;
+  }
+
+  if (target.closest("[data-video-generate-base-batch]")) {
+    handleGenerateBaseImagesBatch();
+    return;
+  }
+
+  const baseImageActionButton = target.closest("[data-base-image-action][data-action]");
+  if (baseImageActionButton) {
+    handleBaseImageAction(baseImageActionButton.dataset.baseImageAction, baseImageActionButton.dataset.action);
+    return;
+  }
+
+  if (target.closest("[data-video-generate-clips]")) {
+    handleGenerateClipsFromApprovedBaseImages();
+    return;
+  }
+
+  const clipActionButton = target.closest("[data-clip-action][data-action]");
+  if (clipActionButton) {
+    handleClipAction(clipActionButton.dataset.clipAction, clipActionButton.dataset.action);
+    return;
+  }
+
+  if (target.closest("[data-compose-final-video]")) {
+    handleComposeFinalVideo();
+    return;
+  }
+
+  const videoApproveButton = target.closest("[data-video-approve-asset]");
+  if (videoApproveButton) {
+    const assetId = videoApproveButton.dataset.videoApproveAsset;
+    state.projectUi.videoApprovedAssetIds = state.projectUi.videoApprovedAssetIds.includes(assetId)
+      ? state.projectUi.videoApprovedAssetIds.filter((id) => id !== assetId)
+      : [...state.projectUi.videoApprovedAssetIds, assetId];
+    renderVideoStudio();
+    return;
+  }
+
+  if (target.closest("[data-video-plan-images]")) {
+    handleVideoPlanAndImages();
+    return;
+  }
+
+  if (target.closest("[data-video-generate-approved]")) {
+    handleGenerateApprovedVideo();
+    return;
+  }
+
+  const legacyFlowButton = target.closest("[data-open-legacy-flow]");
+  if (legacyFlowButton) {
+    if (legacyFlowButton.dataset.openLegacyFlow === "pdf") {
+      preparePresentationAssetsForLegacy();
+    } else {
+      const imageIds = state.projectUi.imageSelectedAssetIds.length
+        ? state.projectUi.imageSelectedAssetIds
+        : state.projectUi.videoSelectedAssetIds;
+      ensureLegacyImagesFromAssets(imageIds);
+    }
+    state.projectUi.tab = "legacy";
+    selectFlow(legacyFlowButton.dataset.openLegacyFlow === "pdf" ? "pdf" : "render", { skipAnalysis: true });
+    const legacyStep = Number(legacyFlowButton.dataset.legacyStep || 0);
+    if (legacyStep) {
+      state.currentStep = clamp(legacyStep, 1, legacyFlowButton.dataset.openLegacyFlow === "pdf" ? PDF_STEPS.length : RENDER_STEPS.length);
+      renderAll();
+    }
+    return;
+  }
+
+  const composerActionButton = target.closest("[data-composer-action]");
+  if (composerActionButton) {
+    elements.conversationActionSelect.value = composerActionButton.dataset.composerAction || "chat";
+    state.projectUi.tab = "conversation";
+    renderAll();
+    elements.conversationPromptInput.focus();
+    return;
+  }
+
+  if (target.closest("[data-generate-visual-profile]")) {
+    generateVisualProfileFromPrompt();
+    return;
+  }
+
+  if (target.closest("[data-reset-visual-profile]")) {
+    resetVisualProfile();
+    return;
+  }
+
+  if (target.closest("[data-build-render-variations]")) {
+    const selectedImages = state.projectUi.imageSelectedAssetIds
+      .map((id) => state.project.assets.find((asset) => asset.id === id))
+      .filter(Boolean);
+    state.projectUi.renderVariationJobs = buildRenderJobs(selectedImages, {
+      variationsPerImage: state.projectUi.variationsPerImage,
+      prompt: state.projectUi.imagePrompt || state.projectUi.videoPrompt,
+    });
+    renderProjectSettingsView();
+    return;
+  }
+
+  if (target.closest("[data-image-build-jobs]")) {
+    buildImageVariationJobs();
+    renderAll();
+    return;
+  }
+
+  if (target.closest("[data-image-generate-from-assets]")) {
+    handleImageGenerateFromAssets();
+    return;
+  }
+
   const styleFilterButton = target.closest("[data-style-filter]");
   if (styleFilterButton) {
     state.pdfBuilder.styleFilter = styleFilterButton.dataset.styleFilter || "all";
     renderDecisions();
+    return;
+  }
+
+  const customTemplatePickerButton = target.closest("[data-custom-template-picker]");
+  if (customTemplatePickerButton) {
+    elements.customTemplateInput?.click();
+    return;
+  }
+
+  const resultSlideButton = target.closest("[data-result-slide-index]");
+  if (resultSlideButton) {
+    state.pdfBuilder.resultSlideIndex = Number(resultSlideButton.dataset.resultSlideIndex || 0);
+    renderPdfResult();
+    return;
+  }
+
+  const resultSlideShiftButton = target.closest("[data-result-slide-shift]");
+  if (resultSlideShiftButton) {
+    const total = state.result.deck?.slides?.length || 1;
+    state.pdfBuilder.resultSlideIndex = clamp(Number(state.pdfBuilder.resultSlideIndex || 0) + Number(resultSlideShiftButton.dataset.resultSlideShift || 0), 0, Math.max(0, total - 1));
+    renderPdfResult();
     return;
   }
 
@@ -9383,6 +10351,14 @@ function handleDelegatedClick(event) {
     return;
   }
 
+  const activeObjectAlignButton = target.closest("[data-template-active-align][data-template-active-align-value]");
+  if (activeObjectAlignButton) {
+    setActiveTemplateObjectStyle(activeObjectAlignButton.dataset.templateActiveAlign, {
+      align: activeObjectAlignButton.dataset.templateActiveAlignValue,
+    });
+    return;
+  }
+
   const activeObjectSizeButton = target.closest("[data-template-active-size][data-template-active-size-delta]");
   if (activeObjectSizeButton) {
     resizeActiveTemplateObject(activeObjectSizeButton.dataset.templateActiveSize, Number(activeObjectSizeButton.dataset.templateActiveSizeDelta || 0));
@@ -9398,6 +10374,16 @@ function handleDelegatedClick(event) {
   const activeObjectDeleteButton = target.closest("[data-template-active-delete]");
   if (activeObjectDeleteButton) {
     deleteActiveTemplateCustomObject(activeObjectDeleteButton.dataset.templateActiveDelete);
+    return;
+  }
+
+  const activeObjectDepthButton = target.closest("[data-template-active-depth]");
+  if (activeObjectDepthButton) {
+    adjustActiveTemplateObjectDepth(
+      activeObjectDepthButton.dataset.templateActiveDepth,
+      activeObjectDepthButton.dataset.templateActiveDepthValue,
+      activeObjectDepthButton.dataset.templateActiveDepthDelta,
+    );
     return;
   }
 
@@ -9588,6 +10574,42 @@ function handleDelegatedClick(event) {
 function handleDelegatedChange(event) {
   const target = event.target;
 
+  if (target.matches("[data-video-setting]")) {
+    const key = target.dataset.videoSetting;
+    if (key === "duration") state.projectUi.videoDurationSeconds = Number(target.value || 9);
+    if (key === "aspect") state.projectUi.videoAspectRatio = target.value || "16:9";
+    if (key === "humans") state.projectUi.videoIncludeHumans = target.checked;
+    if (key === "cars") state.projectUi.videoIncludeCars = target.checked;
+    if (key === "style") state.projectUi.videoStyle = target.value || "";
+    if (key === "motion") state.projectUi.videoMotionIntensity = target.value || "medium";
+    if (key === "fidelity") state.projectUi.videoFidelityLevel = target.value || "strict";
+    if (key === "imageProvider") state.projectUi.imageProvider = target.value || "auto";
+    if (key === "videoProvider") state.projectUi.videoProvider = target.value || "auto";
+    updateActiveVideoProductionFromUi({ create: false });
+    renderProviderPanel();
+    if (["duration", "aspect", "humans", "cars", "style", "motion", "fidelity", "imageProvider", "videoProvider"].includes(key)) renderVideoStudio();
+    return;
+  }
+
+  if (target.matches("[data-video-template-select]")) {
+    state.projectUi.videoTemplateId = target.value || state.projectUi.videoTemplateId;
+    const template = getVideoTemplates().find((item) => item.id === state.projectUi.videoTemplateId);
+    if (template) {
+      state.projectUi.videoDurationSeconds = Number(template.defaultDurationSeconds || 9);
+      state.projectUi.videoAspectRatio = template.defaultAspectRatio || "16:9";
+      state.projectUi.videoCameraMotion = template.defaultCameraMotion || "";
+    }
+    updateActiveVideoProductionFromUi({ create: false });
+    renderVideoStudio();
+    return;
+  }
+
+  if (target.matches("[data-video-input-filter]")) {
+    state.projectUi.videoInputFilter = target.value || "all";
+    renderVideoStudio();
+    return;
+  }
+
   if (target.matches("[data-slide-use-project]")) {
     const slideKey = target.dataset.slideUseProject;
     const config = state.settings.pdfSlideConfigs[slideKey];
@@ -9640,6 +10662,30 @@ function handleDelegatedFocusIn(event) {
 
 function handleDelegatedInput(event) {
   const target = event.target;
+  if (target.matches("[data-video-setting]")) {
+    if (target.dataset.videoSetting === "prompt") {
+      state.projectUi.videoPrompt = target.value || "";
+      updateActiveVideoProductionFromUi({ create: false });
+    }
+    return;
+  }
+  if (target.matches("[data-visual-profile-prompt]")) {
+    state.projectUi.visualProfilePrompt = target.value || "";
+    return;
+  }
+  if (target.matches("[data-render-variations-count]")) {
+    state.projectUi.variationsPerImage = clamp(Number(target.value || 1), 1, 8);
+    return;
+  }
+  if (target.matches("[data-image-prompt]")) {
+    state.projectUi.imagePrompt = target.value || "";
+    return;
+  }
+  if (target.matches("[data-image-variations-count]")) {
+    state.projectUi.imageVariationsPerAsset = clamp(Number(target.value || 1), 1, 8);
+    state.projectUi.variationsPerImage = state.projectUi.imageVariationsPerAsset;
+    return;
+  }
   if (target.matches("[data-style-search]")) {
     state.pdfBuilder.styleSearch = target.value || "";
     renderDecisions();
@@ -9943,6 +10989,28 @@ function resizeActiveTemplateObject(slideKey, delta) {
   renderAll();
 }
 
+function adjustActiveTemplateObjectDepth(slideKey, absoluteValue = "", deltaValue = "") {
+  const config = ensureSlideConfig(slideKey);
+  const objectId = config?.activeTemplateObject;
+  if (!config || !objectId) {
+    toast("Selecciona primero un objeto del canvas.", "warn");
+    return;
+  }
+  if (!config.templateObjectStyles || typeof config.templateObjectStyles !== "object") config.templateObjectStyles = {};
+  const currentStyle = config.templateObjectStyles[objectId] || {};
+  const current = Number(currentStyle.zIndex || (objectId === "__background__" ? 1 : 30));
+  const nextValue = absoluteValue !== ""
+    ? Number(absoluteValue)
+    : current + Number(deltaValue || 0);
+  config.templateObjectStyles[objectId] = {
+    ...currentStyle,
+    zIndex: clamp(nextValue, 1, 99),
+  };
+  persistSettings();
+  renderAll();
+  updatePromptText();
+}
+
 function deleteActiveTemplateCustomObject(slideKey) {
   const config = ensureSlideConfig(slideKey);
   const objectId = config?.activeTemplateObject;
@@ -10143,6 +11211,7 @@ function handleAssetAction(action, itemId) {
     state.result.render = null;
     state.result.deck = null;
     renderAll();
+    scheduleProjectAutosave("main-image");
     if (getMainImage() && !getMainImage().analysis) runMainAnalysis(false);
     return;
   }
@@ -10160,6 +11229,7 @@ function handleAssetAction(action, itemId) {
     state.result.render = null;
     state.result.deck = null;
     renderAll();
+    scheduleProjectAutosave("delete-image");
     return;
   }
 
@@ -10167,12 +11237,14 @@ function handleAssetAction(action, itemId) {
     state.documents = state.documents.filter((item) => item.id !== itemId);
     state.result.deck = null;
     renderAll();
+    scheduleProjectAutosave("delete-document");
   }
 }
 
 function restartCurrentFlow() {
   resetFlowRuntime({ preserveAssets: false, clearFlow: false });
   renderAll();
+  scheduleProjectAutosave("restart");
 }
 
 function resetFlowRuntime(options = {}) {
@@ -10248,17 +11320,21 @@ function buildOccupancyValidationResult(valid, peopleCount) {
 }
 
 function removeAnalysisToken(key, value) {
-  const analysis = getMainImage()?.analysis;
+  const main = getMainImage();
+  const analysis = main?.analysis;
   if (!analysis || !Array.isArray(analysis[key])) return;
   analysis[key] = analysis[key].filter((item) => item !== value);
   analysis.overlay = safeArray(analysis.overlay).filter((entry) => !(entry.manual && entry.category === key && entry.label === value));
   analysis.summary = rebuildAnalysisSummary(analysis);
+  syncProjectAssetAnalysisFromImage(main);
+  scheduleProjectAutosave("analysis-token");
   updatePromptText();
   renderAnalysis();
 }
 
 function addAnalysisToken(key) {
-  const analysis = getMainImage()?.analysis;
+  const main = getMainImage();
+  const analysis = main?.analysis;
   if (!analysis || !Array.isArray(analysis[key])) return;
 
   let value = "";
@@ -10277,6 +11353,8 @@ function addAnalysisToken(key) {
     state.annotation.label = value;
     syncAnnotationUi();
   }
+  syncProjectAssetAnalysisFromImage(main);
+  scheduleProjectAutosave("analysis-token");
   updatePromptText();
   renderAnalysis();
 }
@@ -10788,13 +11866,21 @@ async function checkApiHealth() {
       state.server.analysisReady = Boolean(data.analysisReady ?? data.openAiReady ?? false);
       state.server.renderProvider = data.renderProvider || (state.server.aiReady ? "openai" : "local");
       state.server.analysisProvider = data.analysisProvider || (state.server.analysisReady ? "openai" : "none");
+      state.server.videoProvider = data.videoProvider || "none";
+      state.server.lumaConfigured = Boolean(data.lumaConfigured);
+      state.server.lumaReady = Boolean(data.lumaReady);
+      state.server.mockAi = Boolean(data.mockAi);
+      state.server.publicAssetBaseUrlConfigured = Boolean(data.publicAssetBaseUrlConfigured);
+      state.server.publicAssetBaseUrlUsable = Boolean(data.publicAssetBaseUrlUsable);
+      state.server.videoReady = Boolean(data.videoReady);
       state.server.secretSource = data.renderSecretSource || data.secretSource || "none";
       state.server.baseUrl = base;
       state.server.port = data.port || "";
       if (state.server.aiReady) {
         const renderLabel = state.server.renderProvider === "gemini" ? "render Gemini" : "render OpenAI";
         const analysisLabel = state.server.analysisReady ? "analisis OpenAI" : "analisis local";
-        elements.apiHealthChip.textContent = `Servidor listo · ${renderLabel} · ${analysisLabel}${data.port ? ` · ${data.port}` : ""}`;
+        const videoLabel = state.server.lumaReady ? "Luma conectado" : state.server.mockAi ? "video mock" : "video off";
+        elements.apiHealthChip.textContent = `Servidor listo · ${renderLabel} · ${analysisLabel} · ${videoLabel}${data.port ? ` · ${data.port}` : ""}`;
       } else {
         elements.apiHealthChip.textContent = `Servidor listo · modo local${data.port ? ` · ${data.port}` : ""}`;
       }
@@ -10811,6 +11897,13 @@ async function checkApiHealth() {
     state.server.analysisReady = false;
     state.server.renderProvider = "local";
     state.server.analysisProvider = "none";
+    state.server.videoProvider = "none";
+    state.server.lumaConfigured = false;
+    state.server.lumaReady = false;
+      state.server.mockAi = false;
+      state.server.publicAssetBaseUrlConfigured = false;
+      state.server.publicAssetBaseUrlUsable = false;
+    state.server.videoReady = false;
     state.server.secretSource = "none";
     state.server.baseUrl = "";
     state.server.port = "";
@@ -10820,6 +11913,8 @@ async function checkApiHealth() {
   renderAnalysis();
   renderDecisions();
   renderResult();
+  renderProviderPanel();
+  renderVideoStudio();
 }
 
 function getApiCandidates() {
@@ -10999,8 +12094,3868 @@ function getMainImage() {
   return state.images.find((item) => item.id === state.mainId) || state.images[0] || null;
 }
 
+function getVideoTemplates() {
+  return safeArray(window.VIDEO_TEMPLATES).length ? safeArray(window.VIDEO_TEMPLATES) : [];
+}
+
+function getActiveProjectRecord() {
+  return state.projects.items.find((record) => record.id === state.projects.activeId) || null;
+}
+
+function inferAssetType(name = "", mimeType = "") {
+  const lower = `${name} ${mimeType}`.toLowerCase();
+  if (lower.includes("video") || /\.(mp4|mov|webm)$/i.test(name)) return "video";
+  if (lower.includes("pdf") || /\.pdf$/i.test(name)) return "pdf";
+  if (/\.pptx?$|\.potx$/i.test(name)) return "pptx";
+  if (/\.dxf$/i.test(name)) return "dxf";
+  if (/\.dwg$/i.test(name)) return "dwg";
+  if (lower.includes("image") || /\.(png|jpe?g|webp|gif)$/i.test(name)) return "image";
+  return "other";
+}
+
+function createConversationMessage(input = {}) {
+  return {
+    id: input.id || cryptoRandom(),
+    projectId: input.projectId || state.projects.activeId || "",
+    role: input.role || "system",
+    type: input.type || "text",
+    content: input.content || "",
+    assetIds: safeArray(input.assetIds),
+    jobId: input.jobId || "",
+    metadata: input.metadata || {},
+    createdAt: input.createdAt || new Date().toISOString(),
+    status: input.status || "completed",
+  };
+}
+
+function createProjectAsset(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id || cryptoRandom(),
+    projectId: input.projectId || state.projects.activeId || "",
+    type: input.type || inferAssetType(input.name, input.mimeType),
+    name: input.name || "Asset",
+    url: input.url || "",
+    localPath: input.localPath || "",
+    mimeType: input.mimeType || input.type || "",
+    size: Number(input.size || 0),
+    thumbnailUrl: input.thumbnailUrl || input.url || "",
+    source: input.source || "uploaded",
+    provider: input.provider || "manual",
+    prompt: input.prompt || "",
+    metadata: input.metadata || {},
+    usedIn: safeArray(input.usedIn),
+    createdAt: input.createdAt || now,
+  };
+}
+
+function createGenerationJob(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id || cryptoRandom(),
+    projectId: input.projectId || state.projects.activeId || "",
+    type: input.type || "image",
+    provider: input.provider || "",
+    status: input.status || "pending",
+    progress: Number(input.progress || 0),
+    inputAssetIds: safeArray(input.inputAssetIds),
+    outputAssetIds: safeArray(input.outputAssetIds),
+    prompt: input.prompt || "",
+    settings: input.settings || {},
+    error: input.error || "",
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
+  };
+}
+
+function createVideoJob(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id || cryptoRandom(),
+    projectId: input.projectId || state.projects.activeId || "",
+    templateId: input.templateId || state.projectUi.videoTemplateId || "drone-tour",
+    status: input.status || "pending",
+    sourceAssetIds: safeArray(input.sourceAssetIds),
+    generatedImageAssetIds: safeArray(input.generatedImageAssetIds),
+    approvedImageAssetIds: safeArray(input.approvedImageAssetIds),
+    outputVideoAssetId: input.outputVideoAssetId || "",
+    durationSeconds: Number(input.durationSeconds || state.projectUi.videoDurationSeconds || 9),
+    aspectRatio: input.aspectRatio || state.projectUi.videoAspectRatio || "16:9",
+    includeHumans: Boolean(input.includeHumans),
+    includeCars: Boolean(input.includeCars),
+    prompt: input.prompt || "",
+    internalImagePrompts: safeArray(input.internalImagePrompts),
+    lumaPrompt: input.lumaPrompt || "",
+    lumaGenerationId: input.lumaGenerationId || "",
+    error: input.error || "",
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
+  };
+}
+
+function createFeedbackItem(input = {}) {
+  return {
+    id: input.id || cryptoRandom(),
+    targetType: input.targetType || "base_image",
+    targetId: input.targetId || "",
+    message: input.message || "",
+    createdAt: input.createdAt || new Date().toISOString(),
+  };
+}
+
+function createVideoProductionSettings(input = {}) {
+  return {
+    durationSeconds: Number(input.durationSeconds || state.projectUi.videoDurationSeconds || 9),
+    aspectRatio: input.aspectRatio || state.projectUi.videoAspectRatio || "16:9",
+    includeHumans: Boolean(input.includeHumans ?? state.projectUi.videoIncludeHumans),
+    includeCars: Boolean(input.includeCars ?? state.projectUi.videoIncludeCars),
+    visualStyle: input.visualStyle || state.projectUi.videoStyle || "cinematic architectural realism",
+    motionIntensity: ["low", "medium", "high"].includes(input.motionIntensity) ? input.motionIntensity : (["low", "medium", "high"].includes(state.projectUi.videoMotionIntensity) ? state.projectUi.videoMotionIntensity : "medium"),
+    fidelityLevel: ["strict", "balanced", "creative"].includes(input.fidelityLevel) ? input.fidelityLevel : (state.projectUi.videoFidelityLevel || "strict"),
+    userPrompt: input.userPrompt ?? state.projectUi.videoPrompt ?? "",
+    imageProvider: ["gemini", "openai", "auto"].includes(input.imageProvider) ? input.imageProvider : (state.projectUi.imageProvider || "auto"),
+    videoProvider: ["luma", "mock", "auto"].includes(input.videoProvider) ? input.videoProvider : (state.projectUi.videoProvider || "auto"),
+  };
+}
+
+function createBaseImageItem(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id || cryptoRandom(),
+    sourceAssetId: input.sourceAssetId || "",
+    assetId: input.assetId || "",
+    templateOutputId: input.templateOutputId || input.outputId || "",
+    stageName: input.stageName || "Imagen base",
+    prompt: input.prompt || "",
+    negativePrompt: input.negativePrompt || "",
+    feedbackHistory: safeArray(input.feedbackHistory).map((item) => createFeedbackItem({ ...item, targetType: "base_image" })),
+    status: input.status || "queued",
+    error: input.error || "",
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
+  };
+}
+
+function createClipItem(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id || cryptoRandom(),
+    baseImageItemId: input.baseImageItemId || "",
+    sourceImageAssetId: input.sourceImageAssetId || "",
+    videoAssetId: input.videoAssetId || "",
+    lumaGenerationId: input.lumaGenerationId || "",
+    motionPrompt: input.motionPrompt || "",
+    durationSeconds: Number(input.durationSeconds || 5),
+    transitionIn: input.transitionIn || "soft cut",
+    transitionOut: input.transitionOut || "cross dissolve",
+    order: Number(input.order || 0),
+    feedbackHistory: safeArray(input.feedbackHistory).map((item) => createFeedbackItem({ ...item, targetType: "clip" })),
+    status: input.status || "queued",
+    error: input.error || "",
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
+  };
+}
+
+function createVideoProduction(input = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: input.id || cryptoRandom(),
+    projectId: input.projectId || state.projects.activeId || "",
+    templateId: input.templateId || state.projectUi.videoTemplateId || "drone-tour",
+    status: input.status || "draft",
+    sourceAssetIds: safeArray(input.sourceAssetIds),
+    baseImages: safeArray(input.baseImages).map(createBaseImageItem),
+    clips: safeArray(input.clips).map(createClipItem),
+    finalVideoAssetId: input.finalVideoAssetId || "",
+    settings: createVideoProductionSettings(input.settings || input),
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now,
+  };
+}
+
+function assetFromLegacyImage(image, source = "uploaded") {
+  if (!image) return null;
+  return createProjectAsset({
+    id: image.assetId || image.id,
+    projectId: state.projects.activeId,
+    type: "image",
+    name: image.name || "Referencia",
+    url: image.url || "",
+    mimeType: image.type || "image/png",
+    size: image.size || 0,
+    source,
+    provider: source === "generated" ? (image.source || "manual") : "manual",
+    metadata: { legacyImageId: image.id, analysis: image.analysis || null },
+    createdAt: image.createdAt || new Date().toISOString(),
+  });
+}
+
+function assetFromLegacyDocument(documentItem) {
+  if (!documentItem) return null;
+  return createProjectAsset({
+    id: documentItem.assetId || documentItem.id,
+    projectId: state.projects.activeId,
+    type: inferAssetType(documentItem.name, documentItem.type),
+    name: documentItem.name || "Documento",
+    mimeType: documentItem.type || "application/octet-stream",
+    size: documentItem.size || 0,
+    source: "uploaded",
+    provider: "manual",
+    metadata: { legacyDocumentId: documentItem.id },
+    createdAt: documentItem.createdAt || new Date().toISOString(),
+  });
+}
+
+function normalizeProjectRecord(record = {}) {
+  const now = new Date().toISOString();
+  const normalized = {
+    ...record,
+    id: record.id || cryptoRandom(),
+    user: record.user || state.session?.username || "anon",
+    userName: record.userName || state.session?.name || "",
+    title: record.title || record.name || "Proyecto sin titulo",
+    name: record.name || record.title || "Proyecto sin titulo",
+    description: record.description || record.settings?.contextBrief || "",
+    projectType: record.projectType || record.settings?.projectType || "",
+    goal: record.goal || "",
+    flow: record.flow || "",
+    currentStep: record.currentStep || 1,
+    mainId: record.mainId || "",
+    images: cloneProjectValue(record.images, []),
+    documents: cloneProjectValue(record.documents, []),
+    settings: { ...cloneProjectValue(DEFAULT_SETTINGS, {}), ...cloneProjectValue(record.settings, {}) },
+    pdfBuilder: cloneProjectValue(record.pdfBuilder, {}),
+    result: cloneProjectValue(record.result, { render: null, renderHistory: [], deck: null }),
+    promptText: record.promptText || "",
+    messages: cloneProjectValue(record.messages, []),
+    assets: cloneProjectValue(record.assets, []),
+    generationJobs: cloneProjectValue(record.generationJobs, []),
+    videoJobs: cloneProjectValue(record.videoJobs, []),
+    videoProductions: cloneProjectValue(record.videoProductions, []),
+    coverAssetId: record.coverAssetId || "",
+    projectSettings: cloneProjectValue(record.projectSettings || record.project?.settings || {}, {}),
+    createdAt: record.createdAt || now,
+    updatedAt: record.updatedAt || now,
+    version: PROJECT_SCHEMA_VERSION,
+  };
+
+  const existingAssetIds = new Set(safeArray(normalized.assets).map((asset) => asset.id));
+  safeArray(normalized.images).forEach((image) => {
+    const asset = assetFromLegacyImage(image, "uploaded");
+    if (asset && !existingAssetIds.has(asset.id)) {
+      normalized.assets.push(asset);
+      existingAssetIds.add(asset.id);
+    }
+  });
+  safeArray(normalized.documents).forEach((doc) => {
+    const asset = assetFromLegacyDocument(doc);
+    if (asset && !existingAssetIds.has(asset.id)) {
+      normalized.assets.push(asset);
+      existingAssetIds.add(asset.id);
+    }
+  });
+  if (normalized.result?.render?.url) {
+    const renderAsset = createProjectAsset({
+      id: normalized.result.render.assetId || normalized.result.render.id || cryptoRandom(),
+      type: "image",
+      name: normalized.result.render.title || "Render generado",
+      url: normalized.result.render.url,
+      source: "generated",
+      provider: normalized.result.render.source || "manual",
+      createdAt: normalized.result.render.createdAt || normalized.updatedAt,
+    });
+    if (!existingAssetIds.has(renderAsset.id)) normalized.assets.unshift(renderAsset);
+  }
+
+  if (!normalized.coverAssetId) {
+    normalized.coverAssetId = safeArray(normalized.assets).find((asset) => asset.type === "image" && asset.url)?.id || "";
+  }
+  normalized.videoProductions = safeArray(normalized.videoProductions).map((production) => createVideoProduction({ ...production, projectId: normalized.id }));
+  if (!normalized.messages.length) {
+    normalized.messages = [
+      createConversationMessage({
+        projectId: normalized.id,
+        role: "system",
+        type: "text",
+        content: `Proyecto creado: ${normalized.title}. Sube referencias, conversa con la IA y genera renders, videos, presentaciones o documentos desde este espacio.`,
+        createdAt: normalized.createdAt,
+      }),
+    ];
+  }
+  return normalized;
+}
+
+function syncProjectAssetsFromLegacy() {
+  if (!state.projects.activeId) return;
+  const existing = new Set(state.project.assets.map((asset) => asset.id));
+  state.images.forEach((image) => {
+    const asset = assetFromLegacyImage(image, "uploaded");
+    if (asset && !existing.has(asset.id)) {
+      state.project.assets.unshift(asset);
+      existing.add(asset.id);
+    } else if (asset && image.analysis) {
+      syncProjectAssetAnalysisFromImage(image);
+    }
+  });
+  state.documents.forEach((doc) => {
+    const asset = assetFromLegacyDocument(doc);
+    if (asset && !existing.has(asset.id)) {
+      state.project.assets.unshift(asset);
+      existing.add(asset.id);
+    }
+  });
+}
+
+function syncProjectAssetAnalysisFromImage(image) {
+  if (!image?.analysis) return;
+  const asset = state.project.assets.find((item) => (
+    item.id === image.assetId
+    || item.id === image.id
+    || item.metadata?.legacyImageId === image.id
+  ));
+  if (!asset) return;
+  asset.metadata = { ...(asset.metadata || {}), legacyImageId: asset.metadata?.legacyImageId || image.id, analysis: image.analysis };
+  if (!asset.url && image.url) asset.url = image.url;
+  if (!asset.thumbnailUrl && image.url) asset.thumbnailUrl = image.url;
+}
+
+function upsertProjectAsset(assetInput) {
+  const asset = createProjectAsset(assetInput);
+  const index = state.project.assets.findIndex((item) => item.id === asset.id);
+  if (index >= 0) state.project.assets[index] = { ...state.project.assets[index], ...asset };
+  else state.project.assets.unshift(asset);
+  if (!state.project.coverAssetId && asset.type === "image" && asset.url) state.project.coverAssetId = asset.id;
+  scheduleProjectAutosave("asset");
+  return asset;
+}
+
+function removeProjectAsset(assetId) {
+  if (!assetId) return;
+  const asset = getAssetById(assetId);
+  if (!asset) return;
+  const linkedImageIds = new Set([assetId, asset.metadata?.legacyImageId].filter(Boolean));
+  const linkedDocumentIds = new Set([assetId, asset.metadata?.legacyDocumentId].filter(Boolean));
+  state.project.assets = state.project.assets.filter((item) => item.id !== assetId);
+  state.project.messages.forEach((message) => {
+    message.assetIds = safeArray(message.assetIds).filter((id) => id !== assetId);
+  });
+  state.images = state.images.filter((image) => !linkedImageIds.has(image.id) && !linkedImageIds.has(image.assetId));
+  state.documents = state.documents.filter((documentItem) => !linkedDocumentIds.has(documentItem.id) && !linkedDocumentIds.has(documentItem.assetId));
+  if (state.mainId && linkedImageIds.has(state.mainId)) {
+    state.mainId = state.images[0]?.id || null;
+  }
+  if (state.result?.render && (state.result.render.id === assetId || state.result.render.assetId === assetId)) {
+    state.result.render = null;
+  }
+  state.result.renderHistory = safeArray(state.result?.renderHistory).filter((item) => item.id !== assetId && item.assetId !== assetId);
+  state.project.videoJobs.forEach((job) => {
+    job.sourceAssetIds = safeArray(job.sourceAssetIds).filter((id) => id !== assetId);
+    job.generatedImageAssetIds = safeArray(job.generatedImageAssetIds).filter((id) => id !== assetId);
+    job.approvedImageAssetIds = safeArray(job.approvedImageAssetIds).filter((id) => id !== assetId);
+    if (job.outputVideoAssetId === assetId) job.outputVideoAssetId = "";
+  });
+  state.project.videoProductions.forEach((production) => {
+    production.sourceAssetIds = safeArray(production.sourceAssetIds).filter((id) => id !== assetId);
+    production.baseImages = safeArray(production.baseImages).map((item) => ({
+      ...item,
+      assetId: item.assetId === assetId ? "" : item.assetId,
+      sourceAssetId: item.sourceAssetId === assetId ? "" : item.sourceAssetId,
+      status: item.assetId === assetId ? "rejected" : item.status,
+    }));
+    production.clips = safeArray(production.clips).map((item) => ({
+      ...item,
+      sourceImageAssetId: item.sourceImageAssetId === assetId ? "" : item.sourceImageAssetId,
+      videoAssetId: item.videoAssetId === assetId ? "" : item.videoAssetId,
+      status: item.videoAssetId === assetId ? "rejected" : item.status,
+    }));
+    if (production.finalVideoAssetId === assetId) production.finalVideoAssetId = "";
+  });
+  if (state.project.coverAssetId === assetId) {
+    state.project.coverAssetId = getProjectImageAssets()[0]?.id || "";
+  }
+  compactProjectSelections();
+  renderAll();
+  scheduleProjectAutosave("delete-asset");
+  toast("Asset eliminado del proyecto.", "ok");
+}
+
+function addProjectMessage(messageInput) {
+  const message = createConversationMessage(messageInput);
+  state.project.messages.push(message);
+  scheduleProjectAutosave("message");
+  return message;
+}
+
+function openProjectCreateModal() {
+  state.projectUi.createModalOpen = true;
+  elements.projectCreateModal.classList.remove("hidden");
+  elements.modalProjectName.value = "";
+  elements.modalProjectType.value = "Arquitectura";
+  elements.modalProjectGoal.value = "Generar renders";
+  elements.modalProjectDescription.value = "";
+  window.setTimeout(() => elements.modalProjectName.focus(), 40);
+}
+
+function closeProjectCreateModal() {
+  state.projectUi.createModalOpen = false;
+  elements.projectCreateModal.classList.add("hidden");
+}
+
+async function createProjectFromModal(event) {
+  event.preventDefault();
+  if (!state.session) return;
+  const now = new Date().toISOString();
+  const name = elements.modalProjectName.value.trim();
+  if (!name) {
+    toast("Escribe el nombre del proyecto.", "warn");
+    return;
+  }
+  resetFlowRuntime({ preserveAssets: false, clearFlow: true });
+  state.settings = { ...cloneProjectValue(DEFAULT_SETTINGS, {}), contextBrief: elements.modalProjectDescription.value.trim(), projectType: elements.modalProjectType.value };
+  state.pdfBuilder = createPdfBuilderState();
+  const record = normalizeProjectRecord({
+    id: cryptoRandom(),
+    user: state.session.username,
+    userName: state.session.name,
+    title: name,
+    name,
+    description: elements.modalProjectDescription.value.trim(),
+    projectType: elements.modalProjectType.value,
+    goal: elements.modalProjectGoal.value,
+    settings: state.settings,
+    createdAt: now,
+    updatedAt: now,
+    messages: [
+      createConversationMessage({
+        role: "system",
+        type: "text",
+        content: `Proyecto "${name}" listo. Objetivo inicial: ${elements.modalProjectGoal.value}.`,
+        createdAt: now,
+      }),
+    ],
+  });
+  await putProjectRecord(record);
+  state.projects.activeId = record.id;
+  saveJson(STORAGE_KEYS.lastProject, { user: record.user, id: record.id });
+  closeProjectCreateModal();
+  await refreshProjectList();
+  applyProjectRecord(record, { silent: true });
+  toast("Proyecto creado.", "ok");
+}
+
+function getProjectAssetCounts(record) {
+  const assets = safeArray(record.assets);
+  return {
+    images: assets.filter((asset) => asset.type === "image").length || safeArray(record.images).length,
+    videos: assets.filter((asset) => asset.type === "video").length,
+    documents: assets.filter((asset) => ["pdf", "pptx", "dxf", "dwg", "other"].includes(asset.type)).length || safeArray(record.documents).length,
+  };
+}
+
+function getProjectCoverAsset(record) {
+  const assets = safeArray(record.assets);
+  return assets.find((asset) => asset.id === record.coverAssetId && asset.url)
+    || assets.find((asset) => asset.type === "image" && asset.url)
+    || null;
+}
+
+function filterProjectRecordsForUi(records = state.projects.items) {
+  const query = String(state.projects.search || "").trim().toLowerCase();
+  const filter = state.projectUi.dashboardFilter || "all";
+  return safeArray(records).filter((record) => {
+    const counts = getProjectAssetCounts(record);
+    const matchesFilter = filter === "all"
+      || (filter === "active" && record.id === state.projects.activeId)
+      || (filter === "image" && counts.images)
+      || (filter === "video" && counts.videos)
+      || (filter === "document" && counts.documents);
+    if (!matchesFilter) return false;
+    if (!query) return true;
+    return [
+      record.title,
+      record.name,
+      record.description,
+      record.projectType,
+      record.goal,
+      summarizeProjectRecord(record),
+    ].join(" ").toLowerCase().includes(query);
+  });
+}
+
+function renderProjectDashboard() {
+  if (!elements.projectDashboardGrid || !state.session) return;
+  if (elements.dashboardSearchInput && elements.dashboardSearchInput.value !== state.projects.search) {
+    elements.dashboardSearchInput.value = state.projects.search || "";
+  }
+  if (elements.dashboardFilterSelect && elements.dashboardFilterSelect.value !== state.projectUi.dashboardFilter) {
+    elements.dashboardFilterSelect.value = state.projectUi.dashboardFilter || "all";
+  }
+  const items = filterProjectRecordsForUi();
+  elements.projectDashboardGrid.innerHTML = items.length ? items.map((record) => {
+    const cover = getProjectCoverAsset(record);
+    const counts = getProjectAssetCounts(record);
+    return `
+      <article class="project-dashboard-card panel-surface">
+        <button type="button" class="project-dashboard-cover" data-project-open="${escapeHtml(record.id)}">
+          ${cover?.url ? `<img src="${cover.url}" alt="" loading="lazy" />` : `<span>${escapeHtml((record.title || "P").slice(0, 1).toUpperCase())}</span>`}
+        </button>
+        <div class="project-dashboard-card-body">
+          <div>
+            <span class="eyebrow">${escapeHtml(record.projectType || record.flow || "Proyecto")}</span>
+            <h3>${escapeHtml(record.title || record.name || "Proyecto sin titulo")}</h3>
+            <p>${escapeHtml(record.description || record.goal || "Crea, conversa y genera contenido visual con IA.")}</p>
+          </div>
+          <div class="project-card-metrics">
+            <span>${counts.images} imagenes</span>
+            <span>${counts.videos} videos</span>
+            <span>${counts.documents} docs</span>
+          </div>
+          <div class="project-card-footer">
+            <small>Creado ${escapeHtml(formatDate(record.createdAt))}</small>
+            <small>Actividad ${escapeHtml(formatDate(record.updatedAt || record.createdAt))}</small>
+          </div>
+          <div class="project-memory-actions">
+            <button type="button" class="button button-primary" data-project-open="${escapeHtml(record.id)}">Abrir</button>
+            <button type="button" class="button button-secondary" data-project-rename="${escapeHtml(record.id)}">Renombrar</button>
+            <button type="button" class="button button-ghost" data-project-delete="${escapeHtml(record.id)}">Eliminar</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("") : `
+    <div class="empty-state project-empty-state panel-surface">
+      <strong>No hay proyectos todavia</strong>
+      <span>Crea un proyecto para subir referencias, conversar con la IA y generar renders, videos o presentaciones.</span>
+      <button type="button" class="button button-primary" data-open-create-project>Nuevo proyecto</button>
+    </div>
+  `;
+}
+
+function renderProjectWorkspace() {
+  if (!elements.conversationShell || !state.session) return;
+  const record = getActiveProjectRecord();
+  if (!record) return;
+  syncProjectAssetsFromLegacy();
+  elements.activeProjectStatus.textContent = `${record.projectType || "Proyecto"} · ${record.goal || "Activo"}`;
+  elements.activeProjectTitle.textContent = record.title || record.name || "Proyecto";
+  elements.activeProjectSubtitle.textContent = record.description || "Assets, imagenes, videos y presentaciones desde una misma biblioteca del proyecto.";
+  renderProjectTabs();
+  renderProjectMessages();
+  renderProjectQuickChips();
+  renderProjectAssetsView();
+  renderImageStudio();
+  renderVideoStudio();
+  renderPresentationsView();
+  renderProjectSettingsView();
+  renderProviderPanel();
+  renderProjectAssetRail();
+}
+
+function renderProjectTabs() {
+  if (state.projectUi.tab !== "legacy" && !PROJECT_TABS.some((tab) => tab.id === state.projectUi.tab)) state.projectUi.tab = "assets";
+  elements.projectTabs.innerHTML = PROJECT_TABS.map((tab) => `
+    <button type="button" class="project-tab ${state.projectUi.tab === tab.id ? "active" : ""}" data-project-tab="${tab.id}">
+      ${escapeHtml(tab.label)}
+    </button>
+  `).join("");
+  const active = state.projectUi.tab || "assets";
+  [
+    ["conversation", elements.projectConversationView],
+    ["assets", elements.projectAssetsView],
+    ["images", elements.projectImagesView],
+    ["video", elements.projectVideoStudioView],
+    ["presentations", elements.projectPresentationsView],
+    ["settings", elements.projectSettingsView],
+  ].forEach(([id, node]) => node?.classList.toggle("hidden", active !== id));
+}
+
+function renderProjectMessages() {
+  const messages = safeArray(state.project.messages);
+  elements.projectConversationMessages.innerHTML = messages.length ? messages.map((message) => `
+    <article class="conversation-message role-${escapeHtml(message.role)} type-${escapeHtml(message.type)}">
+      <div class="message-avatar">${message.role === "user" ? "U" : message.role === "assistant" ? "AI" : "SYS"}</div>
+      <div class="message-body">
+        <div class="message-meta">
+          <strong>${message.role === "user" ? "Usuario" : message.role === "assistant" ? "RENDEAI" : "Sistema"}</strong>
+          <span>${escapeHtml(formatDate(message.createdAt))}</span>
+        </div>
+        ${message.content ? `<p>${escapeHtml(message.content)}</p>` : ""}
+        ${renderMessageAssets(message)}
+      </div>
+    </article>
+  `).join("") : `<div class="empty-state"><strong>Conversacion vacia</strong><span>Escribe una instruccion o sube referencias para comenzar.</span></div>`;
+  elements.projectConversationMessages.scrollTop = elements.projectConversationMessages.scrollHeight;
+}
+
+function renderProjectQuickChips() {
+  if (!elements.projectQuickChips) return;
+  elements.projectQuickChips.innerHTML = QUICK_CHIPS.map((chip) => `<button type="button" class="select-chip" data-quick-chip="${escapeHtml(chip)}">${escapeHtml(chip)}</button>`).join("");
+}
+
+function renderMessageAssets(message) {
+  const assets = safeArray(message.assetIds)
+    .map((id) => state.project.assets.find((asset) => asset.id === id))
+    .filter(Boolean);
+  if (!assets.length) return "";
+  return `
+    <div class="message-asset-grid">
+      ${assets.map((asset) => {
+        if (asset.type === "image" && asset.url) return `<button type="button" class="message-asset" data-asset-preview="${escapeHtml(asset.id)}"><img src="${asset.url}" alt="${escapeHtml(asset.name)}" loading="lazy" /><span>${escapeHtml(asset.name)}</span></button>`;
+        if (asset.type === "video" && asset.url) return `<div class="message-asset message-video">${asset.url.startsWith("data:") || asset.url.startsWith("http") ? `<video src="${asset.url}" controls></video>` : ""}<span>${escapeHtml(asset.name)}</span></div>`;
+        return `<button type="button" class="message-asset is-doc" data-asset-preview="${escapeHtml(asset.id)}"><strong>${escapeHtml(asset.type.toUpperCase())}</strong><span>${escapeHtml(asset.name)}</span></button>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+function getFilteredProjectAssets() {
+  const filter = state.projectUi.assetFilter || "all";
+  return safeArray(state.project.assets).filter((asset) => (
+    filter === "all"
+    || asset.type === filter
+    || (filter === "references" && asset.source === "uploaded")
+    || (filter === "initial" && isUserProvidedAsset(asset))
+    || (filter === "transient" && isAiGeneratedAsset(asset))
+  ));
+}
+
+function getProjectImageAssets() {
+  return safeArray(state.project.assets).filter((asset) => asset.type === "image" && asset.url);
+}
+
+function isAiGeneratedAsset(asset) {
+  if (!asset) return false;
+  const provider = String(asset.provider || "").toLowerCase();
+  const source = String(asset.source || "").toLowerCase();
+  return source === "generated" || ["openai", "gemini", "luma"].includes(provider) || Boolean(asset.metadata?.transient);
+}
+
+function isUserProvidedAsset(asset) {
+  if (!asset) return false;
+  if (isAiGeneratedAsset(asset)) return false;
+  const source = String(asset.source || "").toLowerCase();
+  return ["uploaded", "imported", "manual"].includes(source) || !source;
+}
+
+function getAssetLifecycleLabel(asset) {
+  return isAiGeneratedAsset(asset) ? "IA transitorio" : "Fuente usuario";
+}
+
+function isProjectVideoInputAsset(asset) {
+  if (!asset?.url) return false;
+  if (!isUserProvidedAsset(asset)) return false;
+  const mimeType = String(asset.mimeType || "");
+  return asset.type === "image" || asset.type === "reference" || mimeType.startsWith("image/");
+}
+
+function getProjectVideoInputAssets() {
+  return safeArray(state.project.assets).filter(isProjectVideoInputAsset);
+}
+
+function getProjectTransientAiAssets() {
+  return safeArray(state.project.assets).filter(isAiGeneratedAsset);
+}
+
+function getClipVideoAsset(clip) {
+  if (!clip?.videoAssetId) return null;
+  const asset = getAssetById(clip.videoAssetId);
+  if (asset?.type !== "video" || !asset.url) return null;
+  const metadata = asset.metadata || {};
+  if (metadata.stage !== "video-clip" || metadata.clipId !== clip.id) return null;
+  if (["manual", "mock"].includes(asset.provider) && !metadata.resolvedFromStatus) return null;
+  return asset;
+}
+
+function isClipReadyForReview(clip) {
+  return Boolean(getClipVideoAsset(clip));
+}
+
+function isClipApprovedForFinal(clip) {
+  return clip?.status === "approved" && isClipReadyForReview(clip);
+}
+
+function getProjectPresentationAssets() {
+  return safeArray(state.project.assets).filter((asset) => ["image", "video", "pdf", "pptx", "dxf", "dwg", "reference", "other"].includes(asset.type));
+}
+
+function getAssetById(assetId) {
+  return safeArray(state.project.assets).find((asset) => asset.id === assetId) || null;
+}
+
+function getSelectedVideoTemplate() {
+  const templates = getVideoTemplates();
+  return templates.find((template) => template.id === state.projectUi.videoTemplateId) || templates[0] || null;
+}
+
+function getActiveVideoProduction() {
+  const productions = safeArray(state.project.videoProductions);
+  const production = productions.find((item) => item.id === state.projectUi.activeVideoProductionId) || productions[0] || null;
+  if (production) state.projectUi.activeVideoProductionId = production.id;
+  return production;
+}
+
+function syncVideoUiFromProduction(production) {
+  if (!production) return;
+  const settings = createVideoProductionSettings(production.settings || {});
+  state.projectUi.videoTemplateId = production.templateId || state.projectUi.videoTemplateId;
+  state.projectUi.videoSelectedAssetIds = safeArray(production.sourceAssetIds);
+  state.projectUi.videoDurationSeconds = Number(settings.durationSeconds || state.projectUi.videoDurationSeconds || 9);
+  state.projectUi.videoAspectRatio = settings.aspectRatio || state.projectUi.videoAspectRatio || "16:9";
+  state.projectUi.videoIncludeHumans = Boolean(settings.includeHumans);
+  state.projectUi.videoIncludeCars = Boolean(settings.includeCars);
+  state.projectUi.videoStyle = settings.visualStyle || state.projectUi.videoStyle || "";
+  state.projectUi.videoMotionIntensity = settings.motionIntensity || state.projectUi.videoMotionIntensity || "medium";
+  state.projectUi.videoFidelityLevel = settings.fidelityLevel || state.projectUi.videoFidelityLevel || "strict";
+  state.projectUi.videoPrompt = settings.userPrompt ?? "";
+  state.projectUi.imageProvider = settings.imageProvider || state.projectUi.imageProvider || "auto";
+  state.projectUi.videoProvider = settings.videoProvider || state.projectUi.videoProvider || "auto";
+  state.projectUi.videoGeneratedAssetIds = safeArray(production.baseImages).map((item) => item.assetId).filter(Boolean);
+  state.projectUi.videoApprovedAssetIds = safeArray(production.baseImages).filter((item) => item.status === "approved").map((item) => item.assetId).filter(Boolean);
+}
+
+function getCurrentVideoProductionSettings() {
+  return createVideoProductionSettings({
+    durationSeconds: state.projectUi.videoDurationSeconds,
+    aspectRatio: state.projectUi.videoAspectRatio,
+    includeHumans: state.projectUi.videoIncludeHumans,
+    includeCars: state.projectUi.videoIncludeCars,
+    visualStyle: state.projectUi.videoStyle,
+    motionIntensity: state.projectUi.videoMotionIntensity,
+    fidelityLevel: state.projectUi.videoFidelityLevel,
+    userPrompt: state.projectUi.videoPrompt,
+    imageProvider: state.projectUi.imageProvider,
+    videoProvider: state.projectUi.videoProvider,
+  });
+}
+
+function ensureActiveVideoProduction() {
+  let production = getActiveVideoProduction();
+  const template = getSelectedVideoTemplate();
+  if (!production) {
+    production = createVideoProduction({
+      templateId: template?.id || state.projectUi.videoTemplateId || "drone-tour",
+      sourceAssetIds: safeArray(state.projectUi.videoSelectedAssetIds),
+      settings: getCurrentVideoProductionSettings(),
+    });
+    state.project.videoProductions.unshift(production);
+    state.projectUi.activeVideoProductionId = production.id;
+  }
+  return production;
+}
+
+function updateActiveVideoProductionFromUi(options = {}) {
+  const production = options.create ? ensureActiveVideoProduction() : getActiveVideoProduction();
+  if (!production) return null;
+  production.templateId = state.projectUi.videoTemplateId || production.templateId;
+  if (["draft", "source_selected"].includes(production.status)) {
+    production.sourceAssetIds = safeArray(state.projectUi.videoSelectedAssetIds);
+  }
+  production.settings = getCurrentVideoProductionSettings();
+  production.updatedAt = new Date().toISOString();
+  return production;
+}
+
+function compactProjectSelections() {
+  const existing = new Set(safeArray(state.project.assets).map((asset) => asset.id));
+  state.projectUi.imageSelectedAssetIds = safeArray(state.projectUi.imageSelectedAssetIds).filter((id) => existing.has(id));
+  state.projectUi.videoSelectedAssetIds = safeArray(state.projectUi.videoSelectedAssetIds).filter((id) => existing.has(id));
+  state.projectUi.videoGeneratedAssetIds = safeArray(state.projectUi.videoGeneratedAssetIds).filter((id) => existing.has(id));
+  state.projectUi.videoApprovedAssetIds = safeArray(state.projectUi.videoApprovedAssetIds).filter((id) => existing.has(id));
+  state.projectUi.presentationSelectedAssetIds = safeArray(state.projectUi.presentationSelectedAssetIds).filter((id) => existing.has(id));
+  state.project.videoProductions = safeArray(state.project.videoProductions).map((production) => ({
+    ...production,
+    sourceAssetIds: safeArray(production.sourceAssetIds).filter((id) => existing.has(id)),
+    baseImages: safeArray(production.baseImages).filter((item) => !item.assetId || existing.has(item.assetId)),
+    clips: safeArray(production.clips).filter((item) => !item.videoAssetId || existing.has(item.videoAssetId)),
+    finalVideoAssetId: existing.has(production.finalVideoAssetId) ? production.finalVideoAssetId : "",
+  }));
+}
+
+function toggleProjectAssetSelection(listKey, assetId) {
+  const current = safeArray(state.projectUi[listKey]);
+  state.projectUi[listKey] = current.includes(assetId)
+    ? current.filter((id) => id !== assetId)
+    : [...current, assetId];
+}
+
+function buildImageSourceFromAsset(asset) {
+  if (!asset?.url) return null;
+  const legacy = state.images.find((image) => image.id === asset.id || image.id === asset.metadata?.legacyImageId);
+  return legacy || {
+    id: asset.id,
+    assetId: asset.id,
+    name: asset.name || "Asset visual",
+    size: asset.size || 0,
+    type: asset.mimeType || "image/png",
+    url: asset.url,
+    analysis: asset.metadata?.analysis || null,
+  };
+}
+
+function ensureLegacyImagesFromAssets(assetIds = []) {
+  const requestedIds = safeArray(assetIds).filter(Boolean);
+  const sourceAssets = (requestedIds.length ? requestedIds.map(getAssetById) : getProjectImageAssets())
+    .filter((asset) => asset?.type === "image" && asset.url);
+  sourceAssets.forEach((asset) => {
+    if (state.images.some((image) => image.id === asset.id || image.assetId === asset.id || image.id === asset.metadata?.legacyImageId)) return;
+    state.images.unshift({
+      id: asset.id,
+      assetId: asset.id,
+      name: asset.name || "Asset visual",
+      size: asset.size || 0,
+      type: asset.mimeType || "image/png",
+      url: asset.url,
+      analysis: asset.metadata?.analysis || null,
+    });
+  });
+  if ((!state.mainId || !state.images.some((image) => image.id === state.mainId)) && sourceAssets[0]) {
+    state.mainId = sourceAssets[0].id;
+  }
+  return sourceAssets;
+}
+
+function ensureLegacyDocumentsFromAssets(assetIds = []) {
+  const requestedIds = safeArray(assetIds).filter(Boolean);
+  const sourceAssets = (requestedIds.length ? requestedIds.map(getAssetById) : getProjectPresentationAssets())
+    .filter((asset) => asset && asset.type !== "image");
+  sourceAssets.forEach((asset) => {
+    if (state.documents.some((documentItem) => documentItem.id === asset.id || documentItem.assetId === asset.id || documentItem.id === asset.metadata?.legacyDocumentId)) return;
+    state.documents.unshift({
+      id: asset.id,
+      assetId: asset.id,
+      name: asset.name || "Documento",
+      size: asset.size || 0,
+      type: asset.mimeType || asset.type || "application/octet-stream",
+    });
+  });
+  return sourceAssets;
+}
+
+function preparePresentationAssetsForLegacy() {
+  const selected = safeArray(state.projectUi.presentationSelectedAssetIds);
+  const images = ensureLegacyImagesFromAssets(selected);
+  ensureLegacyDocumentsFromAssets(selected);
+  if (!selected.length) {
+    state.projectUi.presentationSelectedAssetIds = getProjectPresentationAssets().map((asset) => asset.id);
+  }
+  return images;
+}
+
+function renderProjectAssetPicker(assets, selectedIds, datasetName, emptyCopy = "No hay assets disponibles.") {
+  if (!assets.length) return `<div class="empty-state compact-empty"><strong>Sin assets</strong><span>${escapeHtml(emptyCopy)}</span></div>`;
+  return assets.map((asset) => {
+    const selected = safeArray(selectedIds).includes(asset.id);
+    const isPrimary = asset.type === "image" && (asset.id === state.mainId || asset.metadata?.legacyImageId === state.mainId);
+    return `
+      <button type="button" class="asset-picker-card ${selected ? "active" : ""} ${isPrimary ? "is-primary" : ""}" ${datasetName}="${escapeHtml(asset.id)}">
+        <span class="asset-picker-media">
+          ${asset.type === "image" && asset.url ? `<img src="${asset.url}" alt="${escapeHtml(asset.name)}" loading="lazy" />` : ""}
+          ${asset.type === "video" && asset.url ? `<video src="${asset.url}" muted playsinline></video>` : ""}
+          ${asset.type !== "image" && asset.type !== "video" ? `<strong>${escapeHtml(asset.type.toUpperCase())}</strong>` : ""}
+        </span>
+        <span class="asset-picker-copy">
+          <strong>${escapeHtml(asset.name)}</strong>
+          <small>${escapeHtml(asset.type)} · ${escapeHtml(asset.source || "asset")}${isPrimary ? " · Principal" : ""}</small>
+        </span>
+      </button>
+    `;
+  }).join("");
+}
+
+function renderProjectDecisionControls(keys = []) {
+  return keys.map((key) => {
+    const group = [...DECISION_GROUPS.render, ...DECISION_GROUPS.pdf].find((entry) => entry.key === key);
+    if (!group) return "";
+    return `
+      <section class="project-decision-group">
+        <div class="mini-head"><span class="eyebrow">${escapeHtml(group.label)}</span><strong>${escapeHtml(getDecisionLabel(key))}</strong></div>
+        <div class="project-choice-grid">
+          ${group.options.map((option) => `
+            <button type="button" class="choice-card ${state.settings[key] === option.value ? "active" : ""}" data-choice-key="${escapeHtml(key)}" data-choice-value="${escapeHtml(option.value)}">
+              <strong>${escapeHtml(option.label)}</strong>
+              <p>${escapeHtml(option.description)}</p>
+            </button>
+          `).join("")}
+        </div>
+      </section>
+    `;
+  }).join("");
+}
+
+function getLegacyImageForAsset(asset) {
+  if (!asset) return null;
+  return state.images.find((image) => (
+    image.id === asset.id
+    || image.assetId === asset.id
+    || image.id === asset.metadata?.legacyImageId
+  )) || null;
+}
+
+function getProjectImageAnalysisEntry(asset) {
+  const image = getLegacyImageForAsset(asset);
+  const analysis = image?.analysis || asset?.metadata?.analysis || null;
+  return { asset, image, analysis };
+}
+
+function setProjectMainImageAsset(assetId) {
+  const asset = getAssetById(assetId);
+  if (!asset || asset.type !== "image") return;
+  ensureLegacyImagesFromAssets([assetId]);
+  const image = getLegacyImageForAsset(asset) || state.images.find((item) => item.id === assetId);
+  state.mainId = image?.id || asset.metadata?.legacyImageId || asset.id;
+  if (!state.projectUi.imageSelectedAssetIds.includes(assetId)) {
+    state.projectUi.imageSelectedAssetIds = [assetId, ...state.projectUi.imageSelectedAssetIds];
+  }
+  syncProjectAssetAnalysisFromImage(image);
+  renderAll();
+  scheduleProjectAutosave("main-asset");
+}
+
+async function handleAnalyzeProjectAssets(forceRemote = false) {
+  const imageAssets = getProjectImageAssets();
+  if (!imageAssets.length) {
+    toast("Sube al menos una imagen para descomponer.", "warn");
+    return;
+  }
+  ensureLegacyImagesFromAssets(imageAssets.map((asset) => asset.id));
+  if (!state.mainId && state.images[0]) state.mainId = state.images[0].id;
+  state.projectUi.tab = "assets";
+  renderAll();
+  await runProjectAnalyses(forceRemote);
+  addProjectMessage({
+    role: "system",
+    type: "text",
+    content: "Descomposicion actualizada en Assets: referencias, objetos, textos, materiales, entorno, composicion y riesgos quedaron editables por imagen.",
+    assetIds: imageAssets.map((asset) => asset.id),
+  });
+  renderAll();
+}
+
+function normalizeProjectAssetAnalysis(assetId) {
+  const asset = getAssetById(assetId);
+  if (!asset || asset.type !== "image") return null;
+  let image = getLegacyImageForAsset(asset);
+  if (!image) {
+    ensureLegacyImagesFromAssets([assetId]);
+    image = getLegacyImageForAsset(asset);
+  }
+  const analysis = image?.analysis || asset.metadata?.analysis || buildAnalysisFallback();
+  const safeAnalysis = sanitizeProjectAnalysis(analysis);
+  if (image) image.analysis = safeAnalysis;
+  asset.metadata = { ...(asset.metadata || {}), legacyImageId: image?.id || asset.metadata?.legacyImageId || asset.id, analysis: safeAnalysis };
+  return { asset, image, analysis: image?.analysis || asset.metadata.analysis };
+}
+
+function sanitizeProjectAnalysis(analysis = {}) {
+  const fallback = buildAnalysisFallback();
+  return {
+    ...fallback,
+    ...analysis,
+    summary: String(analysis.summary || fallback.summary || ""),
+    sceneType: String(analysis.sceneType || fallback.sceneType || ""),
+    cameraNotes: String(analysis.cameraNotes || fallback.cameraNotes || ""),
+    lightMood: String(analysis.lightMood || fallback.lightMood || ""),
+    objects: normalizeStringArray(analysis.objects, 18),
+    texts: normalizeStringArray(analysis.texts, 14),
+    materials: normalizeStringArray(analysis.materials, 14),
+    environment: normalizeStringArray(analysis.environment, 14),
+    composition: normalizeStringArray(analysis.composition, 12),
+    realismRisks: normalizeStringArray(analysis.realismRisks, 12),
+    overlay: safeArray(analysis.overlay),
+    palette: safeArray(analysis.palette || fallback.palette),
+  };
+}
+
+function updateProjectAssetAnalysis(assetId, updater) {
+  const entry = normalizeProjectAssetAnalysis(assetId);
+  if (!entry?.analysis) return;
+  updater(entry.analysis);
+  entry.analysis.summary = rebuildAnalysisSummary(entry.analysis);
+  if (entry.image) {
+    entry.image.analysis = entry.analysis;
+    syncProjectAssetAnalysisFromImage(entry.image);
+  } else {
+    entry.asset.metadata = { ...(entry.asset.metadata || {}), analysis: entry.analysis };
+  }
+  updatePromptText();
+  renderAll();
+  scheduleProjectAutosave("asset-analysis");
+}
+
+function removeProjectAssetAnalysisToken(assetId, key, value) {
+  updateProjectAssetAnalysis(assetId, (analysis) => {
+    if (!Array.isArray(analysis[key])) analysis[key] = [];
+    analysis[key] = analysis[key].filter((item) => item !== value);
+    analysis.overlay = safeArray(analysis.overlay).filter((entry) => !(entry.manual && entry.category === key && entry.label === value));
+  });
+}
+
+function editProjectAssetAnalysisToken(assetId, key, value) {
+  const nextValue = window.prompt("Modificar especificacion", value || "");
+  if (!nextValue || !nextValue.trim()) return;
+  updateProjectAssetAnalysis(assetId, (analysis) => {
+    if (!Array.isArray(analysis[key])) analysis[key] = [];
+    analysis[key] = unique(analysis[key].map((item) => item === value ? nextValue.trim() : item));
+    safeArray(analysis.overlay).forEach((entry) => {
+      if (entry.manual && entry.category === key && entry.label === value) entry.label = nextValue.trim();
+    });
+  });
+}
+
+function addProjectAssetAnalysisToken(assetId, key) {
+  const entry = normalizeProjectAssetAnalysis(assetId);
+  if (!entry?.analysis || !Array.isArray(entry.analysis[key])) return;
+  const controls = Array.from(document.querySelectorAll(`[data-asset-id="${assetId}"]`));
+  const select = controls.find((node) => node.dataset.projectAnalysisSelect === key);
+  const input = controls.find((node) => node.dataset.projectAnalysisInput === key);
+  const value = String(select?.value || input?.value || "").trim();
+  if (!value) return;
+  updateProjectAssetAnalysis(assetId, (analysis) => {
+    analysis[key] = unique([...(analysis[key] || []), value]);
+  });
+}
+
+function buildProjectAssetAnalysisSection(asset, analysis, config) {
+  const values = safeArray(analysis?.[config.key]);
+  const visibleValues = values.slice(0, 14);
+  const actionMarkup = config.type === "select"
+    ? `
+      <select class="token-select" data-asset-id="${escapeHtml(asset.id)}" data-project-analysis-select="${escapeHtml(config.key)}">
+        <option value="">Agregar opcion</option>
+        ${safeArray(TOKEN_LIBRARIES[config.key]).map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")}
+      </select>
+      <button type="button" class="button button-secondary" data-asset-id="${escapeHtml(asset.id)}" data-project-analysis-add="${escapeHtml(config.key)}">Agregar</button>
+    `
+    : `
+      <input class="token-input" data-asset-id="${escapeHtml(asset.id)}" data-project-analysis-input="${escapeHtml(config.key)}" type="text" placeholder="${escapeHtml(config.placeholder || "Agregar especificacion")}" />
+      <button type="button" class="button button-secondary" data-asset-id="${escapeHtml(asset.id)}" data-project-analysis-add="${escapeHtml(config.key)}">Agregar</button>
+    `;
+  return `
+    <article class="project-analysis-section">
+      <div class="mini-head">
+        <span class="eyebrow">${escapeHtml(config.eyebrow)}</span>
+        <strong>${escapeHtml(config.label)}</strong>
+        <small>${values.length ? `${values.length} item${values.length === 1 ? "" : "s"}` : "Pendiente"}</small>
+      </div>
+      <div class="analysis-bubble-grid">
+        ${visibleValues.length ? visibleValues.map((value) => `
+          <span class="token-pill analysis-bubble">
+            <span>${escapeHtml(value)}</span>
+            <button type="button" title="Modificar" aria-label="Modificar ${escapeHtml(value)}" data-asset-id="${escapeHtml(asset.id)}" data-project-token-edit="${escapeHtml(config.key)}" data-project-token-value="${escapeHtml(value)}">Editar</button>
+            <button type="button" title="Quitar" aria-label="Quitar ${escapeHtml(value)}" data-asset-id="${escapeHtml(asset.id)}" data-project-token-remove="${escapeHtml(config.key)}" data-project-token-value="${escapeHtml(value)}">&times;</button>
+          </span>
+        `).join("") : `<span class="token-pill analysis-bubble muted">Sin datos</span>`}
+      </div>
+      <div class="token-editor-actions">${actionMarkup}</div>
+    </article>
+  `;
+}
+
+function renderProjectAssetAnalysisList() {
+  const imageAssets = getProjectImageAssets();
+  if (!imageAssets.length) return "";
+  const sections = [
+    { key: "objects", label: "Objetos", eyebrow: "Escena", type: "input", placeholder: "Agregar objeto, mueble o microobjeto" },
+    { key: "texts", label: "Rotulos y textos", eyebrow: "OCR", type: "input", placeholder: "Agregar texto exacto visible" },
+    { key: "materials", label: "Materiales", eyebrow: "PBR", type: "select" },
+    { key: "environment", label: "Entorno", eyebrow: "Contexto", type: "select" },
+    { key: "composition", label: "Composicion", eyebrow: "Camara", type: "select" },
+    { key: "realismRisks", label: "Riesgos", eyebrow: "Control", type: "select" },
+  ];
+  return `
+    <section class="project-analysis-workbench">
+      <div class="asset-view-head compact-head">
+        <div>
+          <span class="eyebrow">Descomposicion por imagen</span>
+          <h2>Lectura editable de assets visuales</h2>
+          <p>Selecciona la imagen principal y ajusta objetos, textos, materiales, entorno, composicion y riesgos detectados. Estos datos alimentan renders, videos y presentaciones.</p>
+        </div>
+        <div class="asset-view-actions">
+          <button type="button" class="button button-primary" data-assets-analyze>Analizar pendientes</button>
+          <button type="button" class="button button-secondary" data-assets-analyze data-assets-analyze-force>Reanalizar todo</button>
+        </div>
+      </div>
+      <div class="project-analysis-list">
+        ${imageAssets.map((asset, index) => {
+          const { image, analysis } = getProjectImageAnalysisEntry(asset);
+          const isMain = asset.id === state.mainId || asset.metadata?.legacyImageId === state.mainId || image?.id === state.mainId;
+          const pending = !analysis;
+          return `
+            <article class="project-analysis-item ${isMain ? "is-main" : ""}">
+              <div class="project-analysis-media">
+                <img src="${asset.url}" alt="${escapeHtml(asset.name)}" loading="lazy" />
+                <span class="status-chip ${isMain ? "status-ok" : "status-soft"}">${isMain ? "Principal" : `Imagen ${index + 1}`}</span>
+              </div>
+              <div class="project-analysis-body">
+                <div class="project-analysis-title-row">
+                  <div>
+                    <strong>${escapeHtml(asset.name)}</strong>
+                    <p>${pending ? "Lectura pendiente. Ejecuta analisis para descomponer esta imagen." : escapeHtml(analysis.summary || "Lectura lista.")}</p>
+                  </div>
+                  <div class="asset-actions">
+                    <button type="button" class="button button-secondary" data-project-set-main-asset="${escapeHtml(asset.id)}">${isMain ? "Principal" : "Usar principal"}</button>
+                    <button type="button" class="button button-ghost" data-asset-delete="${escapeHtml(asset.id)}">Eliminar</button>
+                  </div>
+                </div>
+                ${pending ? `<div class="empty-state compact-empty"><strong>Sin descomposicion</strong><span>Esta imagen se analizara junto con las demas referencias visuales.</span></div>` : `
+                  <div class="project-analysis-sections">
+                    ${sections.map((section) => buildProjectAssetAnalysisSection(asset, analysis, section)).join("")}
+                  </div>
+                `}
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderProjectAssetsView() {
+  const filters = [
+    ["all", "Todos"],
+    ["initial", "Iniciales"],
+    ["transient", "IA transitorios"],
+    ["image", "Imagenes"],
+    ["video", "Videos"],
+    ["pdf", "PDFs"],
+    ["pptx", "PPTX"],
+    ["dxf", "Planos"],
+    ["references", "Referencias"],
+  ];
+  const assets = getFilteredProjectAssets();
+  elements.projectAssetsView.innerHTML = `
+    <div class="asset-view-head">
+      <div>
+        <span class="eyebrow">Assets</span>
+        <h2>Biblioteca del proyecto</h2>
+        <p>Sube, arrastra, analiza y descompone assets del proyecto. Esta biblioteca alimenta Imagenes, Video Studio y Presentaciones.</p>
+      </div>
+      <div class="asset-view-actions">
+        <button type="button" class="button button-primary" data-assets-upload>Cargar assets</button>
+        <div class="asset-filter-row">
+          ${filters.map(([id, label]) => `<button type="button" class="select-chip ${state.projectUi.assetFilter === id ? "active" : ""}" data-asset-filter="${id}">${label}</button>`).join("")}
+        </div>
+      </div>
+    </div>
+    <section class="project-assets-dropzone" data-project-assets-dropzone tabindex="0" role="button" aria-label="Cargar assets al proyecto">
+      <div class="drop-ornament"></div>
+      <strong>Arrastra imagenes, PDFs, PPTX, DXF o DWG aqui</strong>
+      <span>Al cargar assets visuales, RENDEAI ejecuta la lectura y descomposicion para dejarlos listos como contexto de renders, videos y presentaciones.</span>
+      <button type="button" class="button button-secondary" data-assets-upload>Seleccionar archivos</button>
+    </section>
+    <div class="project-asset-grid">
+      ${assets.length ? assets.map((asset) => renderProjectAssetCard(asset)).join("") : `<div class="empty-state"><strong>No hay assets en este filtro</strong><span>Usa Cargar assets para subir imagenes, PDFs, PPTX, DXF o DWG al proyecto.</span><button type="button" class="button button-primary" data-assets-upload>Cargar assets</button></div>`}
+    </div>
+    ${renderProjectAssetAnalysisList()}
+  `;
+}
+
+function renderProjectAssetCard(asset) {
+  const isImageSelected = state.projectUi.imageSelectedAssetIds.includes(asset.id);
+  const canUseAsVideoInput = isProjectVideoInputAsset(asset);
+  const isVideoSelected = canUseAsVideoInput && state.projectUi.videoSelectedAssetIds.includes(asset.id);
+  const isPresentationSelected = state.projectUi.presentationSelectedAssetIds.includes(asset.id);
+  const selected = isImageSelected || isVideoSelected || isPresentationSelected;
+  const isMain = asset.type === "image" && (asset.id === state.mainId || asset.metadata?.legacyImageId === state.mainId);
+  const lifecycleLabel = getAssetLifecycleLabel(asset);
+  return `
+    <article class="project-asset-card ${selected || isMain ? "selected" : ""}">
+      <div class="project-asset-preview">
+        ${asset.type === "image" && asset.url ? `<img src="${asset.url}" alt="${escapeHtml(asset.name)}" loading="lazy" />` : ""}
+        ${asset.type === "video" && asset.url ? `<video src="${asset.url}" muted playsinline></video>` : ""}
+        ${!(asset.type === "image" && asset.url) && !(asset.type === "video" && asset.url) ? `<strong>${escapeHtml(asset.type.toUpperCase())}</strong>` : ""}
+        <span class="asset-origin-badge ${isAiGeneratedAsset(asset) ? "transient" : "initial"}">${escapeHtml(lifecycleLabel)}</span>
+      </div>
+      <div class="project-asset-card-copy">
+        <strong>${escapeHtml(asset.name)}</strong>
+        <span>${escapeHtml(asset.type)} · ${escapeHtml(asset.source)} · ${escapeHtml(lifecycleLabel)} · ${escapeHtml(formatDate(asset.createdAt))}${isMain ? " · Principal" : ""}</span>
+      </div>
+      <div class="asset-actions">
+        <button type="button" class="button button-secondary" data-asset-preview="${escapeHtml(asset.id)}">Ver</button>
+        ${asset.type === "image" ? `<button type="button" class="button button-secondary" data-project-set-main-asset="${escapeHtml(asset.id)}">${isMain ? "Principal" : "Hacer principal"}</button>` : ""}
+        ${asset.type === "image" ? `<button type="button" class="button button-secondary" data-image-toggle-asset="${escapeHtml(asset.id)}">${isImageSelected ? "Quitar imagen" : "Usar en imagenes"}</button>` : ""}
+        ${asset.type === "image" && canUseAsVideoInput ? `<button type="button" class="button button-secondary" data-video-toggle-asset="${escapeHtml(asset.id)}">${isVideoSelected ? "Quitar video" : "Usar en video"}</button>` : ""}
+        ${asset.type === "image" && !canUseAsVideoInput ? `<button type="button" class="button button-secondary" disabled>Transitorio IA</button>` : ""}
+        <button type="button" class="button button-ghost ${isPresentationSelected ? "active" : ""}" data-asset-use-presentation="${escapeHtml(asset.id)}">${isPresentationSelected ? "Quitar PPT" : "Presentacion"}</button>
+        <button type="button" class="button button-ghost" data-asset-rename="${escapeHtml(asset.id)}">Renombrar</button>
+        ${asset.url ? `<button type="button" class="button button-ghost" data-asset-download="${escapeHtml(asset.id)}">Descargar</button>` : ""}
+        <button type="button" class="button button-ghost" data-asset-delete="${escapeHtml(asset.id)}">Eliminar</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderProviderPanel() {
+  const lumaText = state.server.lumaReady
+    ? "Luma conectado"
+    : state.server.mockAi
+      ? "Mock video activo"
+      : state.server.lumaConfigured && !state.server.publicAssetBaseUrlUsable
+        ? "Luma requiere URL publica HTTPS"
+        : LUMA_NOT_CONFIGURED_MESSAGE;
+  elements.projectProviderPanel.innerHTML = `
+    <span class="provider-pill ${state.server.analysisReady ? "ok" : "warn"}">OpenAI ${state.server.analysisReady ? "conectado" : "no configurado"}</span>
+    <span class="provider-pill ${state.server.renderProvider === "gemini" ? "ok" : state.server.aiReady ? "warn" : "warn"}">Imagen ${escapeHtml(state.server.renderProvider || "local")}</span>
+    <span class="provider-pill ${state.server.lumaReady || state.server.mockAi ? "ok" : "warn"}">${escapeHtml(lumaText)}</span>
+  `;
+}
+
+function renderProjectAssetRail() {
+  const assets = safeArray(state.project.assets).slice(0, 8);
+  elements.projectAssetRail.innerHTML = assets.length ? assets.map((asset) => `
+    <button type="button" class="asset-rail-item" data-asset-preview="${escapeHtml(asset.id)}">
+      ${asset.type === "image" && asset.url ? `<img src="${asset.url}" alt="" loading="lazy" />` : `<span>${escapeHtml(asset.type.toUpperCase())}</span>`}
+      <strong>${escapeHtml(asset.name)}</strong>
+    </button>
+  `).join("") : `<div class="empty-state compact-empty"><strong>Sin assets</strong><span>Adjunta referencias desde el composer.</span></div>`;
+}
+
+function renderImageStudio() {
+  if (!elements.projectImagesView) return;
+  compactProjectSelections();
+  const imageAssets = getProjectImageAssets();
+  const selectedAssets = state.projectUi.imageSelectedAssetIds.map(getAssetById).filter(Boolean);
+  const generatedAssets = imageAssets.filter((asset) => asset.source === "generated").slice(0, 12);
+  const variations = Number(state.projectUi.imageVariationsPerAsset || state.projectUi.variationsPerImage || 1);
+  const total = Math.max(1, selectedAssets.length || (imageAssets.length ? 1 : 0)) * variations;
+  elements.projectImagesView.innerHTML = `
+    <div class="image-studio-head">
+      <div>
+        <span class="eyebrow">Image Studio</span>
+        <h2>Genera y transforma imagenes usando los assets del proyecto.</h2>
+        <p>Selecciona referencias desde la biblioteca. No hay descomposicion automatica: estos assets son el contexto directo para renders, variantes y moodboards.</p>
+      </div>
+      <span class="status-chip status-soft">${imageAssets.length} assets visuales</span>
+    </div>
+
+    <div class="asset-workbench-grid">
+      <section class="asset-workbench-panel">
+        <div class="mini-head"><span class="eyebrow">Assets fuente</span><strong>${selectedAssets.length} seleccionados</strong></div>
+        <div class="asset-picker-grid">
+          ${renderProjectAssetPicker(imageAssets, state.projectUi.imageSelectedAssetIds, "data-image-toggle-asset", "Sube imagenes en Assets para generar nuevos renders.")}
+        </div>
+        <p class="section-note">La primera seleccion queda como imagen principal del motor de render. Puedes cambiarla tocando otro asset.</p>
+      </section>
+
+      <section class="asset-workbench-panel">
+        <div class="mini-head"><span class="eyebrow">Generacion</span><strong>${total} output${total === 1 ? "" : "s"}</strong></div>
+        <label class="field"><span>Prompt visual</span><textarea data-image-prompt placeholder="Render hiperrealista, materiales, atmosfera y cambios deseados.">${escapeHtml(state.projectUi.imagePrompt || "")}</textarea></label>
+        <label class="field"><span>Variaciones por asset</span><input type="number" min="1" max="8" value="${variations}" data-image-variations-count /></label>
+        <div class="action-stack">
+          <button type="button" class="button button-primary" data-image-generate-from-assets>Generar imagenes</button>
+          <button type="button" class="button button-secondary" data-image-build-jobs>Construir variaciones</button>
+          <button type="button" class="button button-ghost" data-open-legacy-flow="render">Abrir motor render</button>
+        </div>
+        <p class="section-note">Si no seleccionas un asset, se usara la primera imagen disponible del proyecto.</p>
+      </section>
+    </div>
+
+    <section class="asset-workbench-panel image-spec-panel">
+      <div class="mini-head"><span class="eyebrow">Especificaciones</span><strong>Realismo, acabado y lenguaje</strong></div>
+      <p class="section-note">Estos controles son los mismos del flujo anterior: definen si el output sera realista, hiperrealista, editorial, fotografico, 3D premium y demas.</p>
+      ${renderProjectDecisionControls(["realism", "renderLanguage", "imageMood", "imageFinish", "lensProfile"])}
+    </section>
+
+    <section class="asset-workbench-panel generated-assets-panel">
+      <div class="mini-head"><span class="eyebrow">Resultados</span><strong>Imagenes generadas</strong></div>
+      <div class="asset-picker-grid">
+        ${renderProjectAssetPicker(generatedAssets, state.projectUi.imageSelectedAssetIds, "data-image-toggle-asset", "Los outputs generados apareceran aqui y quedaran disponibles para Video Studio y Presentaciones.")}
+      </div>
+    </section>
+  `;
+}
+
+function deriveVideoWorkflowState({ sourceIds = [], baseImages = [], clips = [], finalAsset = null, production = null }) {
+  const approvedBaseImages = safeArray(baseImages).filter((item) => item.status === "approved" && item.assetId);
+  const approvedClips = safeArray(clips).filter(isClipApprovedForFinal);
+  const hasInputs = safeArray(sourceIds).length > 0;
+  const inputsConfirmed = hasInputs && production?.status && production.status !== "draft";
+  let activeStage = "inputs";
+  if (finalAsset || production?.status === "completed") activeStage = "final";
+  else if (approvedClips.length) activeStage = "final";
+  else if (safeArray(clips).length || approvedBaseImages.length) activeStage = "clips";
+  else if (safeArray(baseImages).length || inputsConfirmed) activeStage = "base";
+
+  const stageStatus = {
+    inputs: !hasInputs ? "active" : inputsConfirmed ? "completed" : "active",
+    base: !inputsConfirmed ? "locked" : approvedBaseImages.length ? "completed" : activeStage === "base" ? "active" : safeArray(baseImages).some((item) => item.status === "failed") ? "failed" : "pending",
+    clips: !approvedBaseImages.length ? "locked" : approvedClips.length ? "completed" : activeStage === "clips" ? "active" : safeArray(clips).some((clip) => clip.status === "failed") ? "failed" : "pending",
+    final: !approvedClips.length ? "locked" : finalAsset ? "completed" : activeStage === "final" ? "active" : "pending",
+  };
+  if (production?.status === "failed") {
+    stageStatus[activeStage] = "failed";
+  }
+  return {
+    activeStage,
+    inputsConfirmed,
+    approvedBaseImages,
+    approvedClips,
+    stages: [
+      { id: "inputs", number: "01", label: "Inputs", metric: hasInputs ? `${sourceIds.length} seleccionados` : "Sin inputs", status: stageStatus.inputs },
+      { id: "base", number: "02", label: "Imagenes base", metric: safeArray(baseImages).length ? `${safeArray(baseImages).length} generadas · ${approvedBaseImages.length} aprobadas` : "Bloque narrativo", status: stageStatus.base },
+      { id: "clips", number: "03", label: "Clips", metric: safeArray(clips).length ? `${safeArray(clips).length} clips · ${approvedClips.length} aprobados` : "Uno por imagen", status: stageStatus.clips },
+      { id: "final", number: "04", label: "Video final", metric: finalAsset ? "asset guardado" : "Composicion", status: stageStatus.final },
+    ],
+  };
+}
+
+function renderVideoStudio() {
+  const templates = getVideoTemplates();
+  const selectedTemplate = templates.find((template) => template.id === state.projectUi.videoTemplateId) || templates[0] || {};
+  if (!state.projectUi.videoTemplateId && selectedTemplate?.id) state.projectUi.videoTemplateId = selectedTemplate.id;
+  compactProjectSelections();
+  const inputAssets = getProjectVideoInputAssets();
+  const transientAssets = getProjectTransientAiAssets();
+  const production = getActiveVideoProduction();
+  const settings = production ? createVideoProductionSettings(production.settings || {}) : getCurrentVideoProductionSettings();
+  const sourceIds = (safeArray(production?.sourceAssetIds).length ? safeArray(production.sourceAssetIds) : safeArray(state.projectUi.videoSelectedAssetIds))
+    .filter((id) => inputAssets.some((asset) => asset.id === id));
+  const baseImages = safeArray(production?.baseImages);
+  const clips = safeArray(production?.clips).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const finalAsset = getAssetById(production?.finalVideoAssetId);
+  const workflowState = deriveVideoWorkflowState({ sourceIds, baseImages, clips, finalAsset, production });
+  const approvedBaseImages = workflowState.approvedBaseImages;
+  const approvedClips = workflowState.approvedClips;
+  const graph = createVideoWorkflowGraph({ production, template: selectedTemplate, sourceIds, baseImages, clips, finalAsset, workflowState });
+  const videoProviderText = state.server.lumaReady
+    ? "Luma conectado"
+    : state.server.mockAi
+      ? "Mock video activo"
+      : state.server.lumaConfigured && !state.server.publicAssetBaseUrlUsable
+        ? "Luma requiere URL publica HTTPS"
+        : "Luma no configurado";
+  elements.projectVideoStudioView.innerHTML = `
+    <div class="video-studio-head cinematic-video-header">
+      <div>
+        <span class="eyebrow">${escapeHtml(state.project.projectType || "Proyecto audiovisual")}</span>
+        <h2>${escapeHtml(state.project.name || "Video Studio")}</h2>
+        <p>Produccion guiada: assets confirmados, imagenes base diferenciadas, clips aprobables y composicion final dentro del proyecto.</p>
+      </div>
+      <div class="provider-mini-stack">
+        <span class="status-chip status-soft">${inputAssets.length} fuentes usuario</span>
+        <span class="status-chip status-soft">${transientAssets.length} IA transitorios</span>
+        <span class="status-chip ${state.server.lumaReady || state.server.mockAi ? "status-ok" : "status-warn"}">${escapeHtml(videoProviderText)}</span>
+        <button type="button" class="button button-secondary" data-open-dashboard>Proyectos</button>
+        <button type="button" class="button button-secondary" data-project-save-current>Guardar</button>
+        <button type="button" class="button button-secondary" data-video-new-production>Nueva produccion</button>
+      </div>
+    </div>
+
+    ${renderWorkflowProgressRail(workflowState)}
+    ${renderActiveStagePanel({ workflowState, inputAssets, templates, selectedTemplate, settings, sourceIds, baseImages, approvedBaseImages, clips, approvedClips, finalAsset, production })}
+    ${renderVideoWorkflowBoard(graph, { approvedBaseImages, approvedClips, finalAsset, production, workflowState })}
+  `;
+}
+
+function renderWorkflowProgressRail(workflowState) {
+  return `
+    <div class="video-flow-steps workflow-progress-rail" aria-label="Etapas de produccion de video">
+      ${workflowState.stages.map((stage) => `
+        <div class="video-flow-step ${escapeHtml(stage.status)} ${workflowState.activeStage === stage.id ? "is-current" : ""}">
+          <span>${escapeHtml(stage.number)} · ${escapeHtml(stage.label)}</span>
+          <strong>${escapeHtml(stage.metric)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderVideoFlowStep(label, metric, status) {
+  return `
+    <div class="video-flow-step ${escapeHtml(status)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(metric)}</strong>
+    </div>
+  `;
+}
+
+function buildVideoFlowStageStates({ sourceIds, baseImages, clips, finalAsset, production }) {
+  const isFailed = production?.status === "failed";
+  return {
+    sources: sourceIds.length ? "completed" : isFailed ? "failed" : "active",
+    base: isFailed ? "failed" : safeArray(baseImages).some((item) => item.status === "generating") ? "active" : safeArray(baseImages).length ? "completed" : sourceIds.length ? "active" : "pending",
+    clips: isFailed ? "failed" : safeArray(clips).some((item) => item.status === "generating") ? "active" : safeArray(clips).length ? "completed" : safeArray(baseImages).some((item) => item.status === "approved") ? "active" : "pending",
+    final: finalAsset ? "completed" : safeArray(clips).some((item) => item.status === "approved") ? "active" : "pending",
+  };
+}
+
+function renderActiveStagePanel(context) {
+  const { workflowState, inputAssets, templates, selectedTemplate, settings, sourceIds, baseImages, approvedBaseImages, clips, approvedClips, finalAsset } = context;
+  const activeStage = workflowState.activeStage;
+  let body = "";
+  if (activeStage === "inputs") {
+    body = `
+      ${renderSourceAssetSelector(inputAssets, sourceIds)}
+      <div class="active-stage-actions">
+        <button type="button" class="button button-primary" data-video-continue-sources ${sourceIds.length ? "" : "disabled"}>Usar estos assets</button>
+        <span>${sourceIds.length ? "Al confirmar, se desbloquea la configuracion de imagenes base." : "Selecciona uno o mas assets visuales del proyecto para iniciar."}</span>
+      </div>
+    `;
+  } else if (activeStage === "base") {
+    body = `
+      ${renderVideoProductionToolbar(templates, selectedTemplate, settings, sourceIds, approvedBaseImages, workflowState)}
+      ${baseImages.length ? `<p class="section-note">Revisa los nodos de imagen base en el board. Aprueba las piezas que si representen la narrativa antes de generar clips.</p>` : ""}
+    `;
+  } else if (activeStage === "clips") {
+    body = renderClipStagePanel(approvedBaseImages, clips, approvedClips);
+  } else {
+    body = renderFinalStagePanel(approvedClips, finalAsset);
+  }
+
+  return `
+    <section class="active-stage-panel stage-${escapeHtml(activeStage)}">
+      <div class="active-stage-panel-head">
+        <div>
+          <span class="eyebrow">Etapa activa</span>
+          <h3>${escapeHtml(activeStageTitle(activeStage))}</h3>
+          <p>${escapeHtml(activeStageCopy(activeStage))}</p>
+        </div>
+        <span class="approval-badge">${escapeHtml(videoItemStatusLabel(workflowState.stages.find((stage) => stage.id === activeStage)?.status || "active"))}</span>
+      </div>
+      ${body}
+    </section>
+  `;
+}
+
+function activeStageTitle(stage) {
+  const labels = {
+    inputs: "Seleccionar inputs desde Assets",
+    base: "Generar y revisar imagenes base",
+    clips: "Generar clips con imagenes aprobadas",
+    final: "Componer video final",
+  };
+  return labels[stage] || "Video Studio";
+}
+
+function activeStageCopy(stage) {
+  const copy = {
+    inputs: "Elige referencias existentes del proyecto. Video Studio no sube archivos aqui; transforma assets ya analizados.",
+    base: "Configura plantilla y estilo. Un solo click genera todo el lote narrativo de la plantilla.",
+    clips: "Solo las imagenes aprobadas pueden enviarse a Luma o mock video. Cada clip se revisa por separado.",
+    final: "Solo los clips aprobados convergen en el video final guardado como asset del proyecto.",
+  };
+  return copy[stage] || "";
+}
+
+function renderClipStagePanel(approvedBaseImages, clips, approvedClips) {
+  const progress = state.projectUi.videoClipProgress;
+  const readyClipCount = safeArray(clips).filter(isClipReadyForReview).length;
+  return `
+    ${progress ? `<div class="video-progress-line"><span style="width:${Math.round((progress.done / Math.max(progress.total, 1)) * 100)}%"></span></div><p class="section-note">Generando clips: ${progress.done} de ${progress.total}${progress.label ? ` · ${escapeHtml(progress.label)}` : ""}</p>` : ""}
+    <div class="stage-control-grid">
+      <div class="stage-control-card">
+        <span class="eyebrow">Imagenes aprobadas</span>
+        <strong>${approvedBaseImages.length}</strong>
+        <p>Un clip por cada imagen base aprobada. Las imagenes con cambios pedidos quedan excluidas.</p>
+      </div>
+      <div class="stage-control-card">
+        <span class="eyebrow">Clips listos</span>
+        <strong>${readyClipCount}</strong>
+        <p>${approvedClips.length} clips aprobados para composicion final.</p>
+      </div>
+      <div class="stage-control-card action-card">
+        <button type="button" class="button button-primary" data-video-generate-clips ${approvedBaseImages.length ? "" : "disabled"}>Generar clips con imagenes aprobadas</button>
+        <span>${!state.server.lumaReady && !state.server.mockAi ? escapeHtml(LUMA_NOT_CONFIGURED_MESSAGE) : "Despues aprueba o pide cambios clip por clip en el board."}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderFinalStagePanel(approvedClips, finalAsset) {
+  const duration = approvedClips.reduce((sum, clip) => sum + Number(clip.durationSeconds || 0), 0);
+  return `
+    <div class="stage-control-grid">
+      <div class="stage-control-card">
+        <span class="eyebrow">Clips aprobados</span>
+        <strong>${approvedClips.length}</strong>
+        <p>Duracion estimada: ${duration || 0}s. Solo estos clips se usan en la composicion.</p>
+      </div>
+      <div class="stage-control-card">
+        <span class="eyebrow">Resultado</span>
+        <strong>${escapeHtml(finalAsset ? "Listo" : "Pendiente")}</strong>
+        <p>${escapeHtml(finalAsset ? "El video final ya quedo guardado como asset." : "La composicion requiere clips aprobados y usa fallback si FFmpeg no esta configurado.")}</p>
+      </div>
+      <div class="stage-control-card action-card">
+        <button type="button" class="button button-primary" data-compose-final-video ${approvedClips.length ? "" : "disabled"}>${finalAsset ? "Regenerar composicion" : "Componer video final"}</button>
+        ${finalAsset?.url ? `<button type="button" class="button button-secondary" data-asset-download="${escapeHtml(finalAsset.id)}">Descargar MP4</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderVideoProductionToolbar(templates, selectedTemplate, settings, sourceIds) {
+  return `
+    <section class="video-production-toolbar" aria-label="Configuracion de Video Studio">
+      <div class="video-production-toolbar-main">
+        <label class="field"><span>Plantilla</span><select data-video-template-select>${templates.map((template) => `<option value="${escapeHtml(template.id)}" ${selectedTemplate?.id === template.id ? "selected" : ""}>${escapeHtml(template.name)}</option>`).join("")}</select></label>
+        <label class="field compact-number"><span>Duracion</span><select data-video-setting="duration">${[5, 8, 9, 10, 12, 15, 30].map((value) => `<option value="${value}" ${Number(settings.durationSeconds) === value ? "selected" : ""}>${value}s${value > 9 ? " / real 9s" : ""}</option>`).join("")}</select></label>
+        <label class="field compact-number"><span>Aspect ratio</span><select data-video-setting="aspect">${["16:9", "9:16", "1:1"].map((value) => `<option value="${value}" ${settings.aspectRatio === value ? "selected" : ""}>${value}</option>`).join("")}</select></label>
+        <label class="field"><span>Estilo</span><input type="text" data-video-setting="style" value="${escapeHtml(settings.visualStyle || "")}" placeholder="cinematic architectural realism" /></label>
+        <label class="field compact-number"><span>Movimiento</span><select data-video-setting="motion">${[["low", "Bajo"], ["medium", "Medio"], ["high", "Alto"]].map(([value, label]) => `<option value="${value}" ${settings.motionIntensity === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <label class="field compact-number"><span>Fidelidad</span><select data-video-setting="fidelity">${[["strict", "Estricta"], ["balanced", "Balanceada"], ["creative", "Creativa controlada"]].map(([value, label]) => `<option value="${value}" ${settings.fidelityLevel === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+        <label class="field compact-number"><span>Imagen</span><select data-video-setting="imageProvider">${["auto", "gemini", "openai"].map((value) => `<option value="${value}" ${settings.imageProvider === value ? "selected" : ""}>${value}</option>`).join("")}</select></label>
+        <label class="field compact-number"><span>Video</span><select data-video-setting="videoProvider">${["auto", "luma", "mock"].map((value) => `<option value="${value}" ${settings.videoProvider === value ? "selected" : ""}>${value}</option>`).join("")}</select></label>
+        <label class="toggle-pill"><input type="checkbox" data-video-setting="humans" ${settings.includeHumans ? "checked" : ""} /> <span>Humanos</span></label>
+        <label class="toggle-pill"><input type="checkbox" data-video-setting="cars" ${settings.includeCars ? "checked" : ""} /> <span>Carros</span></label>
+      </div>
+      <div class="video-production-prompt-row">
+        <label class="field"><span>Prompt adicional</span><textarea data-video-setting="prompt" placeholder="Movimiento, atmosfera, narrativa o cambios solicitados explicitamente.">${escapeHtml(settings.userPrompt || "")}</textarea></label>
+        <div class="video-production-actions">
+          <button type="button" class="button button-primary" data-video-generate-base-batch ${sourceIds.length ? "" : "disabled"}>Generar imagenes base</button>
+          <button type="button" class="button button-secondary" data-video-edit-inputs>Cambiar inputs</button>
+        </div>
+      </div>
+      <p class="section-note">Fidelidad activa: no cambiar diseno, geometria, materiales, mobiliario, objetos, rotulacion ni composicion salvo instruccion explicita.</p>
+    </section>
+  `;
+}
+
+function renderSourceAssetSelector(inputAssets, sourceIds) {
+  const filter = state.projectUi.videoInputFilter || "all";
+  const filteredAssets = inputAssets.filter((asset) => {
+    if (filter === "selected") return sourceIds.includes(asset.id);
+    if (filter === "references") return asset.type === "reference" || asset.source === "uploaded";
+    if (filter === "imported") return asset.source === "imported";
+    if (filter === "uploaded") return asset.source === "uploaded";
+    return true;
+  });
+  return `
+    <section class="source-asset-selector">
+      <div class="source-asset-selector-head">
+        <div>
+          <span class="eyebrow">Seleccionar inputs desde Assets</span>
+          <strong>${sourceIds.length} seleccionados</strong>
+          <p>Solo aparecen fuentes entregadas por el usuario. Los renders, clips y videos creados por IA se tratan como transitorios internos del proceso.</p>
+        </div>
+        <label class="field compact-number"><span>Filtro</span><select data-video-input-filter>
+          ${[["all", "Todos"], ["selected", "Seleccionados"], ["uploaded", "Subidos"], ["imported", "Importados"], ["references", "Referencias"]].map(([value, label]) => `<option value="${value}" ${filter === value ? "selected" : ""}>${label}</option>`).join("")}
+        </select></label>
+      </div>
+      <div class="source-asset-tray">
+        ${filteredAssets.length ? filteredAssets.map((asset) => renderSourceAssetChip(asset, sourceIds.includes(asset.id))).join("") : `<div class="empty-state compact-empty"><strong>No hay fuentes iniciales</strong><span>Agrega imagenes o referencias propias en Assets. Los outputs generados por IA no aparecen como inputs iniciales.</span></div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderSourceAssetChip(asset, selected) {
+  return `
+    <button type="button" class="source-asset-chip ${selected ? "active" : ""}" data-video-toggle-asset="${escapeHtml(asset.id)}">
+      <span class="source-asset-thumb">${asset.thumbnailUrl || asset.url ? `<img src="${escapeHtml(asset.thumbnailUrl || asset.url)}" alt="${escapeHtml(asset.name)}" loading="lazy" />` : `<strong>${escapeHtml(String(asset.type || "asset").toUpperCase())}</strong>`}</span>
+      <span class="source-asset-copy"><strong>${escapeHtml(asset.name || "Asset visual")}</strong><small>${escapeHtml(asset.type || "image")} · ${escapeHtml(asset.source || "manual")} · fuente usuario</small></span>
+      <span class="source-asset-check">${selected ? "Seleccionado" : "Usar"}</span>
+    </button>
+  `;
+}
+
+function createVideoWorkflowGraph({ production, template, sourceIds, baseImages, clips, finalAsset, workflowState }) {
+  const outputs = getTemplateBaseImageOutputs(template);
+  const inputIds = safeArray(sourceIds).filter((id) => Boolean(getAssetById(id)));
+  const baseItems = safeArray(baseImages);
+  const approvedBaseImages = baseItems.filter((item) => item.status === "approved" && item.assetId);
+  const clipItems = safeArray(clips).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const approvedClips = clipItems.filter(isClipApprovedForFinal);
+  const inputsConfirmed = Boolean(workflowState?.inputsConfirmed);
+  const isGeneratingBase = Boolean(state.projectUi.videoBaseImageProgress) || production?.status === "generating_base_images";
+  const isGeneratingClips = Boolean(state.projectUi.videoClipProgress) || production?.status === "generating_clips";
+  const showBaseNodes = isGeneratingBase || baseItems.length > 0;
+  const showClipNodes = isGeneratingClips || clipItems.length > 0;
+  const laneCounts = [
+    inputIds.length || 1,
+    showBaseNodes ? Math.max(baseItems.length, outputs.length, 1) : 1,
+    showClipNodes ? Math.max(clipItems.length, approvedBaseImages.length, 1) : 1,
+    2,
+  ];
+  const maxLaneCount = Math.max(...laneCounts, 4);
+  const canvasWidth = 1720;
+  const canvasHeight = Math.max(760, (maxLaneCount * 262) + 190);
+  const lanes = { input: 220, base: 590, clip: 980, final: 1405 };
+  const nodes = [];
+  const edges = [];
+  const topMargin = 180;
+  const bottomMargin = 95;
+  const distributeY = (count, index) => {
+    if (count <= 1) return Math.round((canvasHeight + topMargin - bottomMargin) / 2);
+    const span = canvasHeight - topMargin - bottomMargin;
+    return Math.round(topMargin + (span * (index / (count - 1))));
+  };
+  const hasNode = (nodeId) => nodes.some((node) => node.id === nodeId);
+  const inputAnchorIds = [];
+
+  if (inputIds.length) {
+    inputIds.forEach((assetId, index) => {
+      const asset = getAssetById(assetId);
+      const nodeId = `input-${assetId}`;
+      inputAnchorIds.push(nodeId);
+      nodes.push({
+        id: nodeId,
+        type: "input",
+        asset,
+        label: asset?.name || `Input ${index + 1}`,
+        status: inputsConfirmed ? "selected" : "pending",
+        x: lanes.input,
+        y: distributeY(inputIds.length, index),
+        w: 230,
+        h: 156,
+      });
+    });
+  } else {
+    nodes.push({
+      id: "input-empty",
+      type: "empty_input",
+      label: "Selecciona inputs desde Assets",
+      status: "active",
+      x: lanes.input,
+      y: distributeY(1, 0),
+      w: 300,
+      h: 140,
+    });
+  }
+
+  if (!inputsConfirmed) {
+    nodes.push({
+      id: "base-empty",
+      type: "empty_base",
+      status: "locked",
+      title: "Imagenes base bloqueadas",
+      copy: "Confirma primero los inputs desde Assets. Luego se desbloquea el lote narrativo de la plantilla.",
+      x: lanes.base,
+      y: distributeY(1, 0),
+      w: 320,
+      h: 150,
+    });
+  } else if (showBaseNodes) {
+    baseItems.forEach((item, index) => {
+      nodes.push({
+        id: `base-${item.id}`,
+        type: "base_image",
+        item,
+        output: outputs.find((output) => output.id === item.templateOutputId || output.stageName === item.stageName) || outputs[index],
+        index,
+        status: item.status || "pending",
+        x: lanes.base,
+        y: distributeY(Math.max(baseItems.length, 1), index),
+        w: 232,
+        h: 232,
+      });
+    });
+  } else {
+    nodes.push({
+      id: "base-empty",
+      type: "empty_base",
+      status: workflowState?.activeStage === "base" ? "active" : "pending",
+      title: "Lote de imagenes base",
+      copy: `${outputs.length || 5} etapas diferenciadas se generaran en un solo lote, sin pedir imagen por imagen.`,
+      x: lanes.base,
+      y: distributeY(1, 0),
+      w: 340,
+      h: 150,
+    });
+  }
+
+  if (!approvedBaseImages.length) {
+    nodes.push({
+      id: "clip-empty",
+      type: "empty_clip",
+      status: "locked",
+      title: "Clips bloqueados",
+      copy: "Aprueba imagenes base para activar un clip individual por cada imagen aprobada.",
+      x: lanes.clip,
+      y: distributeY(1, 0),
+      w: 320,
+      h: 150,
+    });
+  } else if (showClipNodes) {
+    clipItems.forEach((clip, index) => {
+      nodes.push({
+        id: `clip-${clip.id}`,
+        type: "clip",
+        clip,
+        index,
+        status: clip.status || "pending",
+        x: lanes.clip,
+        y: distributeY(Math.max(clipItems.length, 1), index),
+        w: 224,
+        h: 205,
+      });
+    });
+  } else {
+    nodes.push({
+      id: "clip-empty",
+      type: "empty_clip",
+      status: workflowState?.activeStage === "clips" ? "active" : "pending",
+      title: "Clips listos para generar",
+      copy: `${approvedBaseImages.length} imagen${approvedBaseImages.length === 1 ? "" : "es"} aprobada${approvedBaseImages.length === 1 ? "" : "s"} alimentaran clips individuales.`,
+      x: lanes.clip,
+      y: distributeY(1, 0),
+      w: 340,
+      h: 150,
+    });
+  }
+
+  nodes.push({
+    id: "final-video",
+    type: "final_video",
+    asset: finalAsset,
+    production,
+    status: finalAsset ? "ready" : production?.status === "composing_final_video" ? "composing" : approvedClips.length ? "pending" : "locked",
+    x: lanes.final,
+    y: distributeY(1, 0),
+    w: 500,
+    h: 250,
+  });
+
+  if (inputsConfirmed) {
+    if (baseItems.length) {
+      baseItems.forEach((item, index) => {
+        const sourceId = item.sourceAssetId || inputIds[index % Math.max(inputIds.length, 1)] || "";
+        const sourceNodeId = sourceId ? `input-${sourceId}` : inputAnchorIds[index % Math.max(inputAnchorIds.length, 1)];
+        if (sourceNodeId && hasNode(sourceNodeId)) {
+          edges.push({ id: `edge-${sourceNodeId}-base-${item.id}`, source: sourceNodeId, target: `base-${item.id}`, status: item.status || "pending" });
+        }
+      });
+    } else if (hasNode("base-empty")) {
+      inputAnchorIds.forEach((sourceNodeId, index) => edges.push({ id: `edge-${sourceNodeId}-base-empty-${index}`, source: sourceNodeId, target: "base-empty", status: "selected" }));
+    }
+  }
+
+  if (clipItems.length) {
+    clipItems.forEach((clip) => {
+      const baseNodeId = `base-${clip.baseImageItemId}`;
+      if (hasNode(baseNodeId)) {
+        edges.push({ id: `edge-${baseNodeId}-clip-${clip.id}`, source: baseNodeId, target: `clip-${clip.id}`, status: clip.status || "pending" });
+      }
+      if (isClipApprovedForFinal(clip) && hasNode(`clip-${clip.id}`)) {
+        edges.push({ id: `edge-clip-${clip.id}-final`, source: `clip-${clip.id}`, target: "final-video", status: "approved" });
+      }
+    });
+  } else if (approvedBaseImages.length && hasNode("clip-empty")) {
+    approvedBaseImages.forEach((baseImage) => {
+      const baseNodeId = `base-${baseImage.id}`;
+      if (hasNode(baseNodeId)) {
+        edges.push({ id: `edge-${baseNodeId}-clip-empty`, source: baseNodeId, target: "clip-empty", status: "approved" });
+      }
+    });
+  }
+
+  return { nodes, edges, width: canvasWidth, height: canvasHeight, lanes };
+}
+
+function renderVideoWorkflowBoard(graph, context = {}) {
+  const progressBase = state.projectUi.videoBaseImageProgress;
+  const progressClip = state.projectUi.videoClipProgress;
+  return `
+    <section class="video-workflow-shell">
+      <div class="video-workflow-shell-head">
+        <div>
+          <span class="eyebrow">Workflow board</span>
+          <strong>Assets -> imagenes base -> clips -> video final</strong>
+        </div>
+        <div class="workflow-legend">
+          <span><i class="legend-line solid"></i> Flujo principal</span>
+          <span><i class="legend-line dotted"></i> Convergencia final</span>
+          <span><i class="legend-dot"></i> Aprobacion requerida</span>
+        </div>
+      </div>
+      ${progressBase ? `<div class="video-progress-line"><span style="width:${Math.round((progressBase.done / Math.max(progressBase.total, 1)) * 100)}%"></span></div><p class="section-note">Generando imagenes base: ${progressBase.done} de ${progressBase.total}${progressBase.label ? ` · ${escapeHtml(progressBase.label)}` : ""}</p>` : ""}
+      ${progressClip ? `<div class="video-progress-line"><span style="width:${Math.round((progressClip.done / Math.max(progressClip.total, 1)) * 100)}%"></span></div><p class="section-note">Generando clips: ${progressClip.done} de ${progressClip.total}${progressClip.label ? ` · ${escapeHtml(progressClip.label)}` : ""}</p>` : ""}
+      <div class="video-workflow-scroll">
+        <div class="video-workflow-canvas" style="width:${graph.width}px;height:${graph.height}px;">
+          ${renderWorkflowStageLabels(graph)}
+          ${renderWorkflowEdges(graph)}
+          ${graph.nodes.map((node) => renderWorkflowNode(node, context)).join("")}
+        </div>
+      </div>
+      ${!state.server.lumaReady && !state.server.mockAi ? `<p class="section-note warn-note">${escapeHtml(LUMA_NOT_CONFIGURED_MESSAGE)}</p>` : ""}
+    </section>
+  `;
+}
+
+function renderWorkflowStageLabels(graph = {}) {
+  const lanes = graph.lanes || { input: 220, base: 590, clip: 980, final: 1405 };
+  const label = (x, number, title, small) => `
+    <div class="workflow-stage-label" style="left:${Math.round(x - 108)}px;top:24px">
+      <span>${number}</span><strong>${title}</strong><small>${small}</small>
+    </div>
+  `;
+  return `
+    ${label(lanes.input, "1", "Inputs", "Fuentes usuario")}
+    ${label(lanes.base, "2", "Imagenes base", "IA transitoria")}
+    ${label(lanes.clip, "3", "Clips", "Luma / mock")}
+    ${label(lanes.final, "4", "Video final", "Asset final")}
+  `;
+}
+
+function renderWorkflowEdges(graph) {
+  const nodeMap = new Map(graph.nodes.map((node) => [node.id, node]));
+  const paths = graph.edges.map((edge) => {
+    const source = nodeMap.get(edge.source);
+    const target = nodeMap.get(edge.target);
+    if (!source || !target) return "";
+    const sx = source.x + (source.w / 2);
+    const sy = source.y;
+    const tx = target.x - (target.w / 2);
+    const ty = target.y;
+    const midX = sx + ((tx - sx) * 0.54);
+    const curve = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
+    const convergence = target.type === "final_video" ? "converge" : "";
+    return `<path class="workflow-edge status-${escapeHtml(edge.status || "pending")} ${convergence}" d="${curve}" marker-end="url(#workflow-arrow)" />`;
+  }).join("");
+  return `
+    <svg class="workflow-connectors" viewBox="0 0 ${graph.width} ${graph.height}" aria-hidden="true">
+      <defs>
+        <marker id="workflow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 8 4 L 0 8 z"></path>
+        </marker>
+      </defs>
+      ${paths}
+    </svg>
+  `;
+}
+
+function renderWorkflowNode(node, context = {}) {
+  const style = `left:${Math.round(node.x - (node.w / 2))}px;top:${Math.round(node.y - (node.h / 2))}px;width:${node.w}px;height:${node.h}px;`;
+  return `<article class="workflow-node workflow-node-${escapeHtml(node.type)} status-${escapeHtml(node.status || "pending")}" style="${style}">${renderWorkflowNodeInner(node, context)}</article>`;
+}
+
+function renderWorkflowNodeInner(node, context = {}) {
+  if (node.type === "input") return renderInputAssetNode(node);
+  if (node.type === "empty_input") return renderEmptyInputNode();
+  if (node.type === "empty_base" || node.type === "empty_clip") return renderEmptyStageNode(node);
+  if (node.type === "base_image") return renderBaseImageNode(node);
+  if (node.type === "clip") return renderClipNode(node);
+  if (node.type === "final_video") return renderFinalVideoNode(node, context);
+  return "";
+}
+
+function renderInputAssetNode(node) {
+  const asset = node.asset || {};
+  const previewUrl = asset.thumbnailUrl || asset.url || "";
+  return `
+    <div class="workflow-node-media input-media">
+      ${previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Input")}" loading="lazy" />` : `<div class="video-skeleton">${escapeHtml(asset.type || "Asset")}</div>`}
+      <span class="approval-badge">Input</span>
+    </div>
+    <div class="workflow-node-body">
+      <span class="eyebrow">${escapeHtml(asset.type || "asset")}</span>
+      <strong>${escapeHtml(asset.name || "Asset visual")}</strong>
+      <small>${escapeHtml(asset.source || "proyecto")} · usado como referencia</small>
+    </div>
+  `;
+}
+
+function renderEmptyInputNode() {
+  return `
+    <div class="workflow-empty-node">
+      <strong>Selecciona inputs desde Assets</strong>
+      <span>Usa el selector superior para conectar fotos, renders o referencias al pipeline.</span>
+    </div>
+  `;
+}
+
+function renderEmptyStageNode(node) {
+  return `
+    <div class="workflow-empty-node workflow-empty-stage">
+      <span class="approval-badge">${escapeHtml(videoItemStatusLabel(node.status))}</span>
+      <strong>${escapeHtml(node.title || "Etapa pendiente")}</strong>
+      <span>${escapeHtml(node.copy || "Esta etapa se desbloquea cuando completes la anterior.")}</span>
+    </div>
+  `;
+}
+
+function renderBaseImageNode(node) {
+  const item = node.item || {};
+  const asset = getAssetById(item.assetId);
+  const sourceAsset = getAssetById(item.sourceAssetId);
+  const isVirtual = Boolean(item.virtual);
+  return `
+    <div class="workflow-node-media">
+      ${asset?.url ? `<img src="${escapeHtml(asset.url)}" alt="${escapeHtml(item.stageName)}" loading="lazy" />` : `<div class="video-skeleton">${escapeHtml(item.status === "generating" ? "Generando..." : "Pendiente")}</div>`}
+      <span class="approval-badge">${escapeHtml(videoItemStatusLabel(item.status))}</span>
+    </div>
+    <div class="workflow-node-body">
+      <span class="eyebrow">AI Render ${Number(node.index || 0) + 1}</span>
+      <strong>${escapeHtml(item.stageName || "Imagen base")}</strong>
+      <small>Fuente: ${escapeHtml(sourceAsset?.name || "contexto del proyecto")}</small>
+      ${item.error ? `<p class="error-text">${escapeHtml(item.error)}</p>` : `<p>${escapeHtml(String(item.prompt || node.output?.description || "").slice(0, 122))}${String(item.prompt || node.output?.description || "").length > 122 ? "..." : ""}</p>`}
+      ${safeArray(item.feedbackHistory).length ? `<div class="feedback-mini-list">${item.feedbackHistory.slice(-2).map((feedback) => `<span>${escapeHtml(feedback.message)}</span>`).join("")}</div>` : ""}
+    </div>
+    <div class="workflow-node-actions">
+      <button type="button" class="button button-primary" data-base-image-action="${escapeHtml(item.id)}" data-action="approve" ${!isVirtual && item.assetId ? "" : "disabled"}>Aprobar</button>
+      <button type="button" class="button button-secondary" data-base-image-action="${escapeHtml(item.id)}" data-action="feedback" ${!isVirtual && item.assetId ? "" : "disabled"}>Cambios</button>
+      <button type="button" class="icon-button text-tool" title="Regenerar" aria-label="Regenerar imagen" data-base-image-action="${escapeHtml(item.id)}" data-action="regenerate" ${isVirtual ? "disabled" : ""}>↻</button>
+      <button type="button" class="icon-button text-tool" title="Prompt" aria-label="Ver prompt" data-base-image-action="${escapeHtml(item.id)}" data-action="prompt" ${!isVirtual && item.prompt ? "" : "disabled"}>P</button>
+      <button type="button" class="icon-button text-tool" title="Comparar" aria-label="Comparar con referencia" data-base-image-action="${escapeHtml(item.id)}" data-action="compare" ${!isVirtual && sourceAsset?.url ? "" : "disabled"}>C</button>
+    </div>
+  `;
+}
+
+function renderClipNode(node) {
+  const clip = node.clip || {};
+  const sourceAsset = getAssetById(clip.sourceImageAssetId);
+  const videoAsset = getClipVideoAsset(clip);
+  const isVirtual = Boolean(clip.virtual);
+  const displayStatus = clip.status === "approved" && !videoAsset ? "pending" : (clip.status || "pending");
+  return `
+    <div class="workflow-node-media clip-media">
+      ${videoAsset?.url ? `<video src="${escapeHtml(videoAsset.url)}" controls preload="metadata"></video>` : sourceAsset?.url ? `<img src="${escapeHtml(sourceAsset.url)}" alt="${escapeHtml(sourceAsset.name || "Imagen para clip")}" loading="lazy" />` : `<div class="video-skeleton">${escapeHtml(clip.status === "generating" ? "Generando..." : "Pendiente")}</div>`}
+      <span class="approval-badge">${escapeHtml(videoItemStatusLabel(displayStatus))}</span>
+      <span class="clip-play-badge">▶</span>
+    </div>
+    <div class="workflow-node-body">
+      <span class="eyebrow">Clip ${Number(clip.order || node.index || 0) + 1}</span>
+      <strong>${Number(clip.durationSeconds || 5)}s · ${escapeHtml(clip.transitionOut || "cross dissolve")}</strong>
+      ${clip.error ? `<p class="error-text">${escapeHtml(clip.error)}</p>` : `<p>${escapeHtml(String(clip.motionPrompt || "Se generara desde una imagen base aprobada.").slice(0, 120))}${String(clip.motionPrompt || "").length > 120 ? "..." : ""}</p>`}
+      ${safeArray(clip.feedbackHistory).length ? `<div class="feedback-mini-list">${clip.feedbackHistory.slice(-2).map((feedback) => `<span>${escapeHtml(feedback.message)}</span>`).join("")}</div>` : ""}
+    </div>
+    <div class="workflow-node-actions">
+      <button type="button" class="button button-primary" data-clip-action="${escapeHtml(clip.id)}" data-action="approve" ${!isVirtual && videoAsset ? "" : "disabled"}>Aprobar clip</button>
+      <button type="button" class="button button-secondary" data-clip-action="${escapeHtml(clip.id)}" data-action="feedback" ${!isVirtual && videoAsset ? "" : "disabled"}>Cambios</button>
+      <button type="button" class="icon-button text-tool" title="Regenerar clip" aria-label="Regenerar clip" data-clip-action="${escapeHtml(clip.id)}" data-action="regenerate" ${isVirtual ? "disabled" : ""}>↻</button>
+      <button type="button" class="icon-button text-tool" title="Prompt" aria-label="Ver prompt" data-clip-action="${escapeHtml(clip.id)}" data-action="prompt" ${!isVirtual && clip.motionPrompt ? "" : "disabled"}>P</button>
+      <button type="button" class="icon-button text-tool" title="Comparar" aria-label="Comparar con imagen fuente" data-clip-action="${escapeHtml(clip.id)}" data-action="compare" ${!isVirtual && sourceAsset?.url ? "" : "disabled"}>C</button>
+    </div>
+  `;
+}
+
+function renderFinalVideoNode(node, context = {}) {
+  const finalAsset = node.asset;
+  const approvedClips = safeArray(context.approvedClips);
+  const duration = approvedClips.reduce((sum, clip) => sum + Number(clip.durationSeconds || 0), 0);
+  return `
+    <div class="final-node-layout">
+      <div class="final-node-copy">
+        <span class="eyebrow">Composicion final</span>
+        <strong>${escapeHtml(finalAsset?.name || "Video final compuesto")}</strong>
+        <small>${approvedClips.length} clips aprobados · ${duration || 0}s estimados · MP4</small>
+        <span class="approval-badge">${escapeHtml(videoItemStatusLabel(node.status))}</span>
+        ${finalAsset?.metadata?.compositionStatus === "fallback_sequence" ? `<p class="warn-note">La composicion final requiere FFmpeg o un compositor configurado; se guardo una secuencia fallback clara.</p>` : `<p>Los clips aprobados convergen aqui. Solo esta etapa puede crear el asset final.</p>`}
+      </div>
+      <div class="final-node-preview">
+        ${finalAsset?.url ? `<video src="${escapeHtml(finalAsset.url)}" controls preload="metadata"></video>` : `<div class="video-skeleton">Video final pendiente</div>`}
+      </div>
+    </div>
+    <div class="workflow-node-actions final-actions">
+      <button type="button" class="button button-primary" data-compose-final-video ${approvedClips.length ? "" : "disabled"}>${finalAsset ? "Regenerar composicion" : "Componer video final"}</button>
+      ${finalAsset?.url ? `<button type="button" class="button button-secondary" data-asset-download="${escapeHtml(finalAsset.id)}">Descargar</button><button type="button" class="button button-secondary" data-asset-use-presentation="${escapeHtml(finalAsset.id)}">Usar en presentacion</button>` : ""}
+      <button type="button" class="button button-ghost" data-project-tab="video">Volver a editar clips</button>
+    </div>
+  `;
+}
+
+function videoItemStatusLabel(status) {
+  const labels = {
+    pending: "Pendiente",
+    queued: "En cola",
+    generating: "Generando",
+    ready: "Lista",
+    approved: "Aprobada",
+    changes_requested: "Cambios pedidos",
+    rejected: "Rechazada",
+    failed: "Fallida",
+    selected: "Seleccionado",
+    active: "Activa",
+    locked: "Bloqueada",
+    composing: "Componiendo",
+    completed: "Completado",
+  };
+  return labels[status] || status || "Pendiente";
+}
+
+function openVideoTextModal(options = {}) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop video-text-modal-backdrop";
+    const readonly = Boolean(options.readonly);
+    const cancelButton = options.cancelLabel === "" ? "" : `<button type="button" class="button button-secondary" data-video-modal-cancel>${escapeHtml(options.cancelLabel || "Cancelar")}</button>`;
+    backdrop.innerHTML = `
+      <form class="project-create-modal panel-surface video-text-modal">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">${escapeHtml(options.eyebrow || "Video Studio")}</span>
+            <h3>${escapeHtml(options.title || "Feedback")}</h3>
+            <p>${escapeHtml(options.description || "Indica que debe cambiar sin modificar el diseno base.")}</p>
+          </div>
+        </div>
+        <label class="field">
+          <span>${escapeHtml(options.label || "Detalle")}</span>
+          <textarea ${readonly ? "readonly" : ""} placeholder="${escapeHtml(options.placeholder || "")}">${escapeHtml(options.value || "")}</textarea>
+        </label>
+        <div class="modal-actions">
+          ${cancelButton}
+          <button type="submit" class="button button-primary">${escapeHtml(options.confirmLabel || "Aplicar cambios")}</button>
+        </div>
+      </form>
+    `;
+    const form = backdrop.querySelector("form");
+    const textarea = backdrop.querySelector("textarea");
+    const close = (value) => {
+      backdrop.remove();
+      resolve(value);
+    };
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      close(readonly ? "" : (textarea.value || "").trim());
+    });
+    backdrop.querySelector("[data-video-modal-cancel]")?.addEventListener("click", () => close(""));
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) close("");
+    });
+    document.body.appendChild(backdrop);
+    window.setTimeout(() => textarea.focus(), 40);
+  });
+}
+
+function openVideoPromptViewer(title, prompt) {
+  return openVideoTextModal({
+    title,
+    description: "Prompt interno registrado para esta etapa. No contiene claves ni credenciales.",
+    label: "Prompt",
+    value: prompt || "Sin prompt registrado.",
+    readonly: true,
+    confirmLabel: "Cerrar",
+    cancelLabel: "",
+  });
+}
+
+function renderPresentationsView() {
+  compactProjectSelections();
+  const assets = getProjectPresentationAssets();
+  const selectedAssets = state.projectUi.presentationSelectedAssetIds.map(getAssetById).filter(Boolean);
+  const activeStyle = getBrochureStyleProfile(state.settings.brochureStyle);
+  const styleOptions = BROCHURE_STYLE_OPTIONS.slice(0, 8);
+  elements.projectPresentationsView.innerHTML = `
+    <div class="presentation-bridge">
+      <div>
+        <span class="eyebrow">Presentaciones</span>
+        <h2>Editor PPT y PDF por capas</h2>
+        <p>Selecciona assets del proyecto para construir brochures, PDFs o PPT editables. El editor conserva el flujo existente, pero ahora parte desde esta biblioteca.</p>
+      </div>
+      <div class="action-stack">
+        <button type="button" class="button button-primary" data-open-legacy-flow="pdf" data-legacy-step="3">Escoger plantilla y layout</button>
+        <button type="button" class="button button-secondary" data-open-legacy-flow="pdf" data-legacy-step="5">Editar por capas</button>
+        <button type="button" class="button button-secondary" data-composer-action="presentation">Pedir presentacion en la conversacion</button>
+      </div>
+    </div>
+    <section class="asset-workbench-panel">
+      <div class="mini-head"><span class="eyebrow">Assets para deck</span><strong>${selectedAssets.length} seleccionados</strong></div>
+      <div class="asset-picker-grid">
+        ${renderProjectAssetPicker(assets, state.projectUi.presentationSelectedAssetIds, "data-presentation-toggle-asset", "Sube imagenes, PDFs, PPTX o planos en Assets para preparar presentaciones.")}
+      </div>
+    </section>
+    <section class="asset-workbench-panel presentation-layout-panel">
+      <div class="mini-head"><span class="eyebrow">Layout</span><strong>${escapeHtml(activeStyle.label || "Plantilla editorial")}</strong></div>
+      <p class="section-note">Escoge una base visual aqui o abre el flujo completo para editar secciones, layouts por slide, textos, imagenes y capas.</p>
+      <div class="presentation-style-grid">
+        ${styleOptions.map((option) => `
+          <button type="button" class="presentation-style-card ${state.settings.brochureStyle === option.value ? "active" : ""}" data-choice-key="brochureStyle" data-choice-value="${escapeHtml(option.value)}">
+            ${buildBrochureStylePreview(option)}
+            <strong>${escapeHtml(option.label)}</strong>
+            <span>${escapeHtml(option.description || "")}</span>
+          </button>
+        `).join("")}
+      </div>
+      <div class="action-stack">
+        <button type="button" class="button button-primary" data-open-legacy-flow="pdf" data-legacy-step="4">Configurar slides y layouts</button>
+        <button type="button" class="button button-secondary" data-open-legacy-flow="pdf" data-legacy-step="5">Abrir editor editable</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderProjectSettingsView() {
+  const selectedImages = state.projectUi.imageSelectedAssetIds
+    .map((id) => state.project.assets.find((asset) => asset.id === id))
+    .filter(Boolean);
+  const total = selectedImages.length * Number(state.projectUi.variationsPerImage || 1);
+  elements.projectSettingsView.innerHTML = `
+    <div class="settings-grid">
+      <section class="settings-panel">
+        <span class="eyebrow">Acondicionamiento visual</span>
+        <h2>Visual Studio</h2>
+        <p>Genera tokens visuales validados. No se acepta CSS crudo generado por IA.</p>
+        <label class="field"><span>Prompt visual</span><textarea data-visual-profile-prompt placeholder="Quiero que la app se vea como un estudio arquitectonico minimalista...">${escapeHtml(state.projectUi.visualProfilePrompt || "")}</textarea></label>
+        <div class="action-stack">
+          <button type="button" class="button button-primary" data-generate-visual-profile>Generar perfil visual</button>
+          <button type="button" class="button button-secondary" data-reset-visual-profile>Restaurar default</button>
+        </div>
+      </section>
+
+      <section class="settings-panel">
+        <span class="eyebrow">Render Queue</span>
+        <h2>Imagenes x variaciones</h2>
+        <p>Total a generar: ${total}</p>
+        <label class="field"><span>Variaciones por imagen</span><input type="number" min="1" max="8" value="${Number(state.projectUi.variationsPerImage || 1)}" data-render-variations-count /></label>
+        <button type="button" class="button button-primary" data-build-render-variations>Construir jobs</button>
+        <div class="render-job-list">
+          ${state.projectUi.renderVariationJobs.length ? state.projectUi.renderVariationJobs.map((job) => `<span class="select-chip">${escapeHtml(job.sourceImageId)} · v${job.variationIndex}</span>`).join("") : `<span class="status-chip status-soft">Selecciona imagenes en Image Studio para reutilizarlas aqui.</span>`}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+async function handleConversationFiles(fileList, options = {}) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const assetIds = [];
+  let imageCount = 0;
+  for (const file of files) {
+    if (file.type.startsWith("image/")) {
+      const image = await addImageFile(file);
+      if (image) assetIds.push(image.id);
+      if (image) imageCount += 1;
+    } else {
+      const doc = addDocumentFile(file);
+      if (doc) assetIds.push(doc.id);
+      if (/\.dwg$/i.test(file.name)) {
+        addProjectMessage({
+          role: "system",
+          type: "text",
+          content: "DWG requiere conversion. Exporta como DXF o PDF para mejor compatibilidad.",
+        });
+      }
+    }
+  }
+  elements.conversationFileInput.value = "";
+  if (assetIds.length) {
+    addProjectMessage({
+      role: "user",
+      type: "file_upload",
+      content: `${assetIds.length} archivo${assetIds.length === 1 ? "" : "s"} adjunto${assetIds.length === 1 ? "" : "s"}.`,
+      assetIds,
+    });
+    addProjectMessage({
+      role: "assistant",
+      type: "text",
+      content: imageCount
+        ? "Assets agregados. Estoy analizando y descomponiendo las referencias visuales para usarlas en Imagenes, Video Studio y Presentaciones."
+        : "Assets agregados a la biblioteca del proyecto. Los documentos quedan disponibles como contexto para Imagenes, Video Studio y Presentaciones.",
+      assetIds,
+    });
+    state.projectUi.tab = "assets";
+    renderAll();
+  }
+  if (options.analyze !== false && imageCount && state.images.some((image) => !image.analysis)) {
+    await runProjectAnalyses(false);
+    addProjectMessage({
+      role: "system",
+      type: "text",
+      content: "Descomposicion lista. Los assets visuales ya tienen lectura de escena, materiales, objetos y contexto base.",
+      assetIds,
+    });
+    renderAll();
+  }
+}
+
+async function handleProjectComposerSubmit(event) {
+  event.preventDefault();
+  const prompt = elements.conversationPromptInput.value.trim();
+  const action = elements.conversationActionSelect.value || "chat";
+  if (!prompt && action !== "video") {
+    toast("Escribe una instruccion para RENDEAI.", "warn");
+    return;
+  }
+  if (prompt) addProjectMessage({ role: "user", type: "text", content: prompt, metadata: { action } });
+  elements.conversationPromptInput.value = "";
+  renderAll();
+
+  if (action === "image") {
+    state.projectUi.tab = "images";
+    await generateConversationImage(prompt);
+  } else if (action === "video") {
+    state.projectUi.tab = "video";
+    addProjectMessage({ role: "assistant", type: "text", content: "Abrí Video Studio. Selecciona assets del proyecto, plantilla y configuracion para generar imagenes base antes de enviar a Luma." });
+  } else if (action === "presentation" || action === "pdf") {
+    state.projectUi.tab = "presentations";
+    addProjectMessage({ role: "assistant", type: "text", content: "Preparé la seccion de presentaciones. Selecciona assets del proyecto y abre el editor PPT/PDF existente o pedime una narrativa para el deck." });
+  } else if (action === "analyze") {
+    if (state.project.assets.length) {
+      addProjectMessage({ role: "assistant", type: "text", content: "Ya tengo los assets como contexto del proyecto. Para esta etapa los usaremos directamente en Imagenes, Video Studio y Presentaciones; la lectura profunda queda para herramientas especificas cuando la pidas desde el motor legacy." });
+    } else {
+      addProjectMessage({ role: "assistant", type: "error", content: "Sube al menos un asset visual, PDF o plano antes de usarlo como contexto." });
+    }
+  } else if (action === "improve") {
+    addProjectMessage({ role: "assistant", type: "text", content: improvePromptLocally(prompt) });
+  } else {
+    addProjectMessage({ role: "assistant", type: "text", content: routeProjectConversation(prompt) });
+  }
+  renderAll();
+}
+
+function routeProjectConversation(prompt) {
+  const lower = String(prompt || "").toLowerCase();
+  if (lower.includes("video")) return "Puedo ayudarte a convertir tus assets en video. Abre Video Studio, selecciona imagenes del proyecto y elige una plantilla como Tour de dron o Recorrido arquitectonico.";
+  if (lower.includes("present") || lower.includes("brochure") || lower.includes("pdf")) return "Puedo armar una narrativa de presentacion con tus assets. En Presentaciones seleccionas imagenes, PDFs, PPTX o planos y abres el editor por capas.";
+  if (lower.includes("render") || lower.includes("imagen")) return "Para generar una imagen fiel, selecciona assets en Image Studio y usa la accion Generar imagen. Los outputs vuelven a quedar guardados en Assets.";
+  return "Entendido. Mantendre el contexto dentro de este proyecto para que puedas reutilizar referencias, outputs y decisiones en nuevas generaciones.";
+}
+
+function improvePromptLocally(prompt) {
+  return [
+    "Prompt mejorado:",
+    `${prompt}`,
+    "",
+    architecturalFidelityInstructions({
+      includeHumans: state.projectUi.videoIncludeHumans,
+      includeCars: state.projectUi.videoIncludeCars,
+    }),
+  ].join("\n");
+}
+
+function architecturalFidelityInstructions(options = {}) {
+  const lines = [
+    "Preserve the exact architecture, geometry, proportions, layout, openings, walls, windows, doors, ceiling height, floor plan, material intent, object positions and camera composition from the reference.",
+    "Do not invent new rooms. Do not change the structural design. Do not distort walls, columns, windows, furniture or signage. Improve realism, lighting, materials and photographic quality only.",
+  ];
+  if (options.includeHumans) lines.push("Add only a few natural, realistic, scale-appropriate people if they improve the scene. Do not block architecture.");
+  else lines.push("No people, no humans, no silhouettes, no crowds.");
+  if (options.includeCars) lines.push("Add realistic cars only where architecturally plausible, such as street, parking or driveway. Do not dominate the scene.");
+  else lines.push("No cars, no vehicles, no traffic.");
+  return lines.join(" ");
+}
+
+function getImageStudioSourceAssets() {
+  const selected = state.projectUi.imageSelectedAssetIds.map(getAssetById).filter((asset) => asset?.type === "image" && asset.url);
+  return selected.length ? selected : getProjectImageAssets().slice(0, 1);
+}
+
+function buildImageVariationJobs() {
+  const sourceAssets = getImageStudioSourceAssets();
+  if (!sourceAssets.length) {
+    toast("Sube o selecciona al menos un asset visual.", "warn");
+    return [];
+  }
+  const variations = clamp(Number(state.projectUi.imageVariationsPerAsset || state.projectUi.variationsPerImage || 1), 1, 8);
+  state.projectUi.renderVariationJobs = buildRenderJobs(sourceAssets, {
+    variationsPerImage: variations,
+    prompt: state.projectUi.imagePrompt || state.projectUi.videoPrompt || "",
+  });
+  return state.projectUi.renderVariationJobs;
+}
+
+async function handleImageGenerateFromAssets() {
+  const sourceAssets = getImageStudioSourceAssets();
+  if (!sourceAssets.length) {
+    toast("Sube o selecciona al menos un asset visual.", "warn");
+    return;
+  }
+  const prompt = (state.projectUi.imagePrompt || elements.conversationPromptInput?.value || "Genera una imagen hiperrealista fiel al asset de referencia.").trim();
+  const variations = clamp(Number(state.projectUi.imageVariationsPerAsset || state.projectUi.variationsPerImage || 1), 1, 8);
+  const jobs = buildRenderJobs(sourceAssets, { variationsPerImage: variations, prompt });
+  state.projectUi.renderVariationJobs = jobs;
+  state.generation.busy = true;
+  state.generation.stage = "Generando imagenes desde assets...";
+  renderAll();
+  const outputAssetIds = [];
+  try {
+    for (const job of jobs) {
+      const asset = getAssetById(job.sourceImageId);
+      const sourceImage = buildImageSourceFromAsset(asset);
+      if (!sourceImage) {
+        job.status = "failed";
+        job.error = "Asset sin imagen usable.";
+        continue;
+      }
+      job.status = "processing";
+      state.generation.stage = `Generando ${asset.name} · v${job.variationIndex}...`;
+      renderAll();
+      const finalPrompt = [
+        prompt,
+        `Reference asset: ${asset.name}. Variation ${job.variationIndex}.`,
+        buildRenderDecisionManifest(),
+        architecturalFidelityInstructions({ includeHumans: false, includeCars: false }),
+      ].join("\n");
+      const output = state.server.aiReady
+        ? await requestAiRender(sourceImage, {
+          prompt: finalPrompt,
+          size: pickImageSize(sourceImage),
+          images: [sourceImage.url],
+          profile: getRenderRequestProfile(),
+        }).catch(() => null)
+        : null;
+      const fallback = output || await buildLocalRenderFallback(sourceImage);
+      const generated = upsertProjectAsset({
+        type: "image",
+        name: `${asset.name} · variacion ${job.variationIndex}`,
+        url: fallback.url,
+        source: "generated",
+        provider: fallback.source || "manual",
+        prompt: finalPrompt,
+        metadata: { sourceAssetId: asset.id, renderJobId: job.jobId, stage: "image-studio" },
+      });
+      job.status = "completed";
+      job.outputAssetId = generated.id;
+      outputAssetIds.push(generated.id);
+    }
+    if (outputAssetIds.length) {
+      state.projectUi.imageSelectedAssetIds = outputAssetIds;
+      addProjectMessage({
+        role: "assistant",
+        type: "image_result",
+        content: `Generé ${outputAssetIds.length} imagen${outputAssetIds.length === 1 ? "" : "es"} desde los assets seleccionados. Quedaron listas para Video Studio y Presentaciones.`,
+        assetIds: outputAssetIds,
+      });
+      state.projectUi.tab = "images";
+    } else {
+      addProjectMessage({ role: "assistant", type: "error", content: "No se pudo generar ninguna imagen desde los assets seleccionados." });
+    }
+  } catch (error) {
+    addProjectMessage({ role: "assistant", type: "error", content: `No se pudieron generar las imagenes: ${error.message || "error desconocido"}` });
+  } finally {
+    state.generation.busy = false;
+    state.generation.stage = "";
+    renderAll();
+    scheduleProjectAutosave("image-studio");
+  }
+}
+
+async function generateConversationImage(prompt) {
+  const sourceAsset = getImageStudioSourceAssets()[0] || null;
+  const main = sourceAsset ? buildImageSourceFromAsset(sourceAsset) : getMainImage();
+  if (!main) {
+    addProjectMessage({ role: "assistant", type: "error", content: "Sube o selecciona una imagen de referencia antes de generar imagenes." });
+    return;
+  }
+  if (sourceAsset && !state.projectUi.imageSelectedAssetIds.includes(sourceAsset.id)) {
+    state.projectUi.imageSelectedAssetIds = [sourceAsset.id];
+  }
+  state.generation.busy = true;
+  state.generation.stage = "Generando imagen desde la conversacion...";
+  renderAll();
+  try {
+    const finalPrompt = [prompt, buildRenderDecisionManifest(), architecturalFidelityInstructions({ includeHumans: false, includeCars: false })].join("\n");
+    const output = state.server.aiReady
+      ? await requestAiRender(main, { prompt: finalPrompt, size: pickImageSize(main), profile: getRenderRequestProfile() })
+      : await buildLocalRenderFallback(main);
+    const asset = upsertProjectAsset({
+      type: "image",
+      name: `Imagen generada ${new Date().toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit" })}`,
+      url: output.url,
+      source: "generated",
+      provider: output.source || "manual",
+      prompt: finalPrompt,
+      metadata: { sourceAssetId: sourceAsset?.id || main.id, stage: "conversation-image" },
+    });
+    state.projectUi.imageSelectedAssetIds = [asset.id];
+    state.projectUi.tab = "images";
+    addProjectMessage({ role: "assistant", type: "image_result", content: "Imagen generada y guardada como asset del proyecto.", assetIds: [asset.id] });
+  } catch (error) {
+    addProjectMessage({ role: "assistant", type: "error", content: `No se pudo generar la imagen: ${error.message || "error desconocido"}` });
+  } finally {
+    state.generation.busy = false;
+    state.generation.stage = "";
+  }
+}
+
+function buildLocalVideoPlan(template, settings = {}) {
+  const promptCount = clamp(Number(template.imagePromptCount || 5), 3, 5);
+  const labels = [
+    "vista frontal realista",
+    "vista diagonal/perspectiva",
+    "vista superior o semi-aerea",
+    "vista de aproximacion",
+    "cierre cinematografico",
+  ].slice(0, promptCount);
+  const fidelity = architecturalFidelityInstructions({ includeHumans: settings.includeHumans, includeCars: settings.includeCars });
+  return {
+    videoPrompt: `${template.lumaPromptTemplate || template.description} ${settings.prompt || ""}`.trim(),
+    lumaPrompt: `${template.lumaPromptTemplate || template.description}. Camera motion: ${settings.cameraMotion || template.defaultCameraMotion}. ${settings.prompt || ""} ${fidelity}`.trim(),
+    imagePrompts: labels.map((label) => `${label}. ${template.internalPromptStrategy || template.description}. ${settings.prompt || ""} ${fidelity}`.trim()),
+    negativePrompt: `${settings.includeHumans ? "" : "No people, no humans."} ${settings.includeCars ? "" : "No cars, no vehicles."}`.trim(),
+    fidelityInstructions: fidelity,
+    notes: [],
+  };
+}
+
+async function requestVideoPlan(template, settings) {
+  if (!state.server.analysisReady) return buildLocalVideoPlan(template, settings);
+  const response = await apiRequest(`/api/projects/${encodeURIComponent(state.projects.activeId)}/video/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template, settings, assets: state.project.assets.filter((asset) => state.projectUi.videoSelectedAssetIds.includes(asset.id)) }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok || !payload.plan) return buildLocalVideoPlan(template, settings);
+  return validateVideoPromptPlan(payload.plan, template, settings);
+}
+
+function validateVideoPromptPlan(plan, template, settings) {
+  const fallback = buildLocalVideoPlan(template, settings);
+  const imagePrompts = safeArray(plan.imagePrompts).map((item) => String(item || "").trim()).filter(Boolean).slice(0, 5);
+  while (imagePrompts.length < 3) imagePrompts.push(fallback.imagePrompts[imagePrompts.length] || fallback.imagePrompts[0]);
+  const fidelity = architecturalFidelityInstructions({ includeHumans: settings.includeHumans, includeCars: settings.includeCars });
+  return {
+    videoPrompt: String(plan.videoPrompt || fallback.videoPrompt),
+    lumaPrompt: [String(plan.lumaPrompt || fallback.lumaPrompt), fidelity].join(" "),
+    imagePrompts: imagePrompts.map((prompt) => [prompt, fidelity].join(" ")),
+    negativePrompt: String(plan.negativePrompt || fallback.negativePrompt),
+    fidelityInstructions: String(plan.fidelityInstructions || fidelity),
+    notes: safeArray(plan.notes),
+  };
+}
+
+async function handleVideoPlanAndImages() {
+  const template = getVideoTemplates().find((item) => item.id === state.projectUi.videoTemplateId) || getVideoTemplates()[0];
+  if (!template) return;
+  const selectedAssets = state.projectUi.videoSelectedAssetIds.map((id) => state.project.assets.find((asset) => asset.id === id)).filter(Boolean);
+  if (!selectedAssets.length) {
+    toast("Selecciona al menos una imagen fuente.", "warn");
+    return;
+  }
+  const sourceImage = buildImageSourceFromAsset(selectedAssets[0]);
+  const settings = {
+    includeHumans: state.projectUi.videoIncludeHumans,
+    includeCars: state.projectUi.videoIncludeCars,
+    durationSeconds: state.projectUi.videoDurationSeconds,
+    aspectRatio: state.projectUi.videoAspectRatio,
+    cameraMotion: state.projectUi.videoCameraMotion || template.defaultCameraMotion,
+    prompt: state.projectUi.videoPrompt,
+  };
+  const job = createVideoJob({ templateId: template.id, status: "generating_prompts", sourceAssetIds: selectedAssets.map((asset) => asset.id), ...settings });
+  state.project.videoJobs.unshift(job);
+  state.projectUi.activeVideoJobId = job.id;
+  renderAll();
+  try {
+    const plan = await requestVideoPlan(template, settings);
+    job.status = "generating_images";
+    job.prompt = plan.videoPrompt;
+    job.lumaPrompt = plan.lumaPrompt;
+    job.internalImagePrompts = plan.imagePrompts;
+    job.updatedAt = new Date().toISOString();
+    const generatedIds = [];
+    for (let index = 0; index < plan.imagePrompts.length; index += 1) {
+      state.generation.stage = `Generando imagen base ${index + 1} de ${plan.imagePrompts.length}...`;
+      renderAll();
+      const output = state.server.aiReady
+        ? await requestAiRender(sourceImage, {
+          prompt: plan.imagePrompts[index],
+          size: pickImageSize(sourceImage),
+          images: [sourceImage.url],
+          profile: { quality: "medium", inputFidelity: "high", outputCompression: 92, providerPreference: state.projectUi.imageProvider === "openai" ? "openai" : "auto-strict", strictFidelity: true },
+        }).catch(() => null)
+        : null;
+      const fallback = output || await buildLocalRenderFallback(sourceImage);
+      const asset = upsertProjectAsset({
+        type: "image",
+        name: `${template.name} · imagen base ${index + 1}`,
+        url: fallback.url,
+        source: "generated",
+        provider: fallback.source || "manual",
+        prompt: plan.imagePrompts[index],
+        metadata: { videoJobId: job.id, templateId: template.id, stage: "video-base-image" },
+      });
+      generatedIds.push(asset.id);
+    }
+    job.generatedImageAssetIds = generatedIds;
+    job.status = "waiting_image_approval";
+    job.updatedAt = new Date().toISOString();
+    state.projectUi.videoGeneratedAssetIds = generatedIds;
+    state.projectUi.videoApprovedAssetIds = [...generatedIds];
+    addProjectMessage({ role: "assistant", type: "image_result", content: "Generé imagenes base de alta fidelidad. Selecciona cuales queres aprobar para video.", assetIds: generatedIds, jobId: job.id });
+  } catch (error) {
+    job.status = "failed";
+    job.error = error.message || "No se pudo crear el plan de video.";
+    addProjectMessage({ role: "assistant", type: "error", content: job.error, jobId: job.id });
+  } finally {
+    state.generation.busy = false;
+    state.generation.stage = "";
+    renderAll();
+    scheduleProjectAutosave("video");
+  }
+}
+
+async function handleGenerateApprovedVideo() {
+  const job = state.project.videoJobs.find((item) => item.id === state.projectUi.activeVideoJobId) || state.project.videoJobs[0];
+  const approvedAssets = state.projectUi.videoApprovedAssetIds.map((id) => state.project.assets.find((asset) => asset.id === id)).filter(Boolean);
+  if (!job || !approvedAssets.length) {
+    toast("Primero aprueba al menos una imagen base.", "warn");
+    return;
+  }
+  if (!state.server.lumaReady && !state.server.mockAi) {
+    toast(LUMA_NOT_CONFIGURED_MESSAGE, "warn");
+    addProjectMessage({ role: "assistant", type: "error", content: LUMA_NOT_CONFIGURED_MESSAGE, jobId: job.id });
+    renderAll();
+    return;
+  }
+  job.status = "sending_to_luma";
+  job.approvedImageAssetIds = approvedAssets.map((asset) => asset.id);
+  renderAll();
+  try {
+    const response = await apiRequest("/api/video/luma/image-to-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: state.projects.activeId,
+        videoJobId: job.id,
+        approvedImageAssetIds: approvedAssets.map((asset) => asset.id),
+        images: approvedAssets.map((asset) => asset.url),
+        lumaPrompt: job.lumaPrompt || job.prompt,
+        durationSeconds: job.durationSeconds,
+        aspectRatio: job.aspectRatio,
+        cameraMotion: state.projectUi.videoCameraMotion,
+        provider: state.projectUi.videoProvider,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.message || `Status ${response.status}`);
+    job.lumaGenerationId = payload.generationId || payload.jobId || "";
+    job.status = payload.status === "completed" ? "completed" : "processing_video";
+    if (payload.videoUrl) {
+      const asset = upsertProjectAsset({
+        type: "video",
+        name: `Video ${getVideoTemplates().find((tpl) => tpl.id === job.templateId)?.name || "RENDEAI"}`,
+        url: payload.videoUrl,
+        source: "generated",
+        provider: payload.provider || (state.server.mockAi ? "manual" : "luma"),
+        prompt: job.lumaPrompt,
+        metadata: { videoJobId: job.id, lumaGenerationId: job.lumaGenerationId },
+      });
+      job.outputVideoAssetId = asset.id;
+      addProjectMessage({ role: "assistant", type: "video_result", content: "Video completado y guardado como asset del proyecto.", assetIds: [asset.id], jobId: job.id });
+    } else {
+      addProjectMessage({ role: "system", type: "job_status", content: "Video enviado a Luma. Consultando estado del job...", jobId: job.id });
+      pollLumaStatus(job.id, job.lumaGenerationId);
+    }
+  } catch (error) {
+    job.status = "failed";
+    job.error = error.message || "No se pudo generar video.";
+    addProjectMessage({ role: "assistant", type: "error", content: job.error, jobId: job.id });
+  } finally {
+    job.updatedAt = new Date().toISOString();
+    renderAll();
+    scheduleProjectAutosave("video");
+  }
+}
+
+function pollLumaStatus(videoJobId, generationId) {
+  if (!generationId) return;
+  let attempts = 0;
+  const tick = async () => {
+    attempts += 1;
+    const job = state.project.videoJobs.find((item) => item.id === videoJobId);
+    if (!job || job.status === "completed" || job.status === "failed") return;
+    try {
+      const response = await apiRequest(`/api/video/luma/status/${encodeURIComponent(generationId)}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.message || `Status ${response.status}`);
+      job.status = payload.status === "completed" ? "completed" : payload.status === "failed" ? "failed" : "processing_video";
+      if (payload.videoUrl) {
+        const asset = upsertProjectAsset({
+          type: "video",
+          name: "Video Luma",
+          url: payload.videoUrl,
+          source: "generated",
+          provider: "luma",
+          prompt: job.lumaPrompt,
+          metadata: { videoJobId: job.id, lumaGenerationId: generationId },
+        });
+        job.outputVideoAssetId = asset.id;
+        addProjectMessage({ role: "assistant", type: "video_result", content: "Video completado. Duracion y preview disponibles en Assets.", assetIds: [asset.id], jobId: job.id });
+      } else if (attempts < 8) {
+        window.setTimeout(tick, 5000);
+      }
+      renderAll();
+    } catch (error) {
+      job.status = attempts >= 3 ? "failed" : job.status;
+      job.error = error.message || "";
+      if (attempts < 3) window.setTimeout(tick, 5000);
+      renderAll();
+    }
+  };
+  window.setTimeout(tick, 2500);
+}
+
+function handleVideoSourceSelection() {
+  const sourceAssetIds = safeArray(state.projectUi.videoSelectedAssetIds).filter((id) => isProjectVideoInputAsset(getAssetById(id)));
+  if (!sourceAssetIds.length) {
+    toast("Selecciona al menos un asset visual del proyecto.", "warn");
+    return;
+  }
+  const production = ensureActiveVideoProduction();
+  production.sourceAssetIds = sourceAssetIds;
+  production.templateId = state.projectUi.videoTemplateId || production.templateId;
+  production.settings = getCurrentVideoProductionSettings();
+  production.status = "source_selected";
+  production.updatedAt = new Date().toISOString();
+  console.info("[VideoProduction] sources selected:", sourceAssetIds.length);
+  addProjectMessage({
+    role: "system",
+    type: "job_status",
+    content: `Seleccionaste ${sourceAssetIds.length} asset${sourceAssetIds.length === 1 ? "" : "s"} visual${sourceAssetIds.length === 1 ? "" : "es"} para crear un video.`,
+    assetIds: sourceAssetIds,
+    jobId: production.id,
+  });
+  renderAll();
+  scheduleProjectAutosave("video-sources");
+}
+
+function getTemplateBaseImageOutputs(template) {
+  const outputs = safeArray(template?.baseImageOutputs);
+  if (outputs.length) return outputs;
+  const labels = [
+    "Vista frontal realista",
+    "Vista diagonal/perspectiva",
+    "Vista superior o semi-aerea",
+    "Vista de aproximacion",
+    "Cierre cinematografico",
+  ].slice(0, clamp(Number(template?.imagePromptCount || 5), 3, 5));
+  return labels.map((label, index) => ({
+    id: `stage-${index + 1}`,
+    stageName: label,
+    description: template?.description || "",
+    basePrompt: template?.lumaPromptTemplate || template?.description || "",
+    editInstructions: template?.internalPromptStrategy || "",
+    mustShow: [label, "clear narrative progression", "same architectural identity"],
+    mustNotShow: ["repeated final-scene variant", "layout changes", "geometry changes"],
+    negativePrompt: "No geometry changes, no design drift, no invented architecture.",
+  }));
+}
+
+function strictArchitecturalFidelityInstructions(options = {}) {
+  const lines = [STRICT_ARCHITECTURAL_FIDELITY_PROMPT];
+  if (options.includeHumans) {
+    lines.push("Humans may be added only if requested and only as subtle, realistic, scale-appropriate background elements. They must not block or alter the architecture.");
+  } else {
+    lines.push("No humans, no people, no silhouettes, no crowds, no workers.");
+  }
+  if (options.includeCars) {
+    lines.push("Cars may be added only if requested and only in plausible exterior/parking/street areas. They must not dominate or alter the scene.");
+  } else {
+    lines.push("No cars, no vehicles, no traffic.");
+  }
+  if (options.fidelityLevel === "balanced") lines.push("Balanced mode may improve atmosphere and material realism, but locked geometry and design identity remain mandatory.");
+  if (options.fidelityLevel === "creative") lines.push("Creative mode may explore mood and camera energy only; architectural layout, composition and identity remain locked.");
+  return lines.join(" ");
+}
+
+function buildSourceAssetPromptBrief(asset) {
+  const analysis = asset?.metadata?.analysis || {};
+  const lines = [];
+  if (asset?.name) lines.push(`Reference asset: ${asset.name}.`);
+  if (safeArray(analysis.objects).length) lines.push(`Visible objects: ${safeArray(analysis.objects).slice(0, 10).join(", ")}.`);
+  if (safeArray(analysis.texts).length) lines.push(`Visible text/signage to preserve: ${safeArray(analysis.texts).slice(0, 8).join(", ")}.`);
+  if (safeArray(analysis.materials).length) lines.push(`Material cues: ${safeArray(analysis.materials).slice(0, 8).join(", ")}.`);
+  if (safeArray(analysis.environment).length) lines.push(`Environment: ${safeArray(analysis.environment).slice(0, 6).join(", ")}.`);
+  if (safeArray(analysis.composition).length) lines.push(`Composition: ${safeArray(analysis.composition).slice(0, 6).join(", ")}.`);
+  return lines.join(" ");
+}
+
+function buildBaseImageNegativePrompt(output, settings) {
+  return [
+    output?.negativePrompt || "",
+    ...safeArray(output?.mustNotShow).map((item) => `Must not show: ${item}.`),
+    settings.includeHumans ? "" : "No humans, no people, no silhouettes, no crowds, no workers.",
+    settings.includeCars ? "" : "No cars, no vehicles, no traffic.",
+    "No geometry changes, no layout changes, no object relocation, no signage changes, no invented rooms, no distorted walls, no warped windows.",
+  ].filter(Boolean).join(" ");
+}
+
+function normalizeStageList(value) {
+  return safeArray(value).map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+function buildStagePrompt({
+  templateId,
+  stage,
+  sourceAssets = [],
+  userPrompt = "",
+  includeHumans = false,
+  includeCars = false,
+  fidelityLevel = "strict",
+  visualStyle = "",
+  feedback = "",
+} = {}) {
+  const template = getVideoTemplates().find((item) => item.id === templateId) || getSelectedVideoTemplate();
+  const settings = createVideoProductionSettings({
+    userPrompt,
+    includeHumans,
+    includeCars,
+    fidelityLevel,
+    visualStyle,
+  });
+  const mustShow = normalizeStageList(stage?.mustShow);
+  const mustNotShow = normalizeStageList(stage?.mustNotShow);
+  const stageName = stage?.stageName || "Imagen base";
+  return [
+    `Video template: ${template?.name || "Video arquitectonico"}.`,
+    `Narrative stage: ${stageName}. ${stage?.description || ""}`,
+    "This stage must be visually and narratively distinct from the other base images in the same batch. Do not generate another final-scene variant unless this is explicitly the final result stage.",
+    template?.lumaPromptTemplate || template?.description || "",
+    stage?.basePrompt || "",
+    stage?.editInstructions || "",
+    mustShow.length ? `Must show in this stage: ${mustShow.join("; ")}.` : "",
+    mustNotShow.length ? `Must not show in this stage: ${mustNotShow.join("; ")}.` : "",
+    visualStyle ? `Visual style: ${visualStyle}.` : "",
+    userPrompt ? `User additional prompt: ${userPrompt}. Apply it only if it does not contradict the locked architectural reference.` : "",
+    feedback ? `Targeted feedback for this stage only: ${feedback}. Regenerate only this image and keep every other stage untouched.` : "",
+    safeArray(sourceAssets).map(buildSourceAssetPromptBrief).filter(Boolean).join("\n"),
+    strictArchitecturalFidelityInstructions(settings),
+    `Negative prompt: ${buildBaseImageNegativePrompt(stage, settings)}`,
+  ].filter(Boolean).join("\n");
+}
+
+function buildBaseImagePrompt({ template, output, sourceAsset, settings, feedback = "" }) {
+  return buildStagePrompt({
+    templateId: template?.id,
+    stage: output,
+    sourceAssets: [sourceAsset].filter(Boolean),
+    userPrompt: settings.userPrompt,
+    includeHumans: settings.includeHumans,
+    includeCars: settings.includeCars,
+    fidelityLevel: settings.fidelityLevel,
+    visualStyle: settings.visualStyle,
+    feedback,
+  });
+}
+
+function buildClipMotionPrompt({ template, baseImage, sourceAsset, settings, feedback = "" }) {
+  const motionMap = {
+    low: "very slow, controlled camera movement, minimal parallax",
+    medium: "smooth cinematic movement with controlled parallax",
+    high: "more dynamic movement while keeping architecture stable and undistorted",
+  };
+  return [
+    `Create one image-to-video clip for stage: ${baseImage.stageName}.`,
+    template?.lumaPromptTemplate || template?.description || "",
+    `Camera motion: ${template?.defaultCameraMotion || state.projectUi.videoCameraMotion || "slow architectural reveal"}.`,
+    `Motion intensity: ${motionMap[settings.motionIntensity] || motionMap.medium}.`,
+    settings.userPrompt ? `User additional prompt: ${settings.userPrompt}.` : "",
+    feedback ? `Targeted clip feedback: ${feedback}. Regenerate only this clip and keep the source image/design intact.` : "",
+    buildSourceAssetPromptBrief(sourceAsset),
+    strictArchitecturalFidelityInstructions(settings),
+    "Do not deform walls, columns, windows, doors, furniture, signage or material joints. Do not invent objects during motion.",
+  ].filter(Boolean).join("\n");
+}
+
+function normalizeClipDurationSeconds(settings, approvedCount) {
+  const target = Number(settings.durationSeconds || 9);
+  const estimated = Math.max(3, Math.round(target / Math.max(approvedCount || 1, 1)));
+  if (state.server.lumaReady && !state.server.mockAi) return estimated <= 5 ? 5 : 9;
+  return clamp(estimated, 3, 9);
+}
+
+async function generateSingleBaseImage(production, baseItem, output, sourceAsset, settings, feedback = "") {
+  const sourceImage = buildImageSourceFromAsset(sourceAsset);
+  if (!sourceImage) throw new Error("Asset fuente sin imagen usable.");
+  const prompt = buildBaseImagePrompt({ template: getSelectedVideoTemplate(), output, sourceAsset, settings, feedback });
+  baseItem.prompt = prompt;
+  baseItem.negativePrompt = buildBaseImageNegativePrompt(output, settings);
+  baseItem.sourceAssetId = sourceAsset.id;
+  baseItem.templateOutputId = output.id || baseItem.templateOutputId || "";
+  baseItem.status = "generating";
+  baseItem.error = "";
+  baseItem.updatedAt = new Date().toISOString();
+  renderVideoStudio();
+  const outputRender = state.server.aiReady
+    ? await requestAiRender(sourceImage, {
+      prompt,
+      size: pickImageSize(sourceImage),
+      images: [sourceImage.url],
+      profile: {
+        quality: "high",
+        inputFidelity: "high",
+        outputCompression: 94,
+        providerPreference: settings.imageProvider === "openai" ? "openai" : settings.imageProvider === "gemini" ? "gemini" : "auto-strict",
+        strictFidelity: true,
+      },
+    }).catch(() => null)
+    : null;
+  const fallback = outputRender || await buildLocalRenderFallback(sourceImage);
+  const asset = upsertProjectAsset({
+    id: baseItem.assetId || undefined,
+    type: "image",
+    name: `${getSelectedVideoTemplate()?.name || "Video"} · ${baseItem.stageName}`,
+    url: fallback.url,
+      source: "generated",
+      provider: fallback.source || "manual",
+      prompt,
+      metadata: {
+        transient: true,
+        lifecycle: "ai_transient",
+        allowedUse: ["video-clip"],
+        videoProductionId: production.id,
+        baseImageId: baseItem.id,
+      templateId: production.templateId,
+      templateOutputId: output.id || "",
+      sourceAssetId: sourceAsset.id,
+      stage: "video-base-image",
+      strictFidelity: true,
+    },
+  });
+  baseItem.assetId = asset.id;
+  baseItem.status = "ready";
+  baseItem.updatedAt = new Date().toISOString();
+  return baseItem;
+}
+
+async function handleGenerateBaseImagesBatch() {
+  const production = getActiveVideoProduction();
+  const confirmedSourceIds = safeArray(production?.sourceAssetIds).filter((id) => isProjectVideoInputAsset(getAssetById(id)));
+  if (!production || production.status === "draft" || !confirmedSourceIds.length) {
+    toast("Primero confirma los inputs con 'Usar estos assets'.", "warn");
+    return;
+  }
+  await generateBaseImagesBatch({
+    projectId: state.projects.activeId,
+    productionId: production.id,
+    templateId: state.projectUi.videoTemplateId,
+    sourceAssetIds: confirmedSourceIds,
+    userPrompt: state.projectUi.videoPrompt,
+    includeHumans: state.projectUi.videoIncludeHumans,
+    includeCars: state.projectUi.videoIncludeCars,
+    fidelityLevel: state.projectUi.videoFidelityLevel,
+    imageProvider: state.projectUi.imageProvider,
+  });
+}
+
+async function generateBaseImagesBatch(input = {}) {
+  const template = getVideoTemplates().find((item) => item.id === input.templateId) || getSelectedVideoTemplate();
+  const production = getActiveVideoProduction();
+  const confirmedSourceIds = safeArray(production?.sourceAssetIds).filter((id) => isProjectVideoInputAsset(getAssetById(id)));
+  const sourceAssets = confirmedSourceIds.map(getAssetById).filter(isProjectVideoInputAsset);
+  if (!template) {
+    toast("Selecciona una plantilla de video.", "warn");
+    return { baseImages: [] };
+  }
+  if (!production || production.status === "draft" || !confirmedSourceIds.length) {
+    toast("Primero confirma los inputs con 'Usar estos assets'.", "warn");
+    return { baseImages: [] };
+  }
+  if (!sourceAssets.length) {
+    toast("Selecciona al menos una imagen fuente.", "warn");
+    return { baseImages: [] };
+  }
+  production.templateId = template.id;
+  production.sourceAssetIds = sourceAssets.map((asset) => asset.id);
+  production.settings = createVideoProductionSettings({
+    ...getCurrentVideoProductionSettings(),
+    userPrompt: input.userPrompt ?? state.projectUi.videoPrompt,
+    includeHumans: input.includeHumans,
+    includeCars: input.includeCars,
+    fidelityLevel: input.fidelityLevel,
+    imageProvider: input.imageProvider,
+  });
+  const settings = production.settings;
+  const outputs = getTemplateBaseImageOutputs(template);
+  production.status = "generating_base_images";
+  production.baseImages = outputs.map((output, index) => {
+    const existing = safeArray(production.baseImages).find((item) => item.templateOutputId === output.id || item.stageName === output.stageName);
+    return createBaseImageItem({
+      ...existing,
+      templateOutputId: output.id,
+      stageName: output.stageName,
+      sourceAssetId: sourceAssets[index % sourceAssets.length]?.id || sourceAssets[0].id,
+      status: "pending",
+      error: "",
+    });
+  });
+  production.updatedAt = new Date().toISOString();
+  console.info("[VideoProduction] sources selected:", production.sourceAssetIds.length);
+  state.generation.busy = true;
+  state.generation.stage = "Generando imagenes base por lote...";
+  addProjectMessage({
+    role: "system",
+    type: "job_status",
+    content: `Generando ${outputs.length} imagenes base para la plantilla ${template.name}.`,
+    assetIds: production.sourceAssetIds,
+    jobId: production.id,
+  });
+  renderAll();
+
+  try {
+    for (let index = 0; index < outputs.length; index += 1) {
+      const output = outputs[index];
+      const baseItem = production.baseImages[index];
+      const sourceAsset = sourceAssets[index % sourceAssets.length] || sourceAssets[0];
+      state.projectUi.videoBaseImageProgress = { done: index + 1, total: outputs.length, label: output.stageName };
+      state.generation.stage = `Generando imagen base ${index + 1} de ${outputs.length}...`;
+      renderVideoStudio();
+      try {
+        await generateSingleBaseImage(production, baseItem, output, sourceAsset, settings);
+      } catch (error) {
+        baseItem.status = "failed";
+        baseItem.error = error.message || "No se pudo generar esta imagen base.";
+        baseItem.updatedAt = new Date().toISOString();
+      }
+    }
+    const readyBaseImages = production.baseImages.filter((item) => item.assetId && item.status !== "failed");
+    production.status = "reviewing_base_images";
+    production.updatedAt = new Date().toISOString();
+    state.projectUi.videoGeneratedAssetIds = readyBaseImages.map((item) => item.assetId);
+    state.projectUi.videoApprovedAssetIds = [];
+    console.info("[VideoProduction] base images generated:", readyBaseImages.length);
+    addProjectMessage({
+      role: "assistant",
+      type: "image_result",
+      content: `${readyBaseImages.length} imagenes base generadas. Revisa y aprueba las que quieras usar para crear clips.`,
+      assetIds: readyBaseImages.map((item) => item.assetId),
+      jobId: production.id,
+      metadata: { videoProductionId: production.id, templateId: template.id },
+    });
+  } finally {
+    state.projectUi.videoBaseImageProgress = null;
+    state.generation.busy = false;
+    state.generation.stage = "";
+    renderAll();
+    scheduleProjectAutosave("video-base-images");
+  }
+  return { baseImages: production.baseImages };
+}
+
+async function regenerateBaseImageItem(production, baseItem, feedback = "") {
+  const template = getVideoTemplates().find((item) => item.id === production.templateId) || getSelectedVideoTemplate();
+  const output = getTemplateBaseImageOutputs(template).find((item) => item.id === baseItem.templateOutputId || item.stageName === baseItem.stageName)
+    || { id: baseItem.templateOutputId || baseItem.id, stageName: baseItem.stageName, description: "", basePrompt: template?.lumaPromptTemplate || "", editInstructions: "", negativePrompt: baseItem.negativePrompt || "" };
+  const sourceAsset = getAssetById(baseItem.sourceAssetId) || safeArray(production.sourceAssetIds).map(getAssetById).find(Boolean);
+  if (!sourceAsset) {
+    toast("No encuentro el asset fuente de esta imagen.", "warn");
+    return;
+  }
+  if (feedback) {
+    baseItem.feedbackHistory.push(createFeedbackItem({ targetType: "base_image", targetId: baseItem.id, message: feedback }));
+    baseItem.status = "changes_requested";
+  }
+  state.generation.busy = true;
+  state.generation.stage = `Regenerando ${baseItem.stageName}...`;
+  renderAll();
+  try {
+    await generateSingleBaseImage(production, baseItem, output, sourceAsset, production.settings, feedback);
+    addProjectMessage({
+      role: "system",
+      type: "job_status",
+      content: feedback ? `El usuario solicito cambios en la imagen ${baseItem.stageName}.` : `Regenerada la imagen ${baseItem.stageName}.`,
+      assetIds: baseItem.assetId ? [baseItem.assetId] : [],
+      jobId: production.id,
+    });
+  } catch (error) {
+    baseItem.status = "failed";
+    baseItem.error = error.message || "No se pudo regenerar esta imagen.";
+  } finally {
+    baseItem.updatedAt = new Date().toISOString();
+    state.generation.busy = false;
+    state.generation.stage = "";
+    renderAll();
+    scheduleProjectAutosave("video-base-image-feedback");
+  }
+}
+
+function findBaseImageItem(baseImageId) {
+  const production = getActiveVideoProduction();
+  const baseItem = safeArray(production?.baseImages).find((item) => item.id === baseImageId);
+  return { production, baseItem };
+}
+
+async function handleBaseImageAction(baseImageId, action) {
+  const { production, baseItem } = findBaseImageItem(baseImageId);
+  if (!production || !baseItem) return;
+  if (action === "approve") {
+    baseItem.status = "approved";
+    baseItem.updatedAt = new Date().toISOString();
+    state.projectUi.videoApprovedAssetIds = unique([...state.projectUi.videoApprovedAssetIds, baseItem.assetId].filter(Boolean));
+    const approvedCount = production.baseImages.filter((item) => item.status === "approved").length;
+    console.info("[VideoProduction] base images approved:", approvedCount);
+    addProjectMessage({ role: "system", type: "job_status", content: `Se aprobaron ${approvedCount} imagenes base.`, assetIds: [baseItem.assetId].filter(Boolean), jobId: production.id });
+    production.status = "reviewing_base_images";
+    renderAll();
+    scheduleProjectAutosave("video-base-approve");
+    return;
+  }
+  if (action === "prompt") {
+    await openVideoPromptViewer(`Prompt · ${baseItem.stageName || "Imagen base"}`, baseItem.prompt || "Sin prompt registrado.");
+    return;
+  }
+  if (action === "compare") {
+    const sourceAsset = getAssetById(baseItem.sourceAssetId);
+    if (sourceAsset?.url) window.open(sourceAsset.url, "_blank", "noopener");
+    return;
+  }
+  if (action === "zoom") {
+    const asset = getAssetById(baseItem.assetId);
+    if (asset?.url) window.open(asset.url, "_blank", "noopener");
+    return;
+  }
+  if (action === "feedback") {
+    const feedback = await openVideoTextModal({
+      title: "Feedback para esta imagen",
+      description: "Indica que debe cambiar sin modificar el diseno base.",
+      label: "Cambio solicitado",
+      placeholder: "Ejemplo: manten el piso original, haz la iluminacion mas realista y elimina las personas.",
+      value: "Manten el diseno base; ajusta solo iluminacion, realismo o el detalle indicado.",
+      confirmLabel: "Aplicar cambios",
+    });
+    if (!feedback || !feedback.trim()) return;
+    regenerateBaseImageItem(production, baseItem, feedback.trim());
+    return;
+  }
+  if (action === "regenerate") {
+    regenerateBaseImageItem(production, baseItem, "");
+  }
+}
+
+async function handleGenerateClipsFromApprovedBaseImages() {
+  const production = getActiveVideoProduction();
+  if (!production) {
+    toast("Primero genera o abre una produccion de video.", "warn");
+    return;
+  }
+  const approvedBaseImages = safeArray(production.baseImages).filter((item) => item.status === "approved" && item.assetId);
+  if (!approvedBaseImages.length) {
+    toast("Aprueba al menos una imagen base antes de generar clips.", "warn");
+    return;
+  }
+  if (!state.server.lumaReady && !state.server.mockAi) {
+    toast(LUMA_NOT_CONFIGURED_MESSAGE, "warn");
+    addProjectMessage({ role: "assistant", type: "error", content: LUMA_NOT_CONFIGURED_MESSAGE, jobId: production.id });
+    renderAll();
+    return;
+  }
+  const settings = createVideoProductionSettings(production.settings || {});
+  const perClipDuration = normalizeClipDurationSeconds(settings, approvedBaseImages.length);
+  production.status = "generating_clips";
+  production.clips = approvedBaseImages.map((baseImage, index) => {
+    const existing = safeArray(production.clips).find((clip) => clip.baseImageItemId === baseImage.id);
+    const existingVideoAsset = getClipVideoAsset(existing);
+    return createClipItem({
+      ...existing,
+      baseImageItemId: baseImage.id,
+      sourceImageAssetId: baseImage.assetId,
+      videoAssetId: existingVideoAsset ? existing.videoAssetId : "",
+      lumaGenerationId: existingVideoAsset ? existing.lumaGenerationId : "",
+      durationSeconds: existing?.durationSeconds || perClipDuration,
+      order: index,
+      status: existingVideoAsset ? "ready" : "pending",
+      error: "",
+    });
+  });
+  state.generation.busy = true;
+  state.generation.stage = "Generando clips con Luma o mock...";
+  renderAll();
+  try {
+    for (let index = 0; index < production.clips.length; index += 1) {
+      const clip = production.clips[index];
+      if (isClipReadyForReview(clip) && clip.status === "ready") continue;
+      state.projectUi.videoClipProgress = {
+        done: index,
+        total: production.clips.length,
+        label: `Enviando clip ${index + 1} a ${state.server.lumaReady ? "Luma" : "mock"}...`,
+      };
+      renderAll();
+      try {
+        const result = await generateSingleClip(production, clip, "");
+        if (!isClipReadyForReview(clip) && result?.generationId) {
+          await waitForClipCompletion(production, clip, result.generationId, { index, total: production.clips.length });
+        }
+      } catch (error) {
+        clip.status = "failed";
+        clip.error = error.message || "No se pudo generar este clip.";
+        clip.updatedAt = new Date().toISOString();
+        addProjectMessage({
+          role: "assistant",
+          type: "error",
+          content: `No se pudo generar el clip ${index + 1}: ${clip.error}`,
+          jobId: production.id,
+        });
+      }
+      state.projectUi.videoClipProgress = {
+        done: index + 1,
+        total: production.clips.length,
+        label: isClipReadyForReview(clip) ? `Clip ${index + 1} cargado como asset.` : `Clip ${index + 1} no devolvio video usable.`,
+      };
+      renderAll();
+    }
+    const readyClips = production.clips.filter(isClipReadyForReview);
+    production.status = "reviewing_clips";
+    production.updatedAt = new Date().toISOString();
+    console.info("[VideoProduction] clips generated:", readyClips.length);
+    addProjectMessage({
+      role: "assistant",
+      type: "video_result",
+      content: `Generé ${readyClips.length} clip${readyClips.length === 1 ? "" : "s"} individual${readyClips.length === 1 ? "" : "es"}. Revisa y aprueba antes de componer el video final.`,
+      assetIds: readyClips.map((clip) => clip.videoAssetId).filter(Boolean),
+      jobId: production.id,
+      metadata: { videoProductionId: production.id },
+    });
+  } finally {
+    state.projectUi.videoClipProgress = null;
+    state.generation.busy = false;
+    state.generation.stage = "";
+    renderAll();
+    scheduleProjectAutosave("video-clips");
+  }
+}
+
+async function generateSingleClip(production, clip, feedback = "") {
+  const template = getVideoTemplates().find((item) => item.id === production.templateId) || getSelectedVideoTemplate();
+  const baseImage = safeArray(production.baseImages).find((item) => item.id === clip.baseImageItemId);
+  const sourceAsset = getAssetById(clip.sourceImageAssetId || baseImage?.assetId);
+  if (!baseImage || !sourceAsset?.url) throw new Error("Imagen base no disponible para generar clip.");
+  const settings = createVideoProductionSettings(production.settings || {});
+  clip.motionPrompt = buildClipMotionPrompt({ template, baseImage, sourceAsset, settings, feedback });
+  clip.status = "generating";
+  clip.error = "";
+  clip.updatedAt = new Date().toISOString();
+  renderVideoStudio();
+  const response = await apiRequest("/api/video/luma/image-to-video", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectId: state.projects.activeId,
+      productionId: production.id,
+      clipId: clip.id,
+      sourceImageAssetId: sourceAsset.id,
+      approvedImageAssetIds: [sourceAsset.id],
+      images: [sourceAsset.url],
+      prompt: clip.motionPrompt,
+      lumaPrompt: clip.motionPrompt,
+      durationSeconds: clip.durationSeconds,
+      aspectRatio: settings.aspectRatio,
+      cameraMotion: template?.defaultCameraMotion || state.projectUi.videoCameraMotion,
+      provider: settings.videoProvider,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) throw new Error(payload.message || `Status ${response.status}`);
+  clip.lumaGenerationId = payload.generationId || payload.jobId || clip.lumaGenerationId || "";
+  if (payload.videoUrl) {
+    upsertClipVideoAsset({
+      production,
+      clip,
+      template,
+      sourceAsset,
+      provider: payload.provider || (state.server.mockAi ? "mock" : "luma"),
+      generationId: clip.lumaGenerationId,
+      videoUrl: payload.videoUrl,
+    });
+    clip.status = "ready";
+  } else {
+    clip.status = "generating";
+  }
+  clip.updatedAt = new Date().toISOString();
+  return { generationId: clip.lumaGenerationId, status: clip.status, completed: isClipReadyForReview(clip) };
+}
+
+function upsertClipVideoAsset({ production, clip, template, sourceAsset, provider, generationId, videoUrl }) {
+  const asset = upsertProjectAsset({
+    id: getClipVideoAsset(clip) ? clip.videoAssetId : undefined,
+    type: "video",
+    name: `${template?.name || "Video"} · clip ${Number(clip.order || 0) + 1}`,
+    url: videoUrl,
+    source: "generated",
+    provider: provider || "luma",
+    prompt: clip.motionPrompt,
+    metadata: {
+      transient: true,
+      lifecycle: "ai_transient",
+      allowedUse: ["final-video", "presentation"],
+      videoProductionId: production.id,
+      clipId: clip.id,
+      baseImageItemId: clip.baseImageItemId,
+      sourceImageAssetId: sourceAsset?.id || clip.sourceImageAssetId,
+      lumaGenerationId: generationId || clip.lumaGenerationId,
+      resolvedFromStatus: true,
+      resolvedAt: new Date().toISOString(),
+      stage: "video-clip",
+    },
+  });
+  clip.videoAssetId = asset.id;
+  return asset;
+}
+
+function delayClipPoll(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForClipCompletion(production, clip, generationId, { index = 0, total = 1 } = {}) {
+  const template = getVideoTemplates().find((item) => item.id === production.templateId) || getSelectedVideoTemplate();
+  const sourceAsset = getAssetById(clip.sourceImageAssetId);
+  const maxAttempts = state.server.mockAi && !state.server.lumaReady ? 10 : 80;
+  const intervalMs = state.server.mockAi && !state.server.lumaReady ? 900 : 5000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    state.projectUi.videoClipProgress = {
+      done: index,
+      total,
+      label: `Esperando clip ${index + 1} (${attempt}/${maxAttempts})...`,
+    };
+    clip.status = "generating";
+    clip.updatedAt = new Date().toISOString();
+    renderAll();
+
+    const response = await apiRequest(`/api/video/luma/status/${encodeURIComponent(generationId)}`);
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.message || `Status ${response.status}`);
+
+    clip.lumaGenerationId = payload.generationId || generationId;
+    const status = String(payload.status || "").toLowerCase();
+    if (payload.videoUrl) {
+      const asset = upsertClipVideoAsset({
+        production,
+        clip,
+        template,
+        sourceAsset,
+        provider: payload.provider || "luma",
+        generationId,
+        videoUrl: payload.videoUrl,
+      });
+      clip.status = "ready";
+      clip.error = "";
+      clip.updatedAt = new Date().toISOString();
+      addProjectMessage({ role: "system", type: "job_status", content: `Clip ${Number(clip.order || 0) + 1} listo para revision.`, assetIds: [asset.id], jobId: production.id });
+      return { completed: true, assetId: asset.id };
+    }
+
+    if (["failed", "failure", "error"].includes(status)) {
+      clip.status = "failed";
+      clip.error = payload.failureReason || "Luma marco el clip como fallido.";
+      clip.updatedAt = new Date().toISOString();
+      return { completed: false, failed: true };
+    }
+
+    await delayClipPoll(intervalMs);
+  }
+
+  clip.status = "failed";
+  clip.error = "Tiempo de espera agotado consultando el estado del clip.";
+  clip.updatedAt = new Date().toISOString();
+  return { completed: false, failed: true };
+}
+
+function pollClipLumaStatus(productionId, clipId, generationId) {
+  if (!generationId) return;
+  const production = safeArray(state.project.videoProductions).find((item) => item.id === productionId);
+  const clip = safeArray(production?.clips).find((item) => item.id === clipId);
+  if (!production || !clip || ["ready", "approved", "failed"].includes(clip.status)) return;
+  waitForClipCompletion(production, clip, generationId, {
+    index: Math.max(0, Number(clip.order || 0)),
+    total: Math.max(safeArray(production.clips).length, 1),
+  }).finally(() => {
+    state.projectUi.videoClipProgress = null;
+    renderAll();
+    scheduleProjectAutosave("video-clip-poll");
+  });
+}
+
+function findClipItem(clipId) {
+  const production = getActiveVideoProduction();
+  const clip = safeArray(production?.clips).find((item) => item.id === clipId);
+  return { production, clip };
+}
+
+async function handleClipAction(clipId, action) {
+  const { production, clip } = findClipItem(clipId);
+  if (!production || !clip) return;
+  if (action === "approve") {
+    if (!isClipReadyForReview(clip)) {
+      clip.status = clip.lumaGenerationId ? "generating" : "pending";
+      clip.updatedAt = new Date().toISOString();
+      toast("El clip aun no tiene video generado. No se puede aprobar hasta que Luma o mock devuelva un asset usable.", "warn");
+      renderAll();
+      scheduleProjectAutosave("video-clip-approve-blocked");
+      return;
+    }
+    clip.status = "approved";
+    clip.updatedAt = new Date().toISOString();
+    const approvedCount = production.clips.filter((item) => item.status === "approved").length;
+    console.info("[VideoProduction] clips approved:", approvedCount);
+    addProjectMessage({ role: "system", type: "job_status", content: `Se aprobo el clip ${Number(clip.order || 0) + 1}.`, assetIds: [clip.videoAssetId].filter(Boolean), jobId: production.id });
+    renderAll();
+    scheduleProjectAutosave("video-clip-approve");
+    return;
+  }
+  if (action === "prompt") {
+    await openVideoPromptViewer(`Prompt · Clip ${Number(clip.order || 0) + 1}`, clip.motionPrompt || "Sin prompt registrado.");
+    return;
+  }
+  if (action === "compare") {
+    const asset = getAssetById(clip.sourceImageAssetId);
+    if (asset?.url) window.open(asset.url, "_blank", "noopener");
+    return;
+  }
+  if (action === "feedback") {
+    const feedback = await openVideoTextModal({
+      title: "Feedback para este clip",
+      description: "Indica que debe cambiar el movimiento sin modificar la arquitectura ni inventar elementos.",
+      label: "Cambio solicitado",
+      placeholder: "Ejemplo: movimiento mas lento, transicion suave, sin deformar paredes ni agregar carros.",
+      value: "Manten la arquitectura estable, suaviza el movimiento y no agregues elementos nuevos.",
+      confirmLabel: "Aplicar cambios",
+    });
+    if (!feedback || !feedback.trim()) return;
+    regenerateClipItem(production, clip, feedback.trim());
+    return;
+  }
+  if (action === "regenerate") {
+    regenerateClipItem(production, clip, "");
+  }
+}
+
+async function regenerateClipItem(production, clip, feedback = "") {
+  if (feedback) {
+    clip.feedbackHistory.push(createFeedbackItem({ targetType: "clip", targetId: clip.id, message: feedback }));
+    clip.status = "changes_requested";
+  }
+  if (!state.server.lumaReady && !state.server.mockAi) {
+    toast(LUMA_NOT_CONFIGURED_MESSAGE, "warn");
+    return;
+  }
+  state.generation.busy = true;
+  state.generation.stage = `Regenerando clip ${Number(clip.order || 0) + 1}...`;
+  state.projectUi.videoClipProgress = {
+    done: Math.max(Number(clip.order || 0), 0),
+    total: Math.max(safeArray(production.clips).length, 1),
+    label: `Regenerando clip ${Number(clip.order || 0) + 1}...`,
+  };
+  renderAll();
+  try {
+    const result = await generateSingleClip(production, clip, feedback);
+    if (!isClipReadyForReview(clip) && result?.generationId) {
+      await waitForClipCompletion(production, clip, result.generationId, {
+        index: Math.max(Number(clip.order || 0), 0),
+        total: Math.max(safeArray(production.clips).length, 1),
+      });
+    }
+    addProjectMessage({
+      role: "system",
+      type: "job_status",
+      content: feedback ? `El usuario solicito cambios en el clip ${Number(clip.order || 0) + 1}.` : `Regenerado el clip ${Number(clip.order || 0) + 1}.`,
+      assetIds: clip.videoAssetId ? [clip.videoAssetId] : [],
+      jobId: production.id,
+    });
+  } catch (error) {
+    clip.status = "failed";
+    clip.error = error.message || "No se pudo regenerar este clip.";
+  } finally {
+    clip.updatedAt = new Date().toISOString();
+    state.projectUi.videoClipProgress = null;
+    state.generation.busy = false;
+    state.generation.stage = "";
+    renderAll();
+    scheduleProjectAutosave("video-clip-feedback");
+  }
+}
+
+function buildFinalCompositionPrompt(production, approvedClips) {
+  const template = getVideoTemplates().find((item) => item.id === production.templateId) || getSelectedVideoTemplate();
+  return [
+    `Final video composition for ${template?.name || "Video arquitectonico"}.`,
+    `Clip order: ${approvedClips.map((clip) => Number(clip.order || 0) + 1).join(", ")}.`,
+    `Transitions: ${approvedClips.map((clip) => clip.transitionOut || "cross dissolve").join(", ")}.`,
+    strictArchitecturalFidelityInstructions(createVideoProductionSettings(production.settings || {})),
+  ].join("\n");
+}
+
+function handleComposeFinalVideo() {
+  const production = getActiveVideoProduction();
+  if (!production) {
+    toast("Primero crea una produccion de video.", "warn");
+    return;
+  }
+  const approvedClips = safeArray(production.clips)
+    .filter(isClipApprovedForFinal)
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  if (!approvedClips.length) {
+    toast("Aprueba al menos un clip antes de componer el video final.", "warn");
+    return;
+  }
+  const firstVideoAsset = getAssetById(approvedClips[0].videoAssetId);
+  if (!firstVideoAsset?.url) {
+    toast("No encuentro video usable en los clips aprobados.", "warn");
+    return;
+  }
+  production.status = "composing_final_video";
+  renderAll();
+  const finalAsset = upsertProjectAsset({
+    id: production.finalVideoAssetId || undefined,
+    type: "video",
+    name: `Video final · ${getVideoTemplates().find((item) => item.id === production.templateId)?.name || "RENDEAI"}`,
+    url: firstVideoAsset.url,
+    source: "generated",
+    provider: firstVideoAsset.provider || "manual",
+    prompt: buildFinalCompositionPrompt(production, approvedClips),
+    metadata: {
+      videoProductionId: production.id,
+      orderedClipAssetIds: approvedClips.map((clip) => clip.videoAssetId),
+      compositionStatus: approvedClips.length > 1 ? "fallback_sequence" : "single_clip",
+      ffmpegAvailable: false,
+      stage: "final-video",
+    },
+  });
+  production.finalVideoAssetId = finalAsset.id;
+  production.status = "completed";
+  production.updatedAt = new Date().toISOString();
+  console.info("[VideoProduction] final composition status:", production.status);
+  addProjectMessage({
+    role: "assistant",
+    type: "video_result",
+    content: approvedClips.length > 1
+      ? "Video final guardado como asset. En esta fase se usa fallback de secuencia porque la composicion FFmpeg local aun no esta disponible."
+      : "Video final compuesto y guardado como asset del proyecto.",
+    assetIds: [finalAsset.id],
+    jobId: production.id,
+    metadata: { videoProductionId: production.id },
+  });
+  renderAll();
+  scheduleProjectAutosave("video-final");
+}
+
+function validateVisualProfile(profile) {
+  const allowedFonts = ["Cormorant Garamond", "Playfair Display", "Fraunces", "Libre Baskerville", "Inter", "Manrope", "Satoshi", "Inter Tight", "system sans"];
+  const candidate = { ...DEFAULT_VISUAL_PROFILE, ...(profile || {}) };
+  candidate.palette = { ...DEFAULT_VISUAL_PROFILE.palette, ...(profile?.palette || {}) };
+  Object.keys(DEFAULT_VISUAL_PROFILE.palette).forEach((key) => {
+    if (!/^#[0-9a-f]{6}$/i.test(String(candidate.palette[key] || ""))) candidate.palette[key] = DEFAULT_VISUAL_PROFILE.palette[key];
+  });
+  candidate.typography = { ...DEFAULT_VISUAL_PROFILE.typography, ...(profile?.typography || {}) };
+  if (!allowedFonts.includes(candidate.typography.heading)) candidate.typography.heading = DEFAULT_VISUAL_PROFILE.typography.heading;
+  if (!allowedFonts.includes(candidate.typography.ui)) candidate.typography.ui = DEFAULT_VISUAL_PROFILE.typography.ui;
+  candidate.radius = { ...DEFAULT_VISUAL_PROFILE.radius, ...(profile?.radius || {}) };
+  candidate.density = ["compact", "comfortable", "spacious"].includes(candidate.density) ? candidate.density : "comfortable";
+  candidate.decorationLevel = ["none", "low", "medium"].includes(candidate.decorationLevel) ? candidate.decorationLevel : "low";
+  return candidate;
+}
+
+function applyVisualProfile(profile) {
+  const safeProfile = validateVisualProfile(profile);
+  const root = document.documentElement;
+  Object.entries(safeProfile.palette).forEach(([key, value]) => {
+    root.style.setProperty(`--vp-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, value);
+  });
+  root.style.setProperty("--font-display", `"${safeProfile.typography.heading}", "Cormorant Garamond", serif`);
+  root.style.setProperty("--font-ui", `"${safeProfile.typography.ui}", "Inter Tight", system-ui, sans-serif`);
+  state.project.settings.visualProfile = safeProfile;
+  saveJson("renderai-visual-profile-v1", safeProfile);
+  renderAll();
+}
+
+function resetVisualProfile() {
+  applyVisualProfile(DEFAULT_VISUAL_PROFILE);
+}
+
+async function generateVisualProfileFromPrompt() {
+  const prompt = state.projectUi.visualProfilePrompt.trim();
+  if (!prompt) {
+    toast("Escribe un prompt visual primero.", "warn");
+    return;
+  }
+  let profile = null;
+  if (state.server.analysisReady) {
+    try {
+      const response = await apiRequest("/api/visual-profile/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const payload = await response.json();
+      if (response.ok && payload.ok && payload.profile) profile = payload.profile;
+    } catch {}
+  }
+  if (!profile) {
+    profile = {
+      ...DEFAULT_VISUAL_PROFILE,
+      name: "Perfil visual generado",
+      mood: ["minimalista", "arquitectonico", "premium"],
+    };
+  }
+  applyVisualProfile(profile);
+  toast("Perfil visual aplicado.", "ok");
+}
+
+function buildRenderJobs(selectedImages, settings = {}) {
+  const images = safeArray(selectedImages);
+  const variationsPerImage = Math.max(1, Number(settings.variationsPerImage || 1));
+  const jobs = [];
+  images.forEach((image) => {
+    for (let index = 1; index <= variationsPerImage; index += 1) {
+      jobs.push({
+        jobId: cryptoRandom(),
+        projectId: state.projects.activeId,
+        sourceImageId: image.id,
+        variationIndex: index,
+        prompt: settings.prompt || "",
+        settings: { ...settings },
+        status: "queued",
+        outputAssetId: "",
+        error: "",
+      });
+    }
+  });
+  console.info("[RenderQueue] selectedImages:", images.length);
+  console.info("[RenderQueue] variationsPerImage:", variationsPerImage);
+  console.info("[RenderQueue] totalJobs:", jobs.length);
+  return jobs;
+}
+
+function openProjectDb() {
+  if (!window.indexedDB) return Promise.resolve(null);
+  if (projectDbPromise) return projectDbPromise;
+  projectDbPromise = new Promise((resolve) => {
+    const request = indexedDB.open(PROJECT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      const store = db.objectStoreNames.contains(PROJECT_DB_STORE)
+        ? request.transaction.objectStore(PROJECT_DB_STORE)
+        : db.createObjectStore(PROJECT_DB_STORE, { keyPath: "id" });
+      if (!store.indexNames.contains("user")) store.createIndex("user", "user", { unique: false });
+      if (!store.indexNames.contains("updatedAt")) store.createIndex("updatedAt", "updatedAt", { unique: false });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+  return projectDbPromise;
+}
+
+function projectFallbackKey(username = state.session?.username || "anon") {
+  return `renderai-project-memory-fallback-${username}`;
+}
+
+async function readUserProjectRecords(username = state.session?.username || "") {
+  if (!username) return [];
+  const db = await openProjectDb();
+  if (!db) return safeArray(loadJson(projectFallbackKey(username), [])).map((record) => normalizeProjectRecord(record));
+  return new Promise((resolve) => {
+    const tx = db.transaction(PROJECT_DB_STORE, "readonly");
+    const store = tx.objectStore(PROJECT_DB_STORE);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const records = safeArray(request.result)
+        .filter((record) => record.user === username)
+        .map((record) => normalizeProjectRecord(record))
+        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      resolve(records);
+    };
+    request.onerror = () => resolve([]);
+  });
+}
+
+async function putProjectRecord(record) {
+  const db = await openProjectDb();
+  if (!db) {
+    const key = projectFallbackKey(record.user);
+    const list = safeArray(loadJson(key, [])).filter((item) => item.id !== record.id);
+    saveJson(key, [record, ...list].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))));
+    return record;
+  }
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PROJECT_DB_STORE, "readwrite");
+    tx.objectStore(PROJECT_DB_STORE).put(record);
+    tx.oncomplete = () => resolve(record);
+    tx.onerror = () => reject(tx.error || new Error("No se pudo guardar el proyecto."));
+  });
+}
+
+async function deleteProjectRecord(projectId) {
+  const username = state.session?.username || "";
+  if (!projectId || !username) return;
+  const db = await openProjectDb();
+  if (!db) {
+    const key = projectFallbackKey(username);
+    saveJson(key, safeArray(loadJson(key, [])).filter((item) => item.id !== projectId));
+    return;
+  }
+  await new Promise((resolve) => {
+    const tx = db.transaction(PROJECT_DB_STORE, "readwrite");
+    tx.objectStore(PROJECT_DB_STORE).delete(projectId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
+}
+
+function cloneProjectValue(value, fallback) {
+  try {
+    return JSON.parse(JSON.stringify(value ?? fallback));
+  } catch {
+    return fallback;
+  }
+}
+
+function hasProjectContent() {
+  return Boolean(
+    state.flow
+    || state.images.length
+    || state.documents.length
+    || String(state.settings.contextBrief || "").trim()
+    || state.result.render
+    || state.result.deck
+    || state.project.messages.length
+    || state.project.assets.length
+    || state.projects.activeId
+  );
+}
+
+function deriveProjectMemoryTitle() {
+  const briefLine = String(state.settings.contextBrief || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (briefLine) return briefLine.slice(0, 72);
+  const main = getMainImage();
+  if (main?.name) return main.name.replace(/\.[^.]+$/, "").slice(0, 72);
+  const flowLabel = state.flow === "pdf" ? "Presentacion" : state.flow === "render" ? "Render" : "Proyecto";
+  return `${flowLabel} ${new Date().toLocaleDateString("es-CR")}`;
+}
+
+function summarizeProjectRecord(record) {
+  const counts = getProjectAssetCounts(record);
+  const imageCount = counts.images;
+  const sectionCount = safeArray(record.settings?.pdfSections).length;
+  const localTemplate = record.settings?.localTemplate || "";
+  const style = record.settings?.brochureStyle || "";
+  return [
+    record.goal || (record.flow === "pdf" ? "Presentacion" : record.flow === "render" ? "Render" : "Conversacional"),
+    imageCount ? `${imageCount} imagenes` : "sin imagenes",
+    counts.videos ? `${counts.videos} videos` : "",
+    counts.documents ? `${counts.documents} docs` : "",
+    sectionCount && record.flow === "pdf" ? `${sectionCount} secciones` : "",
+    localTemplate ? "PPT local" : style ? "estilo guardado" : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function buildCurrentProjectRecord(existing = null) {
+  const now = new Date().toISOString();
+  const id = state.projects.activeId || existing?.id || cryptoRandom();
+  syncProjectAssetsFromLegacy();
+  const title = existing?.title || deriveProjectMemoryTitle();
+  return normalizeProjectRecord({
+    id,
+    user: state.session?.username || "anon",
+    userName: state.session?.name || "",
+    title,
+    name: existing?.name || title,
+    description: existing?.description || state.settings.contextBrief || "",
+    projectType: existing?.projectType || state.settings.projectType || "",
+    goal: existing?.goal || "",
+    flow: state.flow || "",
+    currentStep: state.currentStep || 1,
+    mainId: state.mainId || "",
+    images: cloneProjectValue(state.images, []),
+    documents: cloneProjectValue(state.documents, []),
+    settings: cloneProjectValue(state.settings, { ...DEFAULT_SETTINGS }),
+    pdfBuilder: cloneProjectValue(state.pdfBuilder, {}),
+    result: cloneProjectValue(state.result, { render: null, renderHistory: [], deck: null }),
+    promptText: state.promptText || "",
+    messages: cloneProjectValue(state.project.messages, []),
+    assets: cloneProjectValue(state.project.assets, []),
+    generationJobs: cloneProjectValue(state.project.generationJobs, []),
+    videoJobs: cloneProjectValue(state.project.videoJobs, []),
+    videoProductions: cloneProjectValue(state.project.videoProductions, []),
+    coverAssetId: state.project.coverAssetId || "",
+    projectSettings: cloneProjectValue(state.project.settings, {}),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    version: PROJECT_SCHEMA_VERSION,
+  });
+}
+
+async function hydrateProjectsForSession() {
+  if (!state.session) {
+    renderProjectSidebar();
+    return;
+  }
+  state.projects.busy = true;
+  state.projects.status = "Cargando memoria";
+  renderProjectSidebar();
+  const records = await readUserProjectRecords(state.session.username);
+  state.projects.items = records;
+  state.projects.busy = false;
+  state.projects.status = records.length ? `${records.length} proyecto${records.length === 1 ? "" : "s"}` : "Sin proyectos";
+  state.projects.activeId = "";
+  renderProjectSidebar();
+}
+
+async function refreshProjectList() {
+  if (!state.session) return;
+  state.projects.items = await readUserProjectRecords(state.session.username);
+  state.projects.status = state.projects.items.length ? `${state.projects.items.length} proyecto${state.projects.items.length === 1 ? "" : "s"}` : "Sin proyectos";
+  renderProjectSidebar();
+}
+
+function scheduleProjectAutosave(reason = "change") {
+  if (projectRestoreInProgress || !state.session || !hasProjectContent()) return;
+  if (projectAutosaveTimer) clearTimeout(projectAutosaveTimer);
+  projectAutosaveTimer = window.setTimeout(() => {
+    saveCurrentProject({ silent: true, reason }).catch(() => {
+      state.projects.status = "Error al guardar";
+      renderProjectSidebar();
+    });
+  }, 900);
+}
+
+async function saveCurrentProject(options = {}) {
+  if (!state.session) return null;
+  if (!hasProjectContent()) {
+    if (!options.silent) toast("Primero crea o abre un flujo para guardar un proyecto.", "warn");
+    return null;
+  }
+  state.projects.busy = true;
+  state.projects.status = options.silent ? "Autoguardando" : "Guardando";
+  renderProjectSidebar();
+  const existing = state.projects.items.find((item) => item.id === state.projects.activeId);
+  const record = buildCurrentProjectRecord(existing);
+  await putProjectRecord(record);
+  state.projects.activeId = record.id;
+  saveJson(STORAGE_KEYS.lastProject, { user: record.user, id: record.id });
+  state.projects.busy = false;
+  state.projects.status = "Guardado";
+  await refreshProjectList();
+  if (!options.silent) toast("Proyecto guardado en memoria del usuario.", "ok");
+  return record;
+}
+
+function applyProjectRecord(record, options = {}) {
+  if (!record) return;
+  record = normalizeProjectRecord(record);
+  projectRestoreInProgress = true;
+  state.projects.activeId = record.id;
+  state.flow = record.flow || null;
+  state.currentStep = clamp(Number(record.currentStep || 1), 1, state.flow === "pdf" ? PDF_STEPS.length : RENDER_STEPS.length);
+  state.images = cloneProjectValue(record.images, []);
+  state.documents = cloneProjectValue(record.documents, []);
+  state.mainId = record.mainId || state.images[0]?.id || null;
+  state.settings = { ...cloneProjectValue(DEFAULT_SETTINGS, {}), ...cloneProjectValue(record.settings, {}) };
+  state.pdfBuilder = { ...createPdfBuilderState(), ...cloneProjectValue(record.pdfBuilder, {}) };
+  state.result = cloneProjectValue(record.result, { render: null, renderHistory: [], deck: null });
+  state.promptText = record.promptText || "";
+  state.project.messages = cloneProjectValue(record.messages, []);
+  state.project.assets = cloneProjectValue(record.assets, []);
+  state.project.generationJobs = cloneProjectValue(record.generationJobs, []);
+  state.project.videoJobs = cloneProjectValue(record.videoJobs, []);
+  state.project.videoProductions = cloneProjectValue(record.videoProductions, []);
+  state.project.coverAssetId = record.coverAssetId || "";
+  state.project.settings = cloneProjectValue(record.projectSettings || {}, {});
+  state.projectUi.tab = options.keepTab && state.projectUi.tab !== "legacy" ? (state.projectUi.tab || "assets") : "assets";
+  compactProjectSelections();
+  state.projectUi.videoGeneratedAssetIds = [];
+  state.projectUi.videoApprovedAssetIds = [];
+  state.projectUi.activeVideoProductionId = state.project.videoProductions[0]?.id || "";
+  syncVideoUiFromProduction(getActiveVideoProduction());
+  if (state.project.settings.visualProfile) applyVisualProfile(state.project.settings.visualProfile);
+  saveJson(STORAGE_KEYS.settings, state.settings);
+  saveJson(STORAGE_KEYS.lastProject, { user: record.user, id: record.id });
+  projectRestoreInProgress = false;
+  if (elements.contextBrief) elements.contextBrief.value = state.settings.contextBrief || "";
+  if (elements.changeRequest) elements.changeRequest.value = state.settings.changeRequest || "";
+  if (elements.introContextBrief) elements.introContextBrief.value = state.settings.contextBrief || "";
+  renderAll();
+  if (!options.silent) toast(`Proyecto abierto: ${record.title}.`, "ok");
+  if (!options.keepStatus) state.projects.status = "Proyecto abierto";
+}
+
+function createNewProjectFromSidebar() {
+  resetFlowRuntime({ preserveAssets: false, clearFlow: true });
+  state.settings = cloneProjectValue(DEFAULT_SETTINGS, {});
+  state.pdfBuilder = createPdfBuilderState();
+  state.projects.activeId = "";
+  state.projects.status = "Nuevo proyecto";
+  saveJson(STORAGE_KEYS.lastProject, null);
+  persistSettings();
+  renderAll();
+  toast("Nuevo proyecto listo.", "ok");
+}
+
+async function duplicateProjectRecord(projectId) {
+  const record = state.projects.items.find((item) => item.id === projectId);
+  if (!record || !state.session) return;
+  const copy = {
+    ...cloneProjectValue(record, {}),
+    id: cryptoRandom(),
+    title: `${record.title || "Proyecto"} copia`,
+    user: state.session.username,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await putProjectRecord(copy);
+  await refreshProjectList();
+  toast("Proyecto duplicado.", "ok");
+}
+
+async function renameProjectRecord(projectId) {
+  const record = state.projects.items.find((item) => item.id === projectId);
+  if (!record) return;
+  const nextTitle = window.prompt("Nuevo nombre del proyecto", record.title || record.name || "");
+  if (!nextTitle || !nextTitle.trim()) return;
+  const updated = normalizeProjectRecord({
+    ...record,
+    title: nextTitle.trim(),
+    name: nextTitle.trim(),
+    updatedAt: new Date().toISOString(),
+  });
+  await putProjectRecord(updated);
+  await refreshProjectList();
+  if (state.projects.activeId === projectId) applyProjectRecord(updated, { silent: true, keepStatus: true, keepTab: true });
+  toast("Proyecto renombrado.", "ok");
+}
+
+async function removeProjectFromMemory(projectId) {
+  const record = state.projects.items.find((item) => item.id === projectId);
+  const title = record?.title || "este proyecto";
+  if (!window.confirm(`Eliminar "${title}" de la memoria local? Esta accion no afecta tus archivos originales.`)) {
+    return;
+  }
+  await deleteProjectRecord(projectId);
+  if (state.projects.activeId === projectId) state.projects.activeId = "";
+  await refreshProjectList();
+  toast("Proyecto eliminado de la memoria.", "ok");
+}
+
+function renderProjectSidebar() {
+  if (!elements.projectSidebar) return;
+  const loggedIn = Boolean(state.session);
+  elements.projectSidebar.classList.toggle("hidden", !loggedIn);
+  if (!loggedIn) return;
+  if (elements.projectSearchInput && elements.projectSearchInput.value !== state.projects.search) {
+    elements.projectSearchInput.value = state.projects.search || "";
+  }
+  const query = String(state.projects.search || "").trim().toLowerCase();
+  const items = safeArray(state.projects.items).filter((record) => {
+    if (!query) return true;
+    return [
+      record.title,
+      record.flow,
+      record.settings?.contextBrief,
+      record.settings?.localTemplate,
+      record.settings?.brochureStyle,
+      summarizeProjectRecord(record),
+    ].join(" ").toLowerCase().includes(query);
+  });
+  elements.projectMemoryStatus.textContent = state.projects.busy ? state.projects.status : state.projects.status || "Memoria";
+  elements.projectList.innerHTML = items.length
+    ? items.map((record) => {
+      const active = record.id === state.projects.activeId;
+      const cover = getProjectCoverAsset(record);
+      return `
+        <article class="project-memory-card ${active ? "active" : ""}">
+          <button type="button" class="project-memory-main" data-project-open="${escapeHtml(record.id)}">
+            <span class="project-memory-thumb ${record.flow === "pdf" ? "is-pdf" : "is-render"}">
+              ${cover?.url ? `<img src="${cover.url}" alt="" loading="lazy" />` : ""}
+            </span>
+            <span class="project-memory-copy">
+              <strong>${escapeHtml(record.title || "Proyecto sin titulo")}</strong>
+              <small>${escapeHtml(summarizeProjectRecord(record))}</small>
+              <em>${escapeHtml(formatDate(record.updatedAt || record.createdAt || ""))}</em>
+            </span>
+          </button>
+          <div class="project-memory-actions">
+            <button type="button" class="button button-ghost" data-project-duplicate="${escapeHtml(record.id)}">Duplicar</button>
+            <button type="button" class="button button-ghost" data-project-delete="${escapeHtml(record.id)}">Eliminar</button>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : `<div class="empty-state compact-empty"><strong>No hay proyectos</strong><span>Guarda el actual para que quede en la memoria de ${escapeHtml(state.session.name)}.</span></div>`;
+
+  const active = state.projects.items.find((record) => record.id === state.projects.activeId);
+  elements.projectMemoryMeta.innerHTML = active
+    ? `<strong>${escapeHtml(active.title)}</strong><span>${escapeHtml(summarizeProjectRecord(active))}</span><small>Actualizado ${escapeHtml(formatDate(active.updatedAt || active.createdAt || ""))}</small>`
+    : `<strong>Sin proyecto activo</strong><span>Guarda o abre un proyecto para reutilizar brief, imagenes, plantilla, capas y decisiones.</span>`;
+}
+
 function persistSettings() {
   saveJson(STORAGE_KEYS.settings, state.settings);
+  scheduleProjectAutosave("settings");
 }
 
 function loadScript(src) {
@@ -11159,7 +16114,7 @@ function slugify(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "") || "renderai";
+    .replace(/(^-|-$)/g, "") || "proyecto";
 }
 
 function clamp(value, min, max) {
@@ -11172,4 +16127,1910 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/* ============================================================
+   RENDERAI CANVA-GRADE EDITOR — Fase 2
+   EditorStore · LayersPanel · CanvasStage
+   FloatingToolbar · Inspector · SheetPicker · Editor
+   ============================================================ */
+
+function editorUid() {
+  return "rl-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// ── EditorStore ─────────────────────────────────────────────
+class EditorStore {
+  constructor() {
+    this.state = {
+      slides: [],
+      activeSlideId: null,
+      activeLayerIds: [],
+      zoom: 1,
+      tool: "select",
+      clipboard: null,
+    };
+    this._hist = [];
+    this._fut = [];
+    this._subs = [];
+  }
+
+  subscribe(fn) {
+    this._subs.push(fn);
+    return () => { this._subs = this._subs.filter((f) => f !== fn); };
+  }
+
+  _emit() {
+    for (const fn of this._subs) {
+      try { fn(this.state); } catch (_) {}
+    }
+  }
+
+  _snap() { return JSON.parse(JSON.stringify(this.state)); }
+
+  _push() {
+    this._hist.push(this._snap());
+    if (this._hist.length > 50) this._hist.shift();
+    this._fut = [];
+  }
+
+  undo() {
+    if (!this._hist.length) return;
+    this._fut.push(this._snap());
+    this.state = this._hist.pop();
+    this._emit();
+  }
+
+  redo() {
+    if (!this._fut.length) return;
+    this._hist.push(this._snap());
+    this.state = this._fut.pop();
+    this._emit();
+  }
+
+  dispatch(action) {
+    const { type, payload } = action;
+    this._push();
+    const getSlide = () => this.state.slides.find((s) => s.id === this.state.activeSlideId);
+
+    switch (type) {
+      case "SET_TOOL":
+        this.state = { ...this.state, tool: payload };
+        break;
+      case "SET_ZOOM":
+        this.state = { ...this.state, zoom: Math.min(4, Math.max(0.25, payload)) };
+        break;
+      case "SET_ACTIVE_LAYER":
+        this.state = { ...this.state, activeLayerIds: payload ? [payload] : [] };
+        break;
+      case "TOGGLE_LAYER_SELECT": {
+        const ids = this.state.activeLayerIds;
+        this.state = { ...this.state, activeLayerIds: ids.includes(payload) ? ids.filter((id) => id !== payload) : [...ids, payload] };
+        break;
+      }
+      case "ADD_LAYER": {
+        const s = getSlide(); if (!s) break;
+        const layer = {
+          id: editorUid(), visible: true, locked: false,
+          x: 40, y: 40, width: 200, height: 120,
+          rotation: 0, opacity: 1, zIndex: s.layers.length,
+          name: "Capa", type: "shape", content: { bg: "#cccccc" },
+          ...payload,
+        };
+        s.layers = [...s.layers, layer];
+        this.state = { ...this.state, activeLayerIds: [layer.id] };
+        break;
+      }
+      case "UPDATE_LAYER": {
+        const s = getSlide(); if (!s) break;
+        s.layers = s.layers.map((l) => l.id === payload.id ? { ...l, ...payload.changes } : l);
+        break;
+      }
+      case "DELETE_LAYER": {
+        const s = getSlide(); if (!s) break;
+        s.layers = s.layers.filter((l) => l.id !== payload);
+        this.state = { ...this.state, activeLayerIds: this.state.activeLayerIds.filter((id) => id !== payload) };
+        break;
+      }
+      case "REORDER_LAYERS": {
+        const s = getSlide(); if (!s) break;
+        s.layers = payload;
+        break;
+      }
+      case "DUPLICATE_LAYER": {
+        const s = getSlide(); if (!s) break;
+        const src = s.layers.find((l) => l.id === payload); if (!src) break;
+        const copy = JSON.parse(JSON.stringify(src));
+        copy.id = editorUid();
+        copy.name = src.name + " (copia)";
+        copy.x = (src.x || 0) + 16;
+        copy.y = (src.y || 0) + 16;
+        const idx = s.layers.indexOf(src);
+        s.layers = [...s.layers.slice(0, idx + 1), copy, ...s.layers.slice(idx + 1)];
+        this.state = { ...this.state, activeLayerIds: [copy.id] };
+        break;
+      }
+      case "SET_ACTIVE_SLIDE":
+        this.state = { ...this.state, activeSlideId: payload, activeLayerIds: [] };
+        break;
+      case "LOAD_SLIDES":
+        this.state = { ...this.state, slides: payload, activeSlideId: payload[0] ? payload[0].id : null, activeLayerIds: [] };
+        break;
+      case "SET_CLIPBOARD":
+        this.state = { ...this.state, clipboard: payload };
+        break;
+      case "PASTE_LAYER": {
+        if (!this.state.clipboard) break;
+        const s = getSlide(); if (!s) break;
+        const copy = JSON.parse(JSON.stringify(this.state.clipboard));
+        copy.id = editorUid();
+        copy.x = (copy.x || 0) + 16;
+        copy.y = (copy.y || 0) + 16;
+        s.layers = [...s.layers, copy];
+        this.state = { ...this.state, activeLayerIds: [copy.id] };
+        break;
+      }
+      default:
+        break;
+    }
+    this._emit();
+  }
+
+  getSlide() { return this.state.slides.find((s) => s.id === this.state.activeSlideId) || null; }
+  getLayers() { return (this.getSlide() || {}).layers || []; }
+  getActiveLayers() { return this.getLayers().filter((l) => this.state.activeLayerIds.includes(l.id)); }
+  getActiveLayer() { return this.getActiveLayers()[0] || null; }
+}
+
+// ── LayersPanel ─────────────────────────────────────────────
+class LayersPanel {
+  constructor(store, el) {
+    this.store = store;
+    this.el = el;
+    this._dragId = null;
+    this._unsub = null;
+  }
+
+  mount() {
+    this.el.innerHTML = `
+      <div class="layers-header">
+        <strong>Capas</strong>
+        <button class="button button-ghost" style="padding:4px 10px;font-size:12px" data-lp-add-text>+ Texto</button>
+      </div>
+      <div class="layers-list" id="_edLayersList"></div>
+      <div class="layers-footer">
+        <button class="button button-secondary" style="flex:1;font-size:12px;padding:7px" data-lp-add-shape>+ Forma</button>
+        <button class="button button-secondary" style="flex:1;font-size:12px;padding:7px" data-lp-add-img>+ Imagen</button>
+      </div>`;
+    this._listEl = this.el.querySelector("#_edLayersList");
+    this._unsub = this.store.subscribe(() => this.render());
+    this._bindHeader();
+    this.render();
+  }
+
+  render() {
+    const layers = [...this.store.getLayers()].reverse();
+    const activeIds = this.store.state.activeLayerIds;
+    this._listEl.innerHTML = layers.length ? layers.map((layer) => {
+      const isActive = activeIds.includes(layer.id);
+      const thumbContent = layer.type === "image" && layer.content && layer.content.src
+        ? `<img src="${layer.content.src}" alt="" style="width:100%;height:100%;object-fit:cover" />`
+        : layer.type === "text"
+          ? `<span style="font-size:11px;color:#888;font-family:serif;font-style:italic">T</span>`
+          : `<span style="font-size:14px;color:#888">▭</span>`;
+      const eyeSvg = layer.visible
+        ? `<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="8" rx="6" ry="5" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/></svg>`
+        : `<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2l12 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M6.5 6.7A3 3 0 019.3 9.5M4.2 4.4C3 5.3 2 6.5 1.5 8c1 3 4 5 6.5 5a7 7 0 003.1-.75M8 3C11.5 3 14 5 14.5 8a7.6 7.6 0 01-1.2 2.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+      const lockSvg = layer.locked
+        ? `<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 7V5a3 3 0 016 0v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`
+        : `<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M5 7V5a3 3 0 016 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+      return `
+        <div class="layer-item${isActive ? " active" : ""}" data-layer-id="${layer.id}" draggable="true">
+          <div class="layer-thumb">${thumbContent}</div>
+          <div class="layer-meta">
+            <span class="layer-name" title="${escapeHtml(layer.name)}">${escapeHtml(layer.name)}</span>
+            <span class="layer-type">${layer.type}</span>
+          </div>
+          <div class="layer-actions">
+            <button class="layer-action-btn" data-lp-eye="${layer.id}" title="${layer.visible ? "Ocultar" : "Mostrar"}">${eyeSvg}</button>
+            <button class="layer-action-btn" data-lp-lock="${layer.id}" title="${layer.locked ? "Desbloquear" : "Bloquear"}">${lockSvg}</button>
+            <button class="layer-action-btn" data-lp-del="${layer.id}" title="Eliminar" style="color:var(--danger)">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4l.5 8M11 4l-.5 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>`;
+    }).join("") : `<div style="padding:20px 12px;text-align:center;font-size:12px;color:var(--text-faint);font-style:italic;font-family:var(--font-editorial)">Sin capas aún</div>`;
+
+    // Bind list events
+    this._listEl.querySelectorAll("[data-layer-id]").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        if (e.target.closest("[data-lp-eye],[data-lp-lock],[data-lp-del]")) return;
+        const id = el.dataset.layerId;
+        this.store.dispatch({ type: e.ctrlKey || e.metaKey ? "TOGGLE_LAYER_SELECT" : "SET_ACTIVE_LAYER", payload: id });
+      });
+      el.addEventListener("dblclick", (e) => {
+        if (e.target.closest("[data-lp-eye],[data-lp-lock],[data-lp-del]")) return;
+        const current = el.querySelector(".layer-name").textContent;
+        const next = prompt("Nombre de la capa:", current);
+        if (next && next !== current) {
+          this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: el.dataset.layerId, changes: { name: next } } });
+        }
+      });
+      el.addEventListener("dragstart", () => { this._dragId = el.dataset.layerId; el.style.opacity = "0.45"; });
+      el.addEventListener("dragend", () => { el.style.opacity = ""; this._dragId = null; });
+      el.addEventListener("dragover", (e) => { e.preventDefault(); el.style.outline = "1px solid var(--accent)"; });
+      el.addEventListener("dragleave", () => { el.style.outline = ""; });
+      el.addEventListener("drop", (e) => {
+        e.preventDefault(); el.style.outline = "";
+        if (!this._dragId || this._dragId === el.dataset.layerId) return;
+        const all = this.store.getLayers().slice();
+        const src = all.find((l) => l.id === this._dragId);
+        const dst = all.find((l) => l.id === el.dataset.layerId);
+        if (!src || !dst) return;
+        all.splice(all.indexOf(src), 1);
+        all.splice(all.indexOf(dst), 0, src);
+        this.store.dispatch({ type: "REORDER_LAYERS", payload: all });
+      });
+    });
+    this._listEl.querySelectorAll("[data-lp-eye]").forEach((btn) => btn.addEventListener("click", () => {
+      const layer = this.store.getLayers().find((l) => l.id === btn.dataset.lpEye);
+      if (layer) this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { visible: !layer.visible } } });
+    }));
+    this._listEl.querySelectorAll("[data-lp-lock]").forEach((btn) => btn.addEventListener("click", () => {
+      const layer = this.store.getLayers().find((l) => l.id === btn.dataset.lpLock);
+      if (layer) this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { locked: !layer.locked } } });
+    }));
+    this._listEl.querySelectorAll("[data-lp-del]").forEach((btn) => btn.addEventListener("click", () => {
+      this.store.dispatch({ type: "DELETE_LAYER", payload: btn.dataset.lpDel });
+    }));
+  }
+
+  _bindHeader() {
+    this.el.querySelector("[data-lp-add-text]").addEventListener("click", () => {
+      this.store.dispatch({ type: "ADD_LAYER", payload: { type: "text", name: "Texto", x: 60, y: 60, width: 300, height: 64, content: { text: "Escribe aquí", fontSize: 24, fontWeight: 500, color: "#111111", align: "left", fontFamily: "Inter Tight, sans-serif" } } });
+    });
+    this.el.querySelector("[data-lp-add-shape]").addEventListener("click", () => {
+      this.store.dispatch({ type: "ADD_LAYER", payload: { type: "shape", name: "Forma", x: 80, y: 80, width: 200, height: 120, content: { bg: "#d97757", borderRadius: 0 } } });
+    });
+    this.el.querySelector("[data-lp-add-img]").addEventListener("click", () => {
+      this.store.dispatch({ type: "ADD_LAYER", payload: { type: "image", name: "Imagen", x: 60, y: 60, width: 320, height: 200, content: { src: "" } } });
+    });
+  }
+
+  unmount() { if (this._unsub) this._unsub(); }
+}
+
+// ── CanvasStage ──────────────────────────────────────────────
+class CanvasStage {
+  constructor(store, viewportEl, slideEl) {
+    this.store = store;
+    this.viewportEl = viewportEl;
+    this.slideEl = slideEl;
+    this._unsub = null;
+    this._drag = null;
+    this._resize = null;
+  }
+
+  mount() {
+    this._unsub = this.store.subscribe(() => this._render());
+    this.slideEl.addEventListener("mousedown", (e) => {
+      if (e.target === this.slideEl) this.store.dispatch({ type: "SET_ACTIVE_LAYER", payload: null });
+    });
+    document.addEventListener("mousemove", (e) => this._onMove(e));
+    document.addEventListener("mouseup", () => this._onUp());
+    this.viewportEl.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      this.store.dispatch({ type: "SET_ZOOM", payload: this.store.state.zoom + (e.deltaY > 0 ? -0.1 : 0.1) });
+    }, { passive: false });
+    this._render();
+  }
+
+  _render() {
+    const slide = this.store.getSlide();
+    const zoom = this.store.state.zoom;
+    const activeIds = this.store.state.activeLayerIds;
+
+    this.slideEl.style.transform = `scale(${zoom})`;
+    this.slideEl.querySelectorAll(".canvas-slot").forEach((el) => el.remove());
+    if (!slide) return;
+
+    const sorted = [...slide.layers].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+    for (const layer of sorted) {
+      if (!layer.visible) continue;
+      const slot = document.createElement("div");
+      slot.className = "canvas-slot" + (activeIds.includes(layer.id) ? " selected" : "");
+      slot.dataset.layerId = layer.id;
+      slot.style.cssText = `position:absolute;left:${layer.x}px;top:${layer.y}px;width:${layer.width}px;height:${layer.height}px;opacity:${layer.opacity != null ? layer.opacity : 1};transform:rotate(${layer.rotation || 0}deg);pointer-events:${layer.locked ? "none" : "auto"};`;
+
+      if (layer.type === "image" && layer.content && layer.content.src) {
+        const img = document.createElement("img");
+        img.src = layer.content.src;
+        img.style.cssText = "width:100%;height:100%;object-fit:cover;display:block;";
+        slot.appendChild(img);
+      } else if (layer.type === "text") {
+        const div = document.createElement("div");
+        div.contentEditable = "true";
+        div.style.cssText = `width:100%;height:100%;padding:8px;font-family:${(layer.content && layer.content.fontFamily) || "Inter Tight, sans-serif"};font-size:${(layer.content && layer.content.fontSize) || 24}px;font-weight:${(layer.content && layer.content.fontWeight) || 400};color:${(layer.content && layer.content.color) || "#111111"};text-align:${(layer.content && layer.content.align) || "left"};word-break:break-word;overflow:hidden;cursor:text;outline:none;box-sizing:border-box;`;
+        div.textContent = (layer.content && layer.content.text) || "";
+        div.addEventListener("mousedown", (e) => e.stopPropagation());
+        div.addEventListener("input", () => {
+          this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { text: div.textContent }) } } });
+        });
+        slot.appendChild(div);
+      } else {
+        slot.style.background = (layer.content && layer.content.bg) || "#e0e0e0";
+        if (layer.content && layer.content.borderRadius) slot.style.borderRadius = layer.content.borderRadius + "px";
+      }
+
+      // 8 resize handles when selected and unlocked
+      if (activeIds.includes(layer.id) && !layer.locked) {
+        ["nw", "n", "ne", "w", "e", "sw", "s", "se"].forEach((dir) => {
+          const h = document.createElement("div");
+          h.className = "resize-handle " + dir;
+          h.dataset.dir = dir;
+          h.addEventListener("mousedown", (e) => { e.stopPropagation(); e.preventDefault(); this._startResize(e, layer, dir); });
+          slot.appendChild(h);
+        });
+      }
+
+      slot.addEventListener("mousedown", (e) => {
+        if (e.target.classList.contains("resize-handle")) return;
+        e.stopPropagation();
+        if (layer.locked) return;
+        this.store.dispatch({ type: e.ctrlKey || e.metaKey ? "TOGGLE_LAYER_SELECT" : "SET_ACTIVE_LAYER", payload: layer.id });
+        if (this.store.state.tool === "select") this._startDrag(e, layer);
+      });
+
+      this.slideEl.appendChild(slot);
+    }
+  }
+
+  _startDrag(e, layer) {
+    this._drag = { id: layer.id, sx: e.clientX, sy: e.clientY, ox: layer.x, oy: layer.y, w: layer.width, h: layer.height, zoom: this.store.state.zoom };
+    e.preventDefault();
+  }
+
+  _startResize(e, layer, dir) {
+    this._resize = { id: layer.id, dir, sx: e.clientX, sy: e.clientY, ox: layer.x, oy: layer.y, ow: layer.width, oh: layer.height, zoom: this.store.state.zoom };
+    e.preventDefault();
+  }
+
+  _onMove(e) {
+    if (this._drag) {
+      const { id, sx, sy, ox, oy, w, h, zoom } = this._drag;
+      const dx = (e.clientX - sx) / zoom;
+      const dy = (e.clientY - sy) / zoom;
+      let nx = ox + dx;
+      let ny = oy + dy;
+      const SW = this.slideEl.offsetWidth;
+      const SH = this.slideEl.offsetHeight;
+      const TOL = 6;
+      if (Math.abs(nx) < TOL) nx = 0;
+      else if (Math.abs(nx + w - SW) < TOL) nx = SW - w;
+      else if (Math.abs(nx + w / 2 - SW / 2) < TOL) nx = SW / 2 - w / 2;
+      if (Math.abs(ny) < TOL) ny = 0;
+      else if (Math.abs(ny + h - SH) < TOL) ny = SH - h;
+      else if (Math.abs(ny + h / 2 - SH / 2) < TOL) ny = SH / 2 - h / 2;
+      this.store.dispatch({ type: "UPDATE_LAYER", payload: { id, changes: { x: Math.round(nx), y: Math.round(ny) } } });
+    } else if (this._resize) {
+      const { id, dir, sx, sy, ox, oy, ow, oh, zoom } = this._resize;
+      const dx = (e.clientX - sx) / zoom;
+      const dy = (e.clientY - sy) / zoom;
+      const changes = {};
+      const ar = oh / ow;
+      if (dir.includes("e")) changes.width = Math.max(20, ow + dx);
+      if (dir.includes("s")) changes.height = Math.max(20, oh + dy);
+      if (dir.includes("w")) { changes.width = Math.max(20, ow - dx); changes.x = ox + ow - changes.width; }
+      if (dir.includes("n")) { changes.height = Math.max(20, oh - dy); changes.y = oy + oh - changes.height; }
+      if (e.shiftKey) {
+        if (changes.width != null && changes.height == null) changes.height = changes.width * ar;
+        else if (changes.height != null && changes.width == null) changes.width = changes.height / ar;
+      }
+      this.store.dispatch({ type: "UPDATE_LAYER", payload: { id, changes } });
+    }
+  }
+
+  _onUp() { this._drag = null; this._resize = null; }
+  unmount() { if (this._unsub) this._unsub(); }
+}
+
+// ── FloatingToolbar ──────────────────────────────────────────
+class FloatingToolbar {
+  constructor(store, el) {
+    this.store = store;
+    this.el = el;
+    this._unsub = null;
+  }
+
+  mount() {
+    this._unsub = this.store.subscribe(() => this.render());
+    this.render();
+  }
+
+  render() {
+    const { tool, zoom } = this.store.state;
+    const layer = this.store.getActiveLayer();
+    const isText = layer && layer.type === "text";
+    const isImage = layer && layer.type === "image";
+    const fontOpts = ["Inter Tight", "Fraunces", "Space Grotesk", "Cormorant Garamond", "DM Serif Display", "Playfair Display", "Manrope"];
+
+    this.el.innerHTML = `
+      <div class="toolbar-group">
+        <button class="tool-btn${tool === "select" ? " active" : ""}" data-tb-tool="select" title="Seleccionar (V)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2l9 6-4 1-2 5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="tool-btn${tool === "pan" ? " active" : ""}" data-tb-tool="pan" title="Mover (H)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12M5 5l-3 3 3 3M11 5l3 3-3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="toolbar-group">
+        <button class="tool-btn" data-tb-add="text" title="Texto (T)" style="font-family:var(--font-editorial);font-style:italic;font-size:14px">T</button>
+        <button class="tool-btn" data-tb-add="shape" title="Rectángulo (R)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="12" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+        <button class="tool-btn" data-tb-add="image" title="Imagen (I)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M2 10l3-3 3 3 2-2 4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      ${isText ? `<div class="toolbar-group">
+        <select class="tool-select" data-tb-font style="min-width:140px">${fontOpts.map((f) => `<option value="${f}"${(layer.content && layer.content.fontFamily) === f ? " selected" : ""}>${f}</option>`).join("")}</select>
+        <input class="tool-select" data-tb-size type="number" value="${(layer.content && layer.content.fontSize) || 24}" min="8" max="200" style="width:54px;min-width:0" />
+        <input class="tool-color" data-tb-color type="color" value="${(layer.content && layer.content.color) || "#111111"}" title="Color texto" />
+        <button class="tool-btn${(layer.content && layer.content.align) === "left" ? " active" : ""}" data-tb-align="left">≡</button>
+        <button class="tool-btn${(layer.content && layer.content.align) === "center" ? " active" : ""}" data-tb-align="center">≡</button>
+        <button class="tool-btn${(layer.content && layer.content.align) === "right" ? " active" : ""}" data-tb-align="right">≡</button>
+      </div>` : ""}
+      ${layer ? `<div class="toolbar-group">
+        <button class="tool-btn" data-tb-front title="Al frente">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M4 7l4-4 4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="tool-btn" data-tb-back title="Al fondo">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4 9l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="tool-btn" data-tb-dup title="Duplicar (Ctrl+D)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M3 11V3h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tool-btn" data-tb-del title="Eliminar (Del)" style="color:var(--danger)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2h4v2M5 4l.5 8M11 4l-.5 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>` : ""}
+      <div class="toolbar-group" style="margin-left:auto">
+        <button class="tool-btn" data-tb-zoom="-" title="Alejar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5l3 3M5 7h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <span class="zoom-value" style="font-family:var(--font-mono);font-size:12px;min-width:44px;text-align:center">${Math.round(zoom * 100)}%</span>
+        <button class="tool-btn" data-tb-zoom="+" title="Acercar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5l3 3M7 5v4M5 7h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tool-btn" data-tb-zoom="fit" title="Ajustar a pantalla">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>`;
+
+    this._bindToolbar(layer);
+  }
+
+  _bindToolbar(layer) {
+    this.el.querySelectorAll("[data-tb-tool]").forEach((btn) => btn.addEventListener("click", () => {
+      this.store.dispatch({ type: "SET_TOOL", payload: btn.dataset.tbTool });
+    }));
+    this.el.querySelectorAll("[data-tb-add]").forEach((btn) => btn.addEventListener("click", () => {
+      const type = btn.dataset.tbAdd;
+      if (type === "text") {
+        this.store.dispatch({ type: "ADD_LAYER", payload: { type: "text", name: "Texto", x: 60, y: 60, width: 300, height: 64, content: { text: "Nuevo texto", fontSize: 24, fontWeight: 500, color: "#111111", align: "left", fontFamily: "Inter Tight, sans-serif" } } });
+      } else if (type === "shape") {
+        this.store.dispatch({ type: "ADD_LAYER", payload: { type: "shape", name: "Forma", x: 80, y: 80, width: 200, height: 120, content: { bg: "#d97757", borderRadius: 0 } } });
+      } else if (type === "image") {
+        this.store.dispatch({ type: "ADD_LAYER", payload: { type: "image", name: "Imagen", x: 60, y: 60, width: 320, height: 200, content: { src: "" } } });
+      }
+    }));
+    if (layer) {
+      const font = this.el.querySelector("[data-tb-font]");
+      if (font) font.addEventListener("change", (e) => this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { fontFamily: e.target.value }) } } }));
+      const size = this.el.querySelector("[data-tb-size]");
+      if (size) size.addEventListener("input", (e) => this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { fontSize: parseInt(e.target.value, 10) || 16 }) } } }));
+      const col = this.el.querySelector("[data-tb-color]");
+      if (col) col.addEventListener("input", (e) => this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { color: e.target.value }) } } }));
+      this.el.querySelectorAll("[data-tb-align]").forEach((btn) => btn.addEventListener("click", () => this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { align: btn.dataset.tbAlign }) } } })));
+      const front = this.el.querySelector("[data-tb-front]");
+      if (front) front.addEventListener("click", () => {
+        const maxZ = Math.max(0, ...this.store.getLayers().map((l) => l.zIndex || 0));
+        this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { zIndex: maxZ + 1 } } });
+      });
+      const back = this.el.querySelector("[data-tb-back]");
+      if (back) back.addEventListener("click", () => {
+        const minZ = Math.min(0, ...this.store.getLayers().map((l) => l.zIndex || 0));
+        this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { zIndex: minZ - 1 } } });
+      });
+      const dup = this.el.querySelector("[data-tb-dup]");
+      if (dup) dup.addEventListener("click", () => this.store.dispatch({ type: "DUPLICATE_LAYER", payload: layer.id }));
+      const del = this.el.querySelector("[data-tb-del]");
+      if (del) del.addEventListener("click", () => this.store.dispatch({ type: "DELETE_LAYER", payload: layer.id }));
+    }
+    this.el.querySelectorAll("[data-tb-zoom]").forEach((btn) => btn.addEventListener("click", () => {
+      const v = btn.dataset.tbZoom;
+      if (v === "+") this.store.dispatch({ type: "SET_ZOOM", payload: this.store.state.zoom + 0.1 });
+      else if (v === "-") this.store.dispatch({ type: "SET_ZOOM", payload: this.store.state.zoom - 0.1 });
+      else this.store.dispatch({ type: "SET_ZOOM", payload: 1 });
+    }));
+  }
+
+  unmount() { if (this._unsub) this._unsub(); }
+}
+
+// ── Inspector ────────────────────────────────────────────────
+class Inspector {
+  constructor(store, el) {
+    this.store = store;
+    this.el = el;
+    this._unsub = null;
+  }
+
+  mount() {
+    this._unsub = this.store.subscribe(() => this.render());
+    this.render();
+  }
+
+  render() {
+    const layer = this.store.getActiveLayer();
+    if (!layer) {
+      this.el.innerHTML = `<div style="padding:28px 16px;text-align:center;font-size:13px;color:var(--text-faint);font-family:var(--font-editorial);font-style:italic;line-height:1.6">Selecciona una capa<br/>para editar propiedades</div>`;
+      return;
+    }
+    this.el.innerHTML = `
+      <div class="inspector-section">
+        <div class="inspector-section-title">Posición y tamaño</div>
+        <div class="inspector-row">
+          <label>X<input type="number" data-ip="x" value="${Math.round(layer.x || 0)}" /></label>
+          <label>Y<input type="number" data-ip="y" value="${Math.round(layer.y || 0)}" /></label>
+        </div>
+        <div class="inspector-row">
+          <label>W<input type="number" data-ip="width" value="${Math.round(layer.width || 100)}" min="1" /></label>
+          <label>H<input type="number" data-ip="height" value="${Math.round(layer.height || 100)}" min="1" /></label>
+        </div>
+        <div class="inspector-row">
+          <label>Rot°<input type="number" data-ip="rotation" value="${layer.rotation || 0}" /></label>
+          <label>Opac%<input type="number" data-ip-pct="opacity" value="${Math.round((layer.opacity != null ? layer.opacity : 1) * 100)}" min="0" max="100" /></label>
+        </div>
+      </div>
+      ${layer.type === "shape" ? `
+      <div class="inspector-section">
+        <div class="inspector-section-title">Apariencia</div>
+        <div class="inspector-row">
+          <label>Color<input type="color" data-ic="bg" value="${(layer.content && layer.content.bg) || "#cccccc"}" /></label>
+          <label>Radio<input type="number" data-ic="borderRadius" value="${(layer.content && layer.content.borderRadius) || 0}" min="0" /></label>
+        </div>
+      </div>` : ""}
+      ${layer.type === "text" ? `
+      <div class="inspector-section">
+        <div class="inspector-section-title">Tipografía</div>
+        <div class="inspector-row">
+          <label>Color<input type="color" data-ic="color" value="${(layer.content && layer.content.color) || "#111111"}" /></label>
+          <label>Tamaño<input type="number" data-ic="fontSize" value="${(layer.content && layer.content.fontSize) || 24}" min="6" /></label>
+        </div>
+        <div class="inspector-row">
+          <label>Peso<select data-ic="fontWeight">${[300, 400, 500, 600, 700, 800].map((w) => `<option value="${w}"${(layer.content && layer.content.fontWeight) == w ? " selected" : ""}>${w}</option>`).join("")}</select></label>
+          <label>Alineación<select data-ic="align">${["left", "center", "right", "justify"].map((a) => `<option value="${a}"${(layer.content && layer.content.align) === a ? " selected" : ""}>${a}</option>`).join("")}</select></label>
+        </div>
+      </div>` : ""}
+      ${layer.type === "image" ? `
+      <div class="inspector-section">
+        <div class="inspector-section-title">Imagen</div>
+        <select data-img-src style="width:100%;padding:8px 10px;font-size:12px;background:var(--ink-300);border:1px solid var(--border);border-radius:var(--r-md);margin-top:4px">
+          <option value="">Sin imagen</option>
+          ${(typeof state !== "undefined" && state.images ? state.images : []).map((img) => `<option value="${escapeHtml(img.url)}"${(layer.content && layer.content.src) === img.url ? " selected" : ""}>${escapeHtml(img.name)}</option>`).join("")}
+        </select>
+      </div>` : ""}`;
+
+    this._bindInspector(layer);
+  }
+
+  _bindInspector(layer) {
+    this.el.querySelectorAll("[data-ip]").forEach((inp) => inp.addEventListener("input", () => {
+      this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { [inp.dataset.ip]: parseFloat(inp.value) || 0 } } });
+    }));
+    this.el.querySelectorAll("[data-ip-pct]").forEach((inp) => inp.addEventListener("input", () => {
+      this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { [inp.dataset.ipPct]: (parseFloat(inp.value) || 0) / 100 } } });
+    }));
+    this.el.querySelectorAll("[data-ic]").forEach((inp) => inp.addEventListener("input", () => {
+      const val = inp.type === "number" ? parseFloat(inp.value) || 0 : inp.value;
+      this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { [inp.dataset.ic]: val }) } } });
+    }));
+    const imgSel = this.el.querySelector("[data-img-src]");
+    if (imgSel) imgSel.addEventListener("change", (e) => {
+      this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { content: Object.assign({}, layer.content, { src: e.target.value }) } } });
+    });
+  }
+
+  unmount() { if (this._unsub) this._unsub(); }
+}
+
+// ── SheetPicker ──────────────────────────────────────────────
+class SheetPicker {
+  constructor(store, el, slideEl) {
+    this.store = store;
+    this.el = el;
+    this.slideEl = slideEl;
+    this._active = "16/9";
+  }
+
+  mount() {
+    const presets = [
+      { label: "PPT 16:9", aspect: "16/9", cls: "" },
+      { label: "Brochure 4:3", aspect: "4/3", cls: "aspect-brochure" },
+      { label: "Vertical 3:4", aspect: "3/4", cls: "aspect-portrait" },
+    ];
+    this.el.innerHTML = presets.map((p) => `
+      <div class="sheet-card${this._active === p.aspect ? " active" : ""}" data-sp-aspect="${p.aspect}" data-sp-cls="${p.cls}">
+        <div class="sheet-preview" style="aspect-ratio:${p.aspect.replace("/", "/")}"></div>
+        <div class="sheet-label">${p.label}</div>
+      </div>`).join("");
+    this.el.querySelectorAll("[data-sp-aspect]").forEach((card) => card.addEventListener("click", () => {
+      this._active = card.dataset.spAspect;
+      if (this.slideEl) {
+        this.slideEl.className = "canvas-slide" + (card.dataset.spCls ? " " + card.dataset.spCls : "");
+      }
+      this.el.querySelectorAll("[data-sp-aspect]").forEach((c) => c.classList.toggle("active", c.dataset.spAspect === this._active));
+    }));
+  }
+}
+
+// ── Editor (orchestrator) ────────────────────────────────────
+class Editor {
+  constructor(mountEl) {
+    this.mountEl = mountEl;
+    this.store = new EditorStore();
+    this._parts = [];
+    this._keyFn = null;
+  }
+
+  mount(slideData) {
+    const slides = Array.isArray(slideData) ? slideData : (slideData ? [slideData] : []);
+    const normalized = slides.map((slide) => ({
+      id: slide.id || editorUid(),
+      aspectRatio: slide.aspectRatio || "16/9",
+      layers: Array.isArray(slide.layers) && slide.layers.length ? slide.layers : this._autoLayers(slide),
+    }));
+
+    this.mountEl.innerHTML = `
+      <aside class="editor-layers-panel" id="_edLP" style="grid-column:1"></aside>
+      <div class="editor-canvas-area" id="_edCA" style="grid-column:2;display:flex;flex-direction:column">
+        <div class="sheet-picker" id="_edSP" style="padding:var(--s-2) var(--s-3)"></div>
+        <div class="editor-toolbar" id="_edTB"></div>
+        <div class="canvas-viewport" id="_edVP">
+          <div class="canvas-slide" id="_edSL" style="position:relative"></div>
+        </div>
+        <div class="canvas-footer" id="_edFT">
+          <span class="eyebrow">Editor por capas</span>
+          <div class="zoom-controls">
+            <span class="zoom-value" id="_edZL" style="font-family:var(--font-mono);font-size:12px">100%</span>
+          </div>
+        </div>
+      </div>
+      <aside class="editor-inspector" id="_edIS" style="grid-column:3">
+        <div class="inspector-header"><strong>Propiedades</strong></div>
+        <div class="inspector-body" id="_edIB"></div>
+      </aside>`;
+
+    const lpEl = this.mountEl.querySelector("#_edLP");
+    const tbEl = this.mountEl.querySelector("#_edTB");
+    const vpEl = this.mountEl.querySelector("#_edVP");
+    const slEl = this.mountEl.querySelector("#_edSL");
+    const ibEl = this.mountEl.querySelector("#_edIB");
+    const spEl = this.mountEl.querySelector("#_edSP");
+    const zlEl = this.mountEl.querySelector("#_edZL");
+
+    const layers = new LayersPanel(this.store, lpEl);
+    const stage = new CanvasStage(this.store, vpEl, slEl);
+    const toolbar = new FloatingToolbar(this.store, tbEl);
+    const inspector = new Inspector(this.store, ibEl);
+    const sheets = new SheetPicker(this.store, spEl, slEl);
+
+    layers.mount(); stage.mount(); toolbar.mount(); inspector.mount(); sheets.mount();
+
+    this.store.subscribe((s) => { if (zlEl) zlEl.textContent = Math.round(s.zoom * 100) + "%"; });
+
+    this._parts = [layers, stage, toolbar, inspector];
+    this.store.dispatch({ type: "LOAD_SLIDES", payload: normalized });
+
+    this._keyFn = (e) => this._onKey(e);
+    document.addEventListener("keydown", this._keyFn);
+  }
+
+  _autoLayers(slide) {
+    const layers = [];
+    const imgSrc = slide.composedPageDataUrl || slide.imageDataUrl || "";
+    if (imgSrc) {
+      layers.push({ id: editorUid(), name: "Fondo imagen", type: "image", visible: true, locked: false, x: 0, y: 0, width: 900, height: 506, rotation: 0, opacity: 1, zIndex: 0, content: { src: imgSrc } });
+    } else {
+      layers.push({ id: editorUid(), name: "Fondo", type: "shape", visible: true, locked: false, x: 0, y: 0, width: 900, height: 506, rotation: 0, opacity: 1, zIndex: 0, content: { bg: "#fafaf7", borderRadius: 0 } });
+    }
+    if (slide.title) {
+      layers.push({ id: editorUid(), name: "Título", type: "text", visible: true, locked: false, x: 40, y: 40, width: 520, height: 80, rotation: 0, opacity: 1, zIndex: 1, content: { text: slide.title, fontSize: 34, fontWeight: 500, color: "#0A0A0C", align: "left", fontFamily: "Fraunces, serif" } });
+    }
+    if (slide.subtitle) {
+      layers.push({ id: editorUid(), name: "Subtítulo", type: "text", visible: true, locked: false, x: 40, y: 132, width: 520, height: 50, rotation: 0, opacity: 1, zIndex: 2, content: { text: slide.subtitle, fontSize: 18, fontWeight: 400, color: "#44423D", align: "left", fontFamily: "Inter Tight, sans-serif" } });
+    }
+    return layers;
+  }
+
+  _onKey(e) {
+    const active = document.activeElement;
+    const inInput = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT" || active.contentEditable === "true");
+    if (inInput) return;
+    const layer = this.store.getActiveLayer();
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); this.store.undo(); return; }
+      if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); this.store.redo(); return; }
+      if (e.key === "d" && layer) { e.preventDefault(); this.store.dispatch({ type: "DUPLICATE_LAYER", payload: layer.id }); return; }
+      if (e.key === "c" && layer) { e.preventDefault(); this.store.dispatch({ type: "SET_CLIPBOARD", payload: JSON.parse(JSON.stringify(layer)) }); return; }
+      if (e.key === "v") { e.preventDefault(); this.store.dispatch({ type: "PASTE_LAYER" }); return; }
+    }
+    if ((e.key === "Delete" || e.key === "Backspace") && layer) {
+      e.preventDefault(); this.store.dispatch({ type: "DELETE_LAYER", payload: layer.id }); return;
+    }
+    if (e.key === "Escape") { this.store.dispatch({ type: "SET_ACTIVE_LAYER", payload: null }); return; }
+    if (layer && !layer.locked) {
+      const step = e.shiftKey ? 10 : 1;
+      const moves = { ArrowLeft: { x: -step }, ArrowRight: { x: step }, ArrowUp: { y: -step }, ArrowDown: { y: step } };
+      if (moves[e.key]) {
+        e.preventDefault();
+        const delta = moves[e.key];
+        this.store.dispatch({ type: "UPDATE_LAYER", payload: { id: layer.id, changes: { x: (layer.x || 0) + (delta.x || 0), y: (layer.y || 0) + (delta.y || 0) } } });
+      }
+    }
+  }
+
+  export() { return this.store.state.slides; }
+
+  unmount() {
+    if (this._keyFn) document.removeEventListener("keydown", this._keyFn);
+    for (const part of this._parts) { if (part && part.unmount) part.unmount(); }
+    this._parts = [];
+  }
+}
+
+window.RenderAIEditor = Editor;
+
+// ── mountCanvaEditor ─────────────────────────────────────────
+function mountCanvaEditor() {
+  ensurePdfBuilderDefaults();
+  const blueprints = computePdfSlideBlueprints();
+  if (!blueprints.length) {
+    elements.pdfSectionStudio.innerHTML = `<div class="empty-state compact-empty"><strong>Primero define las diapositivas del brochure</strong><span>En el paso 4 escoges cantidad, tipo, orden y amenidades.</span></div>`;
+    return;
+  }
+  // Reuse instance if already mounted on the same element
+  if (window._renderAIEditorInst && window._renderAIEditorInst.mountEl === elements.pdfSectionStudio) return;
+  const analysis = getPdfDeckAnalysis();
+  const slideData = blueprints.map((bp) => {
+    const config = state.settings.pdfSlideConfigs[bp.key] || {};
+    const text = getSlideTextDraft(bp, analysis);
+    const activeImageId = resolveSlideActiveImageId(config);
+    const img = state.images.find((im) => im.id === activeImageId);
+    return {
+      id: bp.key,
+      title: text.title || bp.title,
+      subtitle: text.subtitle || bp.subtitle,
+      imageDataUrl: img ? img.url : "",
+    };
+  });
+  const inst = new Editor(elements.pdfSectionStudio);
+  inst.mount(slideData);
+  window._renderAIEditorInst = inst;
+}
+
+const CREATIVE_EDITOR_SIZE = { width: 900, height: 506 };
+const CREATIVE_EDITOR_FONTS = ["Fraunces", "Cormorant Garamond", "Libre Baskerville", "Georgia", "Manrope", "Albert Sans", "Inter", "Arial"];
+const CREATIVE_EDITOR_PALETTE = ["#FFFFFF", "#FBFAF7", "#F4F1EA", "#D8D5CD", "#181715", "#2A1E16", "#6F4227", "#263423", "#B89A5E"];
+
+function createCreativeEditorId(prefix = "el") {
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  return `${prefix}-${Date.now().toString(36)}-${randomPart}`;
+}
+
+function cloneCreativeEditorValue(value, fallback = {}) {
+  try {
+    return JSON.parse(JSON.stringify(value ?? fallback));
+  } catch {
+    return JSON.parse(JSON.stringify(fallback));
+  }
+}
+
+function numberOr(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function cssUrl(value) {
+  return String(value || "").replace(/"/g, "%22");
+}
+
+function normalizeCreativeElement(element, index = 0) {
+  const type = ["text", "image", "shape"].includes(element?.type) ? element.type : "shape";
+  const style = element?.style || {};
+  return {
+    id: element?.id || createCreativeEditorId(type),
+    name: element?.name || (type === "text" ? "Texto" : type === "image" ? "Imagen" : "Forma"),
+    type,
+    x: clamp(numberOr(element?.x, 80), 0, CREATIVE_EDITOR_SIZE.width),
+    y: clamp(numberOr(element?.y, 80), 0, CREATIVE_EDITOR_SIZE.height),
+    width: clamp(numberOr(element?.width, 220), 20, CREATIVE_EDITOR_SIZE.width),
+    height: clamp(numberOr(element?.height, 90), 20, CREATIVE_EDITOR_SIZE.height),
+    rotation: numberOr(element?.rotation, 0),
+    zIndex: numberOr(element?.zIndex, index + 1),
+    opacity: clamp(numberOr(element?.opacity, 1), 0.05, 1),
+    visible: element?.visible !== false,
+    content: element?.content || (type === "text" ? "Texto editable" : ""),
+    src: element?.src || "",
+    style: {
+      fontFamily: style.fontFamily || (type === "text" ? (state.settings.titleFont || "Fraunces") : "Manrope"),
+      fontSize: numberOr(style.fontSize, type === "text" ? 34 : 16),
+      fontWeight: style.fontWeight || (type === "text" ? "700" : "500"),
+      color: style.color || "#181715",
+      backgroundColor: style.backgroundColor || (type === "shape" ? "#F4F1EA" : "transparent"),
+      borderRadius: numberOr(style.borderRadius, type === "image" ? 22 : 10),
+      textAlign: style.textAlign || "left",
+    },
+  };
+}
+
+function normalizeCreativeSlide(slide, index = 0) {
+  const elements = safeArray(slide?.elements || slide?.layers).map((element, elementIndex) => normalizeCreativeElement(element, elementIndex));
+  return {
+    id: slide?.id || createCreativeEditorId("slide"),
+    name: slide?.name || slide?.title || `Diapositiva ${index + 1}`,
+    sectionId: slide?.sectionId || slide?.key || "",
+    background: slide?.background?.type ? slide.background : { type: "color", value: "#FFFFFF" },
+    elements,
+  };
+}
+
+function getCreativeEditorImages() {
+  return safeArray(state.images).map((image, index) => ({
+    id: image.id || `image-${index}`,
+    name: image.name || image.fileName || `Imagen ${index + 1}`,
+    src: image.url || image.dataUrl || "",
+  })).filter((image) => image.src);
+}
+
+function getCreativeEditorPalette() {
+  return unique([...(state.settings.selectedPalette || []), ...CREATIVE_EDITOR_PALETTE]).slice(0, 10);
+}
+
+function makeCreativeElement(type, overrides = {}) {
+  return normalizeCreativeElement({
+    type,
+    id: createCreativeEditorId(type),
+    name: type === "text" ? "Texto editable" : type === "image" ? "Imagen editable" : "Forma editable",
+    x: type === "text" ? 80 : 110,
+    y: type === "text" ? 72 : 98,
+    width: type === "text" ? 300 : 260,
+    height: type === "text" ? 118 : 160,
+    zIndex: 20,
+    content: type === "text" ? "Nuevo texto" : "",
+    style: {
+      fontFamily: type === "text" ? (state.settings.titleFont || "Fraunces") : "Manrope",
+      fontSize: type === "text" ? 36 : 16,
+      fontWeight: type === "text" ? "700" : "500",
+      color: "#181715",
+      backgroundColor: type === "shape" ? "#F4F1EA" : "transparent",
+      borderRadius: type === "shape" ? 14 : 18,
+      textAlign: "left",
+    },
+    ...overrides,
+  });
+}
+
+function buildCreativeTemplateElements(templateId, seed = {}) {
+  const images = safeArray(seed.images);
+  const palette = safeArray(seed.palette).length ? seed.palette : CREATIVE_EDITOR_PALETTE;
+  const title = seed.title || "Titulo del proyecto";
+  const subtitle = seed.subtitle || "Direccion visual, materialidad y experiencia.";
+  const bullets = safeArray(seed.bullets).length ? seed.bullets : ["Lectura del sitio", "Materiales y atmosfera", "Narrativa de entrega"];
+  const firstImage = images[0]?.src || "";
+  const secondImage = images[1]?.src || firstImage;
+  const thirdImage = images[2]?.src || secondImage;
+
+  if (templateId === "moodboard") {
+    return [
+      makeCreativeElement("shape", { name: "Fondo marfil", x: 0, y: 0, width: 900, height: 506, zIndex: 1, style: { backgroundColor: "#FBFAF7", borderRadius: 0 } }),
+      makeCreativeElement("text", { name: "Etiqueta", x: 54, y: 44, width: 220, height: 24, zIndex: 4, content: "MOODBOARD", style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 12, fontWeight: "800", color: "#263423", textAlign: "left" } }),
+      makeCreativeElement("text", { name: "Titulo", x: 54, y: 88, width: 270, height: 112, zIndex: 5, content: title, style: { fontFamily: state.settings.titleFont || "Fraunces", fontSize: 40, fontWeight: "700", color: "#181715", textAlign: "left" } }),
+      makeCreativeElement("text", { name: "Descripcion", x: 58, y: 220, width: 250, height: 90, zIndex: 5, content: subtitle, style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 17, fontWeight: "500", color: "#5F5A51", textAlign: "left" } }),
+      makeCreativeElement("image", { name: "Referencia 1", x: 350, y: 54, width: 220, height: 172, zIndex: 6, src: firstImage, style: { borderRadius: 22 } }),
+      makeCreativeElement("image", { name: "Referencia 2", x: 596, y: 54, width: 220, height: 172, zIndex: 6, src: secondImage, style: { borderRadius: 22 } }),
+      makeCreativeElement("image", { name: "Referencia 3", x: 350, y: 252, width: 466, height: 170, zIndex: 6, src: thirdImage, style: { borderRadius: 22 } }),
+      ...palette.slice(0, 5).map((color, index) => makeCreativeElement("shape", {
+        name: `Muestra ${index + 1}`,
+        x: 58 + (index * 48),
+        y: 352,
+        width: 32,
+        height: 32,
+        zIndex: 8 + index,
+        style: { backgroundColor: color, borderRadius: 99 },
+      })),
+    ];
+  }
+
+  if (templateId === "technical") {
+    return [
+      makeCreativeElement("shape", { name: "Fondo limpio", x: 0, y: 0, width: 900, height: 506, zIndex: 1, style: { backgroundColor: "#FFFFFF", borderRadius: 0 } }),
+      makeCreativeElement("text", { name: "Etiqueta", x: 54, y: 38, width: 240, height: 24, zIndex: 4, content: "LAMINA TECNICA", style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 12, fontWeight: "800", color: "#263423", textAlign: "left" } }),
+      makeCreativeElement("image", { name: "Plano o render principal", x: 54, y: 82, width: 500, height: 344, zIndex: 5, src: firstImage, style: { borderRadius: 18 } }),
+      makeCreativeElement("text", { name: "Titulo", x: 606, y: 86, width: 230, height: 96, zIndex: 6, content: title, style: { fontFamily: state.settings.titleFont || "Fraunces", fontSize: 34, fontWeight: "700", color: "#181715", textAlign: "left" } }),
+      makeCreativeElement("shape", { name: "Bloque datos", x: 604, y: 206, width: 238, height: 116, zIndex: 4, style: { backgroundColor: "#F4F1EA", borderRadius: 18 } }),
+      makeCreativeElement("text", { name: "Datos", x: 628, y: 224, width: 194, height: 88, zIndex: 7, content: bullets.slice(0, 3).join("\n"), style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 16, fontWeight: "600", color: "#3A2A1D", textAlign: "left" } }),
+      makeCreativeElement("text", { name: "Nota lateral", x: 606, y: 354, width: 236, height: 74, zIndex: 7, content: subtitle, style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 16, fontWeight: "500", color: "#5F5A51", textAlign: "left" } }),
+    ];
+  }
+
+  return [
+    makeCreativeElement("shape", { name: "Fondo blanco", x: 0, y: 0, width: 900, height: 506, zIndex: 1, style: { backgroundColor: "#FFFFFF", borderRadius: 0 } }),
+    makeCreativeElement("shape", { name: "Panel editorial", x: 52, y: 78, width: 310, height: 346, zIndex: 3, style: { backgroundColor: "#FBFAF7", borderRadius: 22 } }),
+    makeCreativeElement("text", { name: "Etiqueta", x: 76, y: 104, width: 200, height: 24, zIndex: 5, content: "PORTADA", style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 12, fontWeight: "800", color: "#263423", textAlign: "left" } }),
+    makeCreativeElement("text", { name: "Titulo", x: 76, y: 148, width: 250, height: 148, zIndex: 6, content: title, style: { fontFamily: state.settings.titleFont || "Fraunces", fontSize: 43, fontWeight: "700", color: "#181715", textAlign: "left" } }),
+    makeCreativeElement("text", { name: "Subtitulo", x: 78, y: 320, width: 238, height: 64, zIndex: 6, content: subtitle, style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 15, fontWeight: "500", color: "#5F5A51", textAlign: "left" } }),
+    makeCreativeElement("image", { name: "Imagen hero", x: 408, y: 58, width: 410, height: 388, zIndex: 5, src: firstImage, style: { borderRadius: 30 } }),
+    makeCreativeElement("shape", { name: "Acento", x: 76, y: 302, width: 74, height: 3, zIndex: 8, style: { backgroundColor: "#B89A5E", borderRadius: 99 } }),
+  ];
+}
+
+function createCreativeSlideFromBlueprint(blueprint, index, analysis) {
+  const config = state.settings.pdfSlideConfigs?.[blueprint.key] || {};
+  const activeImageId = resolveSlideActiveImageId(config);
+  const selectedImages = safeArray(config.imageIds)
+    .map((imageId) => state.images.find((image) => image.id === imageId))
+    .filter(Boolean)
+    .map((image) => ({ id: image.id, name: image.name || image.fileName || "Imagen", src: image.url || image.dataUrl || "" }));
+  const fallbackImage = state.images.find((image) => image.id === activeImageId) || state.images[index % Math.max(1, state.images.length)];
+  const images = selectedImages.length ? selectedImages : (fallbackImage ? [{ id: fallbackImage.id, name: fallbackImage.name || "Imagen", src: fallbackImage.url || fallbackImage.dataUrl || "" }] : []);
+  const text = getSlideTextDraft(blueprint, analysis);
+  const sectionId = blueprint.sectionId || blueprint.key || "";
+  const templateId = index === 0 || sectionId.includes("cover")
+    ? "cover"
+    : ["moodboard", "materials", "pantone", "concept"].some((token) => sectionId.includes(token) || blueprint.visualRole === token)
+      ? "moodboard"
+      : "technical";
+  return normalizeCreativeSlide({
+    id: blueprint.key || createCreativeEditorId("slide"),
+    name: text.title || blueprint.title || `Diapositiva ${index + 1}`,
+    sectionId,
+    background: { type: "color", value: "#FFFFFF" },
+    elements: buildCreativeTemplateElements(templateId, {
+      title: text.title || blueprint.title,
+      subtitle: text.subtitle || blueprint.subtitle,
+      bullets: text.bullets || [],
+      images,
+      palette: getCreativeEditorPalette(),
+    }),
+  }, index);
+}
+
+function buildCreativeEditorInitialState(blueprints, analysis) {
+  const saved = state.settings.deckEditor;
+  if (saved?.slides?.length) {
+    const slides = safeArray(saved.slides).map((slide, index) => normalizeCreativeSlide(slide, index));
+    return {
+      title: saved.title || state.settings.contextBrief || "Presentacion editable",
+      slides,
+      activeSlideId: saved.activeSlideId && slides.some((slide) => slide.id === saved.activeSlideId) ? saved.activeSlideId : slides[0]?.id,
+      activeElementId: saved.activeElementId || slides[0]?.elements?.[0]?.id || null,
+      zoom: clamp(numberOr(saved.zoom, 72), 45, 120),
+    };
+  }
+  const slides = safeArray(blueprints).map((blueprint, index) => createCreativeSlideFromBlueprint(blueprint, index, analysis));
+  return {
+    title: state.settings.contextBrief || "Presentacion editable",
+    slides,
+    activeSlideId: slides[0]?.id || null,
+    activeElementId: slides[0]?.elements?.[0]?.id || null,
+    zoom: 72,
+  };
+}
+
+function buildDeckFromCreativeEditorState(editorState) {
+  const slides = safeArray(editorState?.slides).map((slide, index) => {
+    const textLayers = safeArray(slide.elements).filter((element) => element.type === "text");
+    const imageLayer = safeArray(slide.elements).find((element) => element.type === "image" && element.src);
+    return {
+      key: slide.id || `slide-${index + 1}`,
+      sectionId: slide.sectionId || slide.id || "",
+      tag: textLayers[0]?.content || `Slide ${index + 1}`,
+      title: textLayers[1]?.content || slide.name || `Slide ${index + 1}`,
+      subtitle: textLayers[2]?.content || "",
+      bullets: textLayers.slice(3).map((element) => element.content).filter(Boolean).slice(0, 4),
+      visualRole: "editable",
+      layout: "editable-canvas",
+      imageDataUrl: imageLayer?.src || "",
+      imageWidth: 0,
+      imageHeight: 0,
+      editorSource: "creative-deck-editor",
+      editorCanvas: { width: CREATIVE_EDITOR_SIZE.width, height: CREATIVE_EDITOR_SIZE.height },
+      layerManifest: safeArray(slide.elements).map((element, layerIndex) => ({
+        id: element.id,
+        layer: layerIndex + 1,
+        name: element.name || `Capa ${layerIndex + 1}`,
+        type: element.type,
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height,
+        rotation: element.rotation || 0,
+        zIndex: element.zIndex || layerIndex + 1,
+        opacity: element.opacity ?? 1,
+        visible: element.visible !== false,
+        content: element.content || "",
+        src: element.src || "",
+        style: { ...(element.style || {}) },
+      })),
+    };
+  });
+  return {
+    title: editorState?.title || "Presentacion editable",
+    summary: "Deck editable construido por capas en el editor interno.",
+    slides,
+  };
+}
+
+function syncCreativeDeckEditorState(editorState) {
+  const serialized = cloneCreativeEditorValue(editorState, null);
+  state.settings.deckEditor = serialized;
+  state.result.deck = buildDeckFromCreativeEditorState(serialized);
+  saveJson(STORAGE_KEYS.settings, state.settings);
+  scheduleProjectAutosave("deck-editor");
+}
+
+async function buildDeckFromCreativeEditorExportDeck(editorState) {
+  const serialized = cloneCreativeEditorValue(editorState, null);
+  const deck = buildDeckFromCreativeEditorState(serialized);
+  for (let index = 0; index < deck.slides.length; index += 1) {
+    const slide = serialized.slides[index];
+    try {
+      const dataUrl = await renderCreativeSlideToDataUrl(slide, 1600, 900);
+      deck.slides[index].composedPageDataUrl = dataUrl;
+      deck.slides[index].composedPageWidth = 1600;
+      deck.slides[index].composedPageHeight = 900;
+      deck.slides[index].imageDataUrl = dataUrl;
+      deck.slides[index].imageWidth = 1600;
+      deck.slides[index].imageHeight = 900;
+    } catch {
+      // Keep editable layer export even when a remote image cannot be rasterized.
+    }
+  }
+  return deck;
+}
+
+function loadCreativeImage(src) {
+  return new Promise((resolve, reject) => {
+    if (!src) {
+      reject(new Error("Missing image"));
+      return;
+    }
+    const image = new Image();
+    if (!String(src).startsWith("data:") && !String(src).startsWith("blob:")) {
+      image.crossOrigin = "anonymous";
+    }
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function drawCreativeRoundRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(Math.max(0, radius || 0), width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawCreativeImageCover(ctx, image, x, y, width, height, radius = 0) {
+  const sourceRatio = image.width / image.height;
+  const targetRatio = width / height;
+  let sx = 0;
+  let sy = 0;
+  let sw = image.width;
+  let sh = image.height;
+  if (sourceRatio > targetRatio) {
+    sw = image.height * targetRatio;
+    sx = (image.width - sw) / 2;
+  } else {
+    sh = image.width / targetRatio;
+    sy = (image.height - sh) / 2;
+  }
+  ctx.save();
+  drawCreativeRoundRect(ctx, x, y, width, height, radius);
+  ctx.clip();
+  ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
+  ctx.restore();
+}
+
+function wrapCreativeText(ctx, text, x, y, maxWidth, lineHeight, maxHeight) {
+  const paragraphs = String(text || "").split(/\n+/);
+  let cursorY = y;
+  paragraphs.forEach((paragraph) => {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    let line = "";
+    words.forEach((word) => {
+      const next = line ? `${line} ${word}` : word;
+      if (ctx.measureText(next).width > maxWidth && line) {
+        if (cursorY + lineHeight <= y + maxHeight) ctx.fillText(line, x, cursorY);
+        cursorY += lineHeight;
+        line = word;
+      } else {
+        line = next;
+      }
+    });
+    if (line && cursorY + lineHeight <= y + maxHeight) ctx.fillText(line, x, cursorY);
+    cursorY += lineHeight;
+  });
+}
+
+async function renderCreativeSlideToDataUrl(slide, width = 1600, height = 900) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const scaleX = width / CREATIVE_EDITOR_SIZE.width;
+  const scaleY = height / CREATIVE_EDITOR_SIZE.height;
+  const background = slide.background || { type: "color", value: "#FFFFFF" };
+  ctx.fillStyle = background.type === "color" ? (background.value || "#FFFFFF") : "#FFFFFF";
+  ctx.fillRect(0, 0, width, height);
+  if (background.type === "image" && background.value) {
+    const image = await loadCreativeImage(background.value);
+    drawCreativeImageCover(ctx, image, 0, 0, width, height, 0);
+  }
+  const layers = safeArray(slide.elements).filter((element) => element.visible !== false).sort((a, b) => numberOr(a.zIndex, 0) - numberOr(b.zIndex, 0));
+  for (const element of layers) {
+    const x = element.x * scaleX;
+    const y = element.y * scaleY;
+    const w = element.width * scaleX;
+    const h = element.height * scaleY;
+    ctx.save();
+    ctx.globalAlpha = clamp(numberOr(element.opacity, 1), 0, 1);
+    if (element.rotation) {
+      ctx.translate(x + w / 2, y + h / 2);
+      ctx.rotate((element.rotation * Math.PI) / 180);
+      ctx.translate(-(x + w / 2), -(y + h / 2));
+    }
+    if (element.type === "shape") {
+      ctx.fillStyle = element.style?.backgroundColor || "#F4F1EA";
+      drawCreativeRoundRect(ctx, x, y, w, h, (element.style?.borderRadius || 0) * scaleX);
+      ctx.fill();
+    } else if (element.type === "image" && element.src) {
+      try {
+        const image = await loadCreativeImage(element.src);
+        drawCreativeImageCover(ctx, image, x, y, w, h, (element.style?.borderRadius || 0) * scaleX);
+      } catch {
+        ctx.fillStyle = "#F4F1EA";
+        drawCreativeRoundRect(ctx, x, y, w, h, 14 * scaleX);
+        ctx.fill();
+      }
+    } else if (element.type === "text") {
+      const fontSize = Math.max(8, numberOr(element.style?.fontSize, 24) * scaleY);
+      const fontFamily = element.style?.fontFamily || "Georgia";
+      const fontWeight = element.style?.fontWeight || "500";
+      ctx.fillStyle = element.style?.color || "#181715";
+      ctx.textBaseline = "top";
+      ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}", Arial, sans-serif`;
+      ctx.textAlign = element.style?.textAlign || "left";
+      const textX = ctx.textAlign === "center" ? x + w / 2 : ctx.textAlign === "right" ? x + w : x;
+      wrapCreativeText(ctx, element.content, textX, y, w, fontSize * 1.18, h);
+    }
+    ctx.restore();
+  }
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+class CreativeDeckEditor {
+  constructor(mountEl, initialState) {
+    this.mountEl = mountEl;
+    this.state = cloneCreativeEditorValue(initialState, {});
+    this.history = [cloneCreativeEditorValue(this.state, {})];
+    this.historyIndex = 0;
+    this.dragSession = null;
+    this.importMode = "image";
+    this.boundClick = this.handleClick.bind(this);
+    this.boundInput = this.handleInput.bind(this);
+    this.boundChange = this.handleChange.bind(this);
+    this.boundMouseDown = this.handleMouseDown.bind(this);
+    this.boundMouseMove = this.handleMouseMove.bind(this);
+    this.boundMouseUp = this.handleMouseUp.bind(this);
+  }
+
+  mount() {
+    this.mountEl.innerHTML = `<section class="creative-editor-shell"></section>`;
+    this.root = this.mountEl.querySelector(".creative-editor-shell");
+    this.root.addEventListener("click", this.boundClick);
+    this.root.addEventListener("input", this.boundInput);
+    this.root.addEventListener("change", this.boundChange);
+    this.root.addEventListener("mousedown", this.boundMouseDown);
+    document.addEventListener("mousemove", this.boundMouseMove);
+    document.addEventListener("mouseup", this.boundMouseUp);
+    this.render();
+    this.sync();
+  }
+
+  unmount() {
+    if (this.root) {
+      this.root.removeEventListener("click", this.boundClick);
+      this.root.removeEventListener("input", this.boundInput);
+      this.root.removeEventListener("change", this.boundChange);
+      this.root.removeEventListener("mousedown", this.boundMouseDown);
+    }
+    document.removeEventListener("mousemove", this.boundMouseMove);
+    document.removeEventListener("mouseup", this.boundMouseUp);
+    this.mountEl.innerHTML = "";
+  }
+
+  serialize() {
+    return cloneCreativeEditorValue(this.state, {});
+  }
+
+  activeSlide() {
+    return this.state.slides.find((slide) => slide.id === this.state.activeSlideId) || this.state.slides[0] || null;
+  }
+
+  activeElement() {
+    const slide = this.activeSlide();
+    return slide?.elements.find((element) => element.id === this.state.activeElementId) || null;
+  }
+
+  commit() {
+    const snapshot = cloneCreativeEditorValue(this.state, {});
+    this.history = this.history.slice(0, this.historyIndex + 1);
+    this.history.push(snapshot);
+    this.history = this.history.slice(-40);
+    this.historyIndex = this.history.length - 1;
+  }
+
+  mutate(callback, options = {}) {
+    callback(this.state);
+    if (options.history !== false) this.commit();
+    this.render();
+    this.sync();
+  }
+
+  sync() {
+    syncCreativeDeckEditorState(this.serialize());
+  }
+
+  render() {
+    if (!this.root) return;
+    const slide = this.activeSlide();
+    const element = this.activeElement();
+    const scale = this.state.zoom / 100;
+    this.root.innerHTML = `
+      <header class="creative-editor-head">
+        <div>
+          <span class="eyebrow">Paso 5 · Editor por capas</span>
+          <h3>Canva / PPT editable</h3>
+        </div>
+        <input type="text" class="creative-title-input" data-ed-deck-title value="${escapeHtml(this.state.title || "")}" aria-label="Titulo del deck">
+        <div class="creative-editor-actions">
+          <button type="button" class="button button-secondary" data-ed-action="preview">Vista previa</button>
+          <button type="button" class="button button-secondary" data-ed-action="export-pdf">Exportar PDF</button>
+          <button type="button" class="button button-primary" data-ed-action="export-ppt">Exportar PPTX</button>
+        </div>
+      </header>
+      <section class="creative-editor-workspace">
+        <aside class="creative-slide-rail">
+          <div class="rail-head">
+            <span class="eyebrow">Diapositivas</span>
+            <button type="button" class="icon-button" data-ed-action="add-slide" title="Nueva diapositiva">+</button>
+          </div>
+          <div class="creative-slide-list">
+            ${safeArray(this.state.slides).map((item, index) => this.renderSlideThumb(item, index)).join("")}
+          </div>
+        </aside>
+        <main class="creative-canvas-column">
+          ${this.renderToolbar()}
+          <div class="creative-canvas-stage">
+            <div class="creative-canvas-frame" style="width:${CREATIVE_EDITOR_SIZE.width * scale}px;height:${CREATIVE_EDITOR_SIZE.height * scale}px;">
+              ${slide ? this.renderCanvas(slide, scale) : this.renderEmptyCanvas()}
+            </div>
+          </div>
+          <footer class="creative-editor-footer">
+            <span>${safeArray(slide?.elements).length} capas editables</span>
+            <span>Zoom ${Math.round(this.state.zoom)}%</span>
+          </footer>
+        </main>
+        <aside class="creative-props-panel">
+          ${this.renderInspector(slide, element)}
+          ${this.renderLayers(slide)}
+        </aside>
+      </section>
+      <input type="file" class="hidden" data-ed-file accept="image/*,.pdf">
+    `;
+  }
+
+  renderSlideThumb(slide, index) {
+    const isActive = slide.id === this.state.activeSlideId;
+    const previewImage = safeArray(slide.elements).find((element) => element.type === "image" && element.src)?.src || "";
+    return `
+      <article class="creative-slide-thumb ${isActive ? "active" : ""}" data-ed-slide="${escapeHtml(slide.id)}">
+        <div class="creative-thumb-preview">
+          ${previewImage ? `<img src="${escapeHtml(previewImage)}" alt="">` : `<span>${index + 1}</span>`}
+        </div>
+        <div>
+          <strong>${escapeHtml(slide.name || `Diapositiva ${index + 1}`)}</strong>
+          <small>${slide.elements.length} capas · editable</small>
+        </div>
+        <div class="thumb-actions">
+          <button type="button" data-ed-action="duplicate-slide" data-ed-id="${escapeHtml(slide.id)}">Duplicar</button>
+          <button type="button" data-ed-action="delete-slide" data-ed-id="${escapeHtml(slide.id)}">Eliminar</button>
+        </div>
+      </article>
+    `;
+  }
+
+  renderToolbar() {
+    const palette = getCreativeEditorPalette();
+    return `
+      <div class="creative-editor-toolbar">
+        <div class="tool-group">
+          <button type="button" data-ed-action="undo">Deshacer</button>
+          <button type="button" data-ed-action="redo">Rehacer</button>
+        </div>
+        <div class="tool-group">
+          <button type="button" data-ed-action="add-text">Texto</button>
+          <button type="button" data-ed-action="add-image">Imagen</button>
+          <button type="button" data-ed-action="add-shape">Forma</button>
+        </div>
+        <div class="tool-group template-tools">
+          <button type="button" data-ed-template="cover">Portada hero</button>
+          <button type="button" data-ed-template="moodboard">Moodboard</button>
+          <button type="button" data-ed-template="technical">Lamina tecnica</button>
+        </div>
+        <div class="tool-group reference-tools">
+          <button type="button" data-ed-action="import-image">Subir referencia</button>
+          <input type="url" data-ed-url-input placeholder="URL publica de imagen">
+          <button type="button" data-ed-action="insert-url">Insertar</button>
+          <button type="button" data-ed-action="background-url">Fondo</button>
+        </div>
+        <div class="tool-group color-tools">
+          ${palette.slice(0, 7).map((color) => `<button type="button" class="color-dot" style="background:${escapeHtml(color)}" data-ed-bg="${escapeHtml(color)}" title="${escapeHtml(color)}"></button>`).join("")}
+        </div>
+        <div class="tool-group zoom-tools">
+          <button type="button" data-ed-action="zoom-out">-</button>
+          <button type="button" data-ed-action="zoom-in">+</button>
+        </div>
+      </div>
+    `;
+  }
+
+  renderCanvas(slide, scale) {
+    const background = slide.background || { type: "color", value: "#FFFFFF" };
+    const bgStyle = background.type === "image" && background.value
+      ? `background:url(&quot;${escapeHtml(cssUrl(background.value))}&quot;) center / cover no-repeat;`
+      : `background:${escapeHtml(background.value || "#FFFFFF")};`;
+    const layers = safeArray(slide.elements).filter((element) => element.visible !== false).sort((a, b) => numberOr(a.zIndex, 0) - numberOr(b.zIndex, 0));
+    return `
+      <div class="creative-canvas" style="width:${CREATIVE_EDITOR_SIZE.width}px;height:${CREATIVE_EDITOR_SIZE.height}px;transform:scale(${scale});${bgStyle}">
+        ${layers.map((element) => this.renderCanvasElement(element)).join("")}
+        ${layers.length ? "" : `
+          <div class="creative-empty-canvas">
+            <strong>Selecciona una plantilla o agrega tu primer elemento</strong>
+            <div>
+              <button type="button" data-ed-action="add-text">Agregar texto</button>
+              <button type="button" data-ed-action="add-image">Agregar imagen</button>
+              <button type="button" data-ed-template="cover">Usar plantilla</button>
+            </div>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  renderEmptyCanvas() {
+    return `<div class="creative-empty-canvas"><strong>Crea una diapositiva para comenzar.</strong><button type="button" data-ed-action="add-slide">Nueva diapositiva</button></div>`;
+  }
+
+  renderCanvasElement(element) {
+    const selected = element.id === this.state.activeElementId;
+    const style = [
+      `left:${element.x}px`,
+      `top:${element.y}px`,
+      `width:${element.width}px`,
+      `height:${element.height}px`,
+      `z-index:${element.zIndex}`,
+      `opacity:${element.opacity}`,
+      `transform:rotate(${element.rotation || 0}deg)`,
+    ].join(";");
+    const base = `class="creative-layer creative-layer-${element.type} ${selected ? "selected" : ""}" data-ed-element-id="${escapeHtml(element.id)}" style="${style}"`;
+    const handles = selected ? `
+      <span class="resize-handle nw" data-ed-resize="nw"></span>
+      <span class="resize-handle ne" data-ed-resize="ne"></span>
+      <span class="resize-handle sw" data-ed-resize="sw"></span>
+      <span class="resize-handle se" data-ed-resize="se"></span>
+    ` : "";
+    if (element.type === "text") {
+      const textStyle = `font-family:${escapeHtml(element.style.fontFamily || "Georgia")};font-size:${numberOr(element.style.fontSize, 24)}px;font-weight:${escapeHtml(element.style.fontWeight || "500")};color:${escapeHtml(element.style.color || "#181715")};text-align:${escapeHtml(element.style.textAlign || "left")};`;
+      return `<div ${base}><div class="creative-text-content" contenteditable="true" data-ed-text-content style="${textStyle}">${escapeHtml(element.content || "").replace(/\n/g, "<br>")}</div>${handles}</div>`;
+    }
+    if (element.type === "image") {
+      const radius = numberOr(element.style.borderRadius, 18);
+      const content = element.src
+        ? `<img src="${escapeHtml(element.src)}" alt="" style="border-radius:${radius}px;">`
+        : `<div class="creative-image-placeholder"><strong>Imagen</strong><span>Inserta referencia</span></div>`;
+      return `<div ${base}>${content}${handles}</div>`;
+    }
+    return `<div ${base}><div class="creative-shape-fill" style="background:${escapeHtml(element.style.backgroundColor || "#F4F1EA")};border-radius:${numberOr(element.style.borderRadius, 12)}px;"></div>${handles}</div>`;
+  }
+
+  renderInspector(slide, element) {
+    if (!slide) return `<div class="inspector-section"><strong>Sin diapositiva</strong></div>`;
+    if (!element) {
+      return `
+        <section class="inspector-section">
+          <span class="eyebrow">Propiedades de slide</span>
+          <label>Nombre<input type="text" data-ed-slide-prop="name" value="${escapeHtml(slide.name || "")}"></label>
+          <label>Fondo<input type="color" data-ed-slide-bg value="${escapeHtml(slide.background?.type === "color" ? slide.background.value : "#FFFFFF")}"></label>
+          <p class="microcopy">Selecciona una capa para editar texto, imagen, forma, posicion y profundidad.</p>
+        </section>
+        ${this.renderAssetPicker()}
+      `;
+    }
+    const style = element.style || {};
+    return `
+      <section class="inspector-section">
+        <span class="eyebrow">Seleccion</span>
+        <label>Nombre<input type="text" data-ed-prop="name" value="${escapeHtml(element.name || "")}"></label>
+        ${element.type === "text" ? `
+          <label>Texto<textarea data-ed-prop="content" rows="4">${escapeHtml(element.content || "")}</textarea></label>
+          <label>Fuente<select data-ed-prop="style.fontFamily">${CREATIVE_EDITOR_FONTS.map((font) => `<option value="${escapeHtml(font)}" ${style.fontFamily === font ? "selected" : ""}>${escapeHtml(font)}</option>`).join("")}</select></label>
+          <div class="two-col">
+            <label>Tamano<input type="number" min="8" max="96" data-ed-prop="style.fontSize" value="${numberOr(style.fontSize, 24)}"></label>
+            <label>Peso<select data-ed-prop="style.fontWeight"><option value="400" ${style.fontWeight === "400" ? "selected" : ""}>Regular</option><option value="600" ${style.fontWeight === "600" ? "selected" : ""}>Semibold</option><option value="700" ${style.fontWeight === "700" ? "selected" : ""}>Bold</option></select></label>
+          </div>
+          <div class="two-col">
+            <label>Color<input type="color" data-ed-prop="style.color" value="${escapeHtml(style.color || "#181715")}"></label>
+            <label>Alinear<select data-ed-prop="style.textAlign"><option value="left" ${style.textAlign === "left" ? "selected" : ""}>Izq.</option><option value="center" ${style.textAlign === "center" ? "selected" : ""}>Centro</option><option value="right" ${style.textAlign === "right" ? "selected" : ""}>Der.</option></select></label>
+          </div>
+        ` : ""}
+        ${element.type === "shape" ? `
+          <div class="two-col">
+            <label>Color<input type="color" data-ed-prop="style.backgroundColor" value="${escapeHtml(style.backgroundColor || "#F4F1EA")}"></label>
+            <label>Radio<input type="number" min="0" max="80" data-ed-prop="style.borderRadius" value="${numberOr(style.borderRadius, 12)}"></label>
+          </div>
+        ` : ""}
+        ${element.type === "image" ? `
+          <label>URL / imagen<input type="text" data-ed-prop="src" value="${escapeHtml(element.src || "")}"></label>
+          <label>Radio<input type="number" min="0" max="80" data-ed-prop="style.borderRadius" value="${numberOr(style.borderRadius, 18)}"></label>
+        ` : ""}
+        <div class="two-col">
+          <label>X<input type="number" data-ed-prop="x" value="${Math.round(element.x)}"></label>
+          <label>Y<input type="number" data-ed-prop="y" value="${Math.round(element.y)}"></label>
+          <label>Ancho<input type="number" min="20" data-ed-prop="width" value="${Math.round(element.width)}"></label>
+          <label>Alto<input type="number" min="20" data-ed-prop="height" value="${Math.round(element.height)}"></label>
+        </div>
+        <label>Opacidad<input type="range" min="0.05" max="1" step="0.05" data-ed-prop="opacity" value="${element.opacity}"></label>
+        <div class="tool-group full">
+          <button type="button" data-ed-action="layer-up">Traer adelante</button>
+          <button type="button" data-ed-action="layer-down">Enviar atras</button>
+          <button type="button" data-ed-action="delete-element">Eliminar</button>
+        </div>
+      </section>
+      ${this.renderAssetPicker()}
+    `;
+  }
+
+  renderAssetPicker() {
+    const images = getCreativeEditorImages().slice(0, 6);
+    return `
+      <section class="inspector-section">
+        <span class="eyebrow">Assets del flujo</span>
+        <div class="asset-palette">
+          ${images.length ? images.map((image) => `
+            <button type="button" class="asset-chip" data-ed-asset-src="${escapeHtml(image.src)}">
+              <img src="${escapeHtml(image.src)}" alt="">
+              <span>${escapeHtml(image.name)}</span>
+            </button>
+          `).join("") : `<p class="microcopy">Sube imagenes en Insumos o importa una referencia local.</p>`}
+        </div>
+      </section>
+    `;
+  }
+
+  renderLayers(slide) {
+    const layers = safeArray(slide?.elements).slice().sort((a, b) => numberOr(b.zIndex, 0) - numberOr(a.zIndex, 0));
+    return `
+      <section class="inspector-section layer-list-panel">
+        <span class="eyebrow">Capas</span>
+        ${layers.map((element) => `
+          <button type="button" class="layer-row ${element.id === this.state.activeElementId ? "active" : ""}" data-ed-layer-id="${escapeHtml(element.id)}">
+            <span>${escapeHtml(element.name || element.type)}</span>
+            <small>${escapeHtml(element.type)} · z${element.zIndex}</small>
+          </button>
+        `).join("") || `<p class="microcopy">No hay capas en esta diapositiva.</p>`}
+      </section>
+    `;
+  }
+
+  handleClick(event) {
+    const slideButton = event.target.closest("[data-ed-slide]");
+    if (slideButton && !event.target.closest("button")) {
+      this.mutate((draft) => {
+        draft.activeSlideId = slideButton.dataset.edSlide;
+        draft.activeElementId = draft.slides.find((slide) => slide.id === draft.activeSlideId)?.elements?.[0]?.id || null;
+      }, { history: false });
+      return;
+    }
+
+    const layerButton = event.target.closest("[data-ed-layer-id]");
+    if (layerButton) {
+      this.mutate((draft) => { draft.activeElementId = layerButton.dataset.edLayerId; }, { history: false });
+      return;
+    }
+
+    const assetButton = event.target.closest("[data-ed-asset-src]");
+    if (assetButton) {
+      this.addImage(assetButton.dataset.edAssetSrc);
+      return;
+    }
+
+    const bgButton = event.target.closest("[data-ed-bg]");
+    if (bgButton) {
+      this.setSlideBackground({ type: "color", value: bgButton.dataset.edBg });
+      return;
+    }
+
+    const templateButton = event.target.closest("[data-ed-template]");
+    if (templateButton) {
+      this.applyTemplate(templateButton.dataset.edTemplate);
+      return;
+    }
+
+    const actionButton = event.target.closest("[data-ed-action]");
+    if (!actionButton) return;
+    this.handleAction(actionButton.dataset.edAction, actionButton.dataset.edId || "");
+  }
+
+  handleAction(action, id = "") {
+    if (action === "add-slide") return this.addSlide();
+    if (action === "duplicate-slide") return this.duplicateSlide(id);
+    if (action === "delete-slide") return this.deleteSlide(id);
+    if (action === "add-text") return this.addElement("text");
+    if (action === "add-image") return this.addImage(getCreativeEditorImages()[0]?.src || "");
+    if (action === "add-shape") return this.addElement("shape");
+    if (action === "delete-element") return this.deleteActiveElement();
+    if (action === "layer-up") return this.shiftLayer(1);
+    if (action === "layer-down") return this.shiftLayer(-1);
+    if (action === "zoom-in") return this.setZoom(this.state.zoom + 8);
+    if (action === "zoom-out") return this.setZoom(this.state.zoom - 8);
+    if (action === "undo") return this.undo();
+    if (action === "redo") return this.redo();
+    if (action === "import-image") {
+      this.importMode = "image";
+      this.root.querySelector("[data-ed-file]")?.click();
+      return null;
+    }
+    if (action === "insert-url" || action === "background-url") {
+      const input = this.root.querySelector("[data-ed-url-input]");
+      const value = input?.value?.trim();
+      if (!value) return null;
+      if (action === "background-url") this.setSlideBackground({ type: "image", value });
+      else this.addImage(value);
+      input.value = "";
+      return null;
+    }
+    if (action === "export-pdf") return this.export("pdf");
+    if (action === "export-ppt") return this.export("ppt");
+    if (action === "preview") {
+      state.currentStep = 6;
+      persistSettings();
+      renderAll();
+      return null;
+    }
+    return null;
+  }
+
+  handleInput(event) {
+    const titleInput = event.target.closest("[data-ed-deck-title]");
+    if (titleInput) {
+      this.state.title = titleInput.value;
+      this.sync();
+      return;
+    }
+    const textContent = event.target.closest("[data-ed-text-content]");
+    if (textContent) {
+      const elementId = textContent.closest("[data-ed-element-id]")?.dataset.edElementId;
+      const element = this.activeSlide()?.elements.find((item) => item.id === elementId);
+      if (element) {
+        element.content = textContent.innerText;
+        this.sync();
+      }
+      return;
+    }
+    const propInput = event.target.closest("[data-ed-prop]");
+    if (propInput) this.updateActiveElement(propInput.dataset.edProp, propInput.value);
+  }
+
+  handleChange(event) {
+    const slideName = event.target.closest("[data-ed-slide-prop]");
+    if (slideName) {
+      this.mutate((draft) => {
+        const slide = this.activeSlide();
+        if (slide) slide.name = slideName.value;
+      });
+      return;
+    }
+    const slideBg = event.target.closest("[data-ed-slide-bg]");
+    if (slideBg) {
+      this.setSlideBackground({ type: "color", value: slideBg.value });
+      return;
+    }
+    const propInput = event.target.closest("[data-ed-prop]");
+    if (propInput) {
+      this.updateActiveElement(propInput.dataset.edProp, propInput.value);
+      return;
+    }
+    const fileInput = event.target.closest("[data-ed-file]");
+    if (!fileInput?.files?.length) return;
+    const file = fileInput.files[0];
+    if (!file.type.startsWith("image/")) {
+      toast("El editor inserta imagenes. Los PDFs siguen disponibles como soporte del flujo.", "warn");
+      fileInput.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.addImage(String(reader.result || ""));
+      fileInput.value = "";
+    };
+    reader.readAsDataURL(file);
+  }
+
+  handleMouseDown(event) {
+    const layer = event.target.closest("[data-ed-element-id]");
+    if (!layer) return;
+    const elementId = layer.dataset.edElementId;
+    const element = this.activeSlide()?.elements.find((item) => item.id === elementId);
+    if (!element) return;
+    this.state.activeElementId = elementId;
+    if (event.target.closest("[data-ed-text-content]")) {
+      this.render();
+      return;
+    }
+    const handle = event.target.closest("[data-ed-resize]");
+    this.dragSession = {
+      mode: handle ? "resize" : "move",
+      handle: handle?.dataset.edResize || "",
+      startX: event.clientX,
+      startY: event.clientY,
+      original: { ...element },
+    };
+    event.preventDefault();
+    this.render();
+  }
+
+  handleMouseMove(event) {
+    if (!this.dragSession) return;
+    const element = this.activeElement();
+    if (!element) return;
+    const scale = this.state.zoom / 100;
+    const dx = (event.clientX - this.dragSession.startX) / scale;
+    const dy = (event.clientY - this.dragSession.startY) / scale;
+    const original = this.dragSession.original;
+    if (this.dragSession.mode === "move") {
+      element.x = clamp(original.x + dx, -element.width + 20, CREATIVE_EDITOR_SIZE.width - 20);
+      element.y = clamp(original.y + dy, -element.height + 20, CREATIVE_EDITOR_SIZE.height - 20);
+    } else {
+      const handle = this.dragSession.handle;
+      if (handle.includes("e")) element.width = Math.max(20, original.width + dx);
+      if (handle.includes("s")) element.height = Math.max(20, original.height + dy);
+      if (handle.includes("w")) {
+        element.x = original.x + dx;
+        element.width = Math.max(20, original.width - dx);
+      }
+      if (handle.includes("n")) {
+        element.y = original.y + dy;
+        element.height = Math.max(20, original.height - dy);
+      }
+    }
+    this.render();
+    this.sync();
+  }
+
+  handleMouseUp() {
+    if (this.dragSession) {
+      this.dragSession = null;
+      this.commit();
+      this.sync();
+    }
+  }
+
+  addSlide() {
+    this.mutate((draft) => {
+      const slide = normalizeCreativeSlide({
+        id: createCreativeEditorId("slide"),
+        name: `Diapositiva ${draft.slides.length + 1}`,
+        background: { type: "color", value: "#FFFFFF" },
+        elements: buildCreativeTemplateElements("cover", {
+          title: "Nueva diapositiva",
+          subtitle: "Edita texto, imagenes y capas.",
+          images: getCreativeEditorImages(),
+          palette: getCreativeEditorPalette(),
+        }),
+      }, draft.slides.length);
+      draft.slides.push(slide);
+      draft.activeSlideId = slide.id;
+      draft.activeElementId = slide.elements[0]?.id || null;
+    });
+  }
+
+  duplicateSlide(id) {
+    this.mutate((draft) => {
+      const source = draft.slides.find((slide) => slide.id === id) || this.activeSlide();
+      if (!source) return;
+      const copy = normalizeCreativeSlide({
+        ...cloneCreativeEditorValue(source, {}),
+        id: createCreativeEditorId("slide"),
+        name: `${source.name || "Diapositiva"} copia`,
+        elements: safeArray(source.elements).map((element) => ({ ...cloneCreativeEditorValue(element, {}), id: createCreativeEditorId(element.type || "el") })),
+      }, draft.slides.length);
+      const index = draft.slides.findIndex((slide) => slide.id === source.id);
+      draft.slides.splice(index + 1, 0, copy);
+      draft.activeSlideId = copy.id;
+      draft.activeElementId = copy.elements[0]?.id || null;
+    });
+  }
+
+  deleteSlide(id) {
+    if (this.state.slides.length <= 1) {
+      toast("Debe quedar al menos una diapositiva.", "warn");
+      return;
+    }
+    this.mutate((draft) => {
+      const targetId = id || draft.activeSlideId;
+      draft.slides = draft.slides.filter((slide) => slide.id !== targetId);
+      draft.activeSlideId = draft.slides[0]?.id || null;
+      draft.activeElementId = draft.slides[0]?.elements?.[0]?.id || null;
+    });
+  }
+
+  addElement(type) {
+    this.mutate(() => {
+      const slide = this.activeSlide();
+      if (!slide) return;
+      const maxZ = Math.max(0, ...slide.elements.map((element) => numberOr(element.zIndex, 0)));
+      const element = makeCreativeElement(type, { zIndex: maxZ + 1 });
+      slide.elements.push(element);
+      this.state.activeElementId = element.id;
+    });
+  }
+
+  addImage(src) {
+    this.mutate(() => {
+      const slide = this.activeSlide();
+      if (!slide) return;
+      const maxZ = Math.max(0, ...slide.elements.map((element) => numberOr(element.zIndex, 0)));
+      const element = makeCreativeElement("image", { src, zIndex: maxZ + 1, x: 320, y: 86, width: 300, height: 210 });
+      slide.elements.push(element);
+      this.state.activeElementId = element.id;
+    });
+  }
+
+  applyTemplate(templateId) {
+    this.mutate(() => {
+      const slide = this.activeSlide();
+      if (!slide) return;
+      const oldTitle = slide.elements.find((element) => element.type === "text")?.content || slide.name;
+      slide.elements = buildCreativeTemplateElements(templateId, {
+        title: oldTitle,
+        subtitle: "Edita esta lamina por capas.",
+        bullets: ["Texto editable", "Imagen separada", "Formas independientes"],
+        images: getCreativeEditorImages(),
+        palette: getCreativeEditorPalette(),
+      });
+      this.state.activeElementId = slide.elements[0]?.id || null;
+    });
+  }
+
+  setSlideBackground(background) {
+    this.mutate(() => {
+      const slide = this.activeSlide();
+      if (slide) slide.background = background;
+    });
+  }
+
+  updateActiveElement(path, value) {
+    this.mutate(() => {
+      const element = this.activeElement();
+      if (!element) return;
+      const numericProps = new Set(["x", "y", "width", "height", "opacity", "rotation", "zIndex", "style.fontSize", "style.borderRadius"]);
+      const finalValue = numericProps.has(path) ? numberOr(value, path === "opacity" ? 1 : 0) : value;
+      const parts = path.split(".");
+      let target = element;
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        target[parts[index]] = target[parts[index]] || {};
+        target = target[parts[index]];
+      }
+      target[parts[parts.length - 1]] = finalValue;
+    });
+  }
+
+  deleteActiveElement() {
+    this.mutate(() => {
+      const slide = this.activeSlide();
+      if (!slide) return;
+      slide.elements = slide.elements.filter((element) => element.id !== this.state.activeElementId);
+      this.state.activeElementId = slide.elements[0]?.id || null;
+    });
+  }
+
+  shiftLayer(direction) {
+    this.mutate(() => {
+      const element = this.activeElement();
+      if (!element) return;
+      element.zIndex = Math.max(1, numberOr(element.zIndex, 1) + direction);
+    });
+  }
+
+  setZoom(value) {
+    this.mutate((draft) => { draft.zoom = clamp(numberOr(value, 72), 45, 120); }, { history: false });
+  }
+
+  undo() {
+    if (this.historyIndex <= 0) return;
+    this.historyIndex -= 1;
+    this.state = cloneCreativeEditorValue(this.history[this.historyIndex], {});
+    this.render();
+    this.sync();
+  }
+
+  redo() {
+    if (this.historyIndex >= this.history.length - 1) return;
+    this.historyIndex += 1;
+    this.state = cloneCreativeEditorValue(this.history[this.historyIndex], {});
+    this.render();
+    this.sync();
+  }
+
+  async export(kind) {
+    this.sync();
+    state.result.deck = await buildDeckFromCreativeEditorExportDeck(this.serialize());
+    await downloadPdfVariant(kind === "ppt" ? "alternate" : "final");
+  }
+}
+
+window.CreativeDeckEditor = CreativeDeckEditor;
+
+function mountCanvaEditor() {
+  ensurePdfBuilderDefaults();
+  const blueprints = computePdfSlideBlueprints();
+  if (!blueprints.length) {
+    elements.pdfSectionStudio.innerHTML = `<div class="empty-state compact-empty"><strong>Primero define las diapositivas del brochure</strong><span>En el paso 4 escoges cantidad, tipo, orden y amenidades.</span></div>`;
+    return;
+  }
+  const analysis = getPdfDeckAnalysis();
+  const initialState = buildCreativeEditorInitialState(blueprints, analysis);
+  const mountHash = JSON.stringify({
+    slides: blueprints.map((blueprint) => blueprint.key),
+    saved: state.settings.deckEditor?.slides?.length || 0,
+  });
+  if (window._creativeDeckEditorInst && window._creativeDeckEditorInst.mountEl === elements.pdfSectionStudio && window._creativeDeckEditorHash === mountHash) {
+    return;
+  }
+  if (window._renderAIEditorInst) {
+    window._renderAIEditorInst.unmount();
+    window._renderAIEditorInst = null;
+  }
+  if (window._creativeDeckEditorInst) {
+    window._creativeDeckEditorInst.unmount();
+    window._creativeDeckEditorInst = null;
+  }
+  const inst = new CreativeDeckEditor(elements.pdfSectionStudio, initialState);
+  inst.mount();
+  window._creativeDeckEditorInst = inst;
+  window._creativeDeckEditorHash = mountHash;
 }
