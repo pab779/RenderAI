@@ -21,8 +21,12 @@ try {
   if ($index.Content -notmatch 'RenderAI Studio') { throw 'Index does not contain the expected title.' }
   if ($index.Content -notmatch 'loginForm') { throw 'Login form was not found in the HTML.' }
   if ($index.Content -notmatch 'flowRenderCard') { throw 'Flow selection controls were not found in the HTML.' }
+  if ($index.Content -notmatch 'projectGalleryView') { throw 'Gallery container was not found in the HTML.' }
   if ($health.status -ne 'ok') { throw 'Health endpoint did not return ok.' }
   if ($null -eq $health.aiReady) { throw 'Health endpoint did not report aiReady.' }
+
+  $providerStatus = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/providers/status"
+  if ($null -eq $providerStatus.providers) { throw 'Providers status endpoint did not return provider rows.' }
 
   $pdfPayload = @{
     title = 'Smoke Test Export'
@@ -40,13 +44,24 @@ try {
   $pdfHeader = [System.Text.Encoding]::ASCII.GetString($pdfBytes[0..7])
   if (-not $pdfHeader.StartsWith('%PDF-1.')) { throw 'PDF export response did not look like a PDF.' }
 
+  try {
+    Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/video/compose" -Method Post -ContentType 'application/json' -Body (@{ clips = @() } | ConvertTo-Json) | Out-Null
+    throw 'Video compose endpoint unexpectedly succeeded without a compositor.'
+  } catch {
+    $statusCode = $_.Exception.Response.StatusCode.value__
+    if ($statusCode -ne 501) { throw "Video compose endpoint did not fail clearly with 501. Status: $statusCode" }
+  }
+
   Write-Host 'Smoke test passed.'
   Write-Host '- Index served correctly'
   Write-Host '- Login screen is present'
   Write-Host '- Workflow controls are present'
+  Write-Host '- Gallery container is present'
   Write-Host '- Health endpoint responds'
   Write-Host '- Health endpoint reports aiReady'
+  Write-Host '- Providers status endpoint responds without keys'
   Write-Host '- PDF export endpoint generates a PDF'
+  Write-Host '- Video compose endpoint fails clearly when compositor is missing'
 } finally {
   if (Test-Path -LiteralPath $pdfOutputPath) {
     Remove-Item -LiteralPath $pdfOutputPath -Force
