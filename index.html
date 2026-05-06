@@ -11,10 +11,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Albert+Sans:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&family=Bodoni+Moda:wght@500;600;700&family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:wght@500;600;700&family=Crimson+Pro:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&family=DM+Serif+Display&family=EB+Garamond:wght@400;500;600;700&family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Gloock&family=Inter+Tight:wght@400;500;600;700;800&family=Italiana&family=JetBrains+Mono:wght@400;500;700&family=Josefin+Sans:wght@400;500;600;700&family=Karla:wght@400;500;600;700&family=Lexend:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&family=Lora:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Serif+Display:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Playfair+Display:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Prata&family=Rubik:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;700&family=Spectral:wght@400;500;600;700&family=Syne:wght@400;500;600;700;800&family=Tenor+Sans&family=Urbanist:wght@400;500;600;700;800&family=Work+Sans:wght@400;500;600;700&family=Young+Serif&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-  <link rel="stylesheet" href="./styles.css?v=32" />
+    <link rel="stylesheet" href="./styles.css?v=32" />
+    <link rel="stylesheet" href="./premium-ui.css?v=1" />
   </head>
   <body>
     <div class="page-ambient"></div>
@@ -26,14 +27,22 @@
         <div class="story-copy">
           <div class="story-brand">
             <span class="story-brand-mark" aria-hidden="true">
-              <img src="./assets/renderai-sofa-clicker-logo.svg" alt="" class="brand-mark-image" />
+              <img
+                src="./assets/renderai-sofa-clicker-logo.svg"
+                alt=""
+                class="brand-mark-image"
+              />
             </span>
             <span class="eyebrow">RenderAI Studio</span>
           </div>
-          <h1>RenderAI se recorre como una casa: claro, tactil y listo para presentar.</h1>
+          <h1>
+            RenderAI se recorre como una casa: claro, tactil y listo para
+            presentar.
+          </h1>
           <p>
-            Entra al estudio, elige render o PDF, sube los insumos y avanza por un flujo que cuida
-            textura, fidelidad, capas editables y una salida visual con lenguaje residencial mid-century.
+            Entra al estudio, elige render o PDF, sube los insumos y avanza por
+            un flujo que cuida textura, fidelidad, capas editables y una salida
+            visual con lenguaje residencial mid-century.
           </p>
         </div>
 
@@ -41,17 +50,26 @@
           <article class="story-card">
             <span class="story-index">01</span>
             <strong>Recibidor ordenado</strong>
-            <p>Sube referencias, define la principal y separa soporte visual o documental sin ruido.</p>
+            <p>
+              Sube referencias, define la principal y separa soporte visual o
+              documental sin ruido.
+            </p>
           </article>
           <article class="story-card">
             <span class="story-index">02</span>
             <strong>Mesa de lectura</strong>
-            <p>Materiales, rotulos, objetos, fondo y riesgos quedan visibles antes de generar.</p>
+            <p>
+              Materiales, rotulos, objetos, fondo y riesgos quedan visibles
+              antes de generar.
+            </p>
           </article>
           <article class="story-card">
             <span class="story-index">03</span>
             <strong>Entrega editable</strong>
-            <p>Descarga render, PDF o PPT con texto, fotos, estilos y slots realmente controlables.</p>
+            <p>
+              Descarga render, PDF o PPT con texto, fotos, estilos y slots
+              realmente controlables.
+            </p>
           </article>
         </div>
       </div>
@@ -60,21 +78,40 @@
         <div class="auth-copy">
           <span class="eyebrow">Ingreso</span>
           <h2>Entrar al estudio</h2>
-          <p>Acceso de desarrollo para validar experiencia, resultado y panel administrativo.</p>
+          <p>
+            Acceso de desarrollo para validar experiencia, resultado y panel
+            administrativo.
+          </p>
         </div>
 
         <label class="field">
           <span>Usuario</span>
-          <input id="loginUsername" type="text" autocomplete="username" placeholder="Ingresa tu usuario" required />
+          <input
+            id="loginUsername"
+            type="text"
+            autocomplete="username"
+            placeholder="Ingresa tu usuario"
+            required
+          />
         </label>
 
         <label class="field">
           <span>Password</span>
-          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Ingresa tu password" required />
+          <input
+            id="loginPassword"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Ingresa tu password"
+            required
+          />
         </label>
 
-        <button type="submit" class="button button-primary full">Ingresar</button>
-        <p id="loginError" class="inline-error hidden">Usuario o password invalido.</p>
+        <button type="submit" class="button button-primary full">
+          Ingresar
+        </button>
+        <p id="loginError" class="inline-error hidden">
+          Usuario o password invalido.
+        </p>
       </form>
     </section>
 
@@ -82,7 +119,11 @@
       <header class="topbar panel-surface">
         <div class="brand-lockup">
           <div class="brand-mark brand-mark-sofa" aria-hidden="true">
-            <img src="./assets/renderai-sofa-clicker-logo.svg" alt="" class="brand-mark-image" />
+            <img
+              src="./assets/renderai-sofa-clicker-logo.svg"
+              alt=""
+              class="brand-mark-image"
+            />
           </div>
           <div>
             <span class="eyebrow">RenderAI Studio</span>
@@ -91,452 +132,749 @@
         </div>
 
         <div class="topbar-actions">
-          <span id="apiHealthChip" class="status-chip">Verificando servidor</span>
-          <span id="sessionChip" class="status-chip status-soft">Sin sesion</span>
-          <button id="adminToggleBtn" type="button" class="button button-ghost hidden">Admin</button>
-          <button id="logoutBtn" type="button" class="button button-ghost">Salir</button>
+          <span id="apiHealthChip" class="status-chip"
+            >Verificando servidor</span
+          >
+          <span id="sessionChip" class="status-chip status-soft"
+            >Sin sesion</span
+          >
+          <button
+            id="adminToggleBtn"
+            type="button"
+            class="button button-ghost hidden"
+          >
+            Admin
+          </button>
+          <button id="logoutBtn" type="button" class="button button-ghost">
+            Salir
+          </button>
         </div>
       </header>
 
       <div class="app-workspace">
-        <aside id="projectSidebar" class="project-sidebar panel-surface" aria-label="Proyectos guardados">
+        <aside
+          id="projectSidebar"
+          class="project-sidebar panel-surface"
+          aria-label="Proyectos guardados"
+        >
           <div class="project-sidebar-head">
             <div>
               <span class="eyebrow">Proyectos</span>
               <h3>Memoria del estudio</h3>
             </div>
-            <span id="projectMemoryStatus" class="status-chip status-soft">Cargando</span>
+            <span id="projectMemoryStatus" class="status-chip status-soft"
+              >Cargando</span
+            >
           </div>
 
           <div class="project-sidebar-actions">
-            <button id="projectNewBtn" type="button" class="button button-secondary">Nuevo</button>
-            <button id="projectSaveBtn" type="button" class="button button-primary">Guardar</button>
+            <button
+              id="projectNewBtn"
+              type="button"
+              class="button button-secondary"
+            >
+              Nuevo
+            </button>
+            <button
+              id="projectSaveBtn"
+              type="button"
+              class="button button-primary"
+            >
+              Guardar
+            </button>
           </div>
 
           <label class="project-search-field">
             <span>Buscar</span>
-            <input id="projectSearchInput" type="search" placeholder="Proyecto, plantilla, flujo..." autocomplete="off" />
+            <input
+              id="projectSearchInput"
+              type="search"
+              placeholder="Proyecto, plantilla, flujo..."
+              autocomplete="off"
+            />
           </label>
 
           <div id="projectList" class="project-list"></div>
 
           <div id="projectMemoryMeta" class="project-memory-meta">
             <strong>Sin proyecto activo</strong>
-            <span>Guarda o abre un proyecto para reutilizar renders, brief, plantilla, capas y decisiones.</span>
+            <span
+              >Guarda o abre un proyecto para reutilizar renders, brief,
+              plantilla, capas y decisiones.</span
+            >
           </div>
         </aside>
 
         <main class="app-stage">
-        <section id="projectDashboard" class="project-dashboard hidden" aria-label="Dashboard de proyectos">
-          <div class="project-dashboard-hero panel-surface">
-            <div>
-              <span class="eyebrow">RENDEAI</span>
-              <h1>Proyectos</h1>
-              <p>Crea, conversa y genera contenido visual con IA.</p>
-            </div>
-            <button id="dashboardNewProjectBtn" type="button" class="button button-primary">Nuevo proyecto</button>
-          </div>
-
-          <div class="project-dashboard-toolbar panel-surface">
-            <label class="project-search-field">
-              <span>Buscar</span>
-              <input id="dashboardSearchInput" type="search" placeholder="Restaurante, hotel, brochure..." autocomplete="off" />
-            </label>
-            <label class="project-search-field compact">
-              <span>Filtro</span>
-              <select id="dashboardFilterSelect">
-                <option value="all">Todos</option>
-                <option value="active">Activos</option>
-                <option value="image">Con imagenes</option>
-                <option value="video">Con videos</option>
-                <option value="document">Con documentos</option>
-              </select>
-            </label>
-          </div>
-
-          <div id="projectDashboardGrid" class="project-dashboard-grid"></div>
-        </section>
-
-        <section id="conversationShell" class="project-chat-shell hidden" aria-label="Proyecto conversacional">
-          <div class="project-chat-layout">
-            <section class="project-chat-main panel-surface">
-              <div class="project-chat-header">
-                <div>
-                  <span id="activeProjectStatus" class="eyebrow">Proyecto</span>
-                  <h1 id="activeProjectTitle">Proyecto</h1>
-                  <p id="activeProjectSubtitle">Conversacion, assets y generaciones del proyecto.</p>
-                </div>
-                <div class="project-chat-actions">
-                  <button type="button" class="button button-secondary" data-open-dashboard>Proyectos</button>
-                  <button type="button" class="button button-primary" data-project-save-current>Guardar</button>
-                </div>
-              </div>
-
-              <nav id="projectTabs" class="project-tabs" aria-label="Secciones del proyecto"></nav>
-
-              <div id="projectConversationView" class="project-tab-view">
-                <div id="projectConversationMessages" class="conversation-messages"></div>
-                <div id="projectQuickChips" class="project-quick-chips" aria-label="Acciones rapidas"></div>
-                <form id="projectComposer" class="project-composer">
-                  <input id="conversationFileInput" class="hidden" type="file" accept="image/*,.pdf,.pptx,.potx,.dxf,.dwg,.doc,.docx,.txt,.webp" multiple />
-                  <button id="conversationAttachBtn" type="button" class="composer-icon-button" title="Adjuntar archivos" aria-label="Adjuntar archivos">+</button>
-                  <select id="conversationActionSelect" aria-label="Accion rapida">
-                    <option value="chat">Conversar</option>
-                    <option value="image">Generar imagen</option>
-                    <option value="video">Generar video</option>
-                    <option value="presentation">Generar presentacion</option>
-                    <option value="pdf">Generar PDF</option>
-                    <option value="analyze">Analizar archivos</option>
-                    <option value="improve">Mejorar prompt</option>
-                  </select>
-                  <textarea id="conversationPromptInput" rows="2" placeholder="Escribe que queres crear, analizar o mejorar dentro de este proyecto."></textarea>
-                  <button type="submit" class="button button-primary">Enviar</button>
-                </form>
-              </div>
-
-              <div id="projectAssetsView" class="project-tab-view hidden"></div>
-              <div id="projectGalleryView" class="project-tab-view hidden"></div>
-              <div id="projectImagesView" class="project-tab-view hidden"></div>
-              <div id="projectVideoStudioView" class="project-tab-view hidden"></div>
-              <div id="projectPresentationsView" class="project-tab-view hidden"></div>
-              <div id="projectSettingsView" class="project-tab-view hidden"></div>
-            </section>
-
-            <aside class="project-context-panel panel-surface">
-              <div class="mini-head">
-                <span class="eyebrow">Providers</span>
-                <strong>Estado IA</strong>
-              </div>
-              <div id="projectProviderPanel" class="provider-panel"></div>
-
-              <div class="mini-head">
-                <span class="eyebrow">Assets</span>
-                <strong>Contexto activo</strong>
-              </div>
-              <div id="projectAssetRail" class="project-asset-rail"></div>
-            </aside>
-          </div>
-        </section>
-
-        <section id="flowScreen" class="flow-screen">
-          <div class="flow-intro panel-surface">
-            <span class="eyebrow">Paso inicial</span>
-            <h3>Primero escoge por que puerta entrar.</h3>
-            <p>
-              Cada recorrido conserva la misma casa visual: paredes blancas texturizadas, materia real,
-              decisiones claras y una IA que no rediseña lo que ya aprobaste.
-            </p>
-          </div>
-
-          <div class="flow-grid">
-            <button id="flowRenderCard" type="button" class="flow-card panel-surface">
-              <span class="flow-number">01</span>
-              <strong>Render fiel</strong>
-              <p>Sube referencias, bloquea una escena principal y genera una imagen lista para cliente.</p>
-              <span class="flow-meta">Lectura + decisiones + salida de imagen</span>
-            </button>
-
-            <button id="flowPdfCard" type="button" class="flow-card panel-surface">
-              <span class="flow-number">02</span>
-              <strong>Brochure editable</strong>
-              <p>Organiza soporte visual, define narrativa y exporta un deck arquitectonico moldeable.</p>
-              <span class="flow-meta">Canva/PPT + narrativa + PDF descargable</span>
-            </button>
-          </div>
-        </section>
-
-        <section id="wizardShell" class="wizard-shell hidden">
-          <div class="wizard-heading panel-surface">
-            <button id="backToFlowsBtn" type="button" class="button button-ghost">Cambiar flujo</button>
-            <div class="wizard-heading-copy">
-              <span id="wizardFlowLabel" class="eyebrow">Flujo</span>
-              <h3 id="wizardFlowTitle">Render fotorrealista</h3>
-              <p id="wizardFlowSummary">
-                Un recorrido guiado para pasar de insumos a resultado sin mezclar pasos, feedback o administracion fuera de contexto.
-              </p>
-            </div>
-          </div>
-
-          <ol id="stepper" class="stepper" aria-label="Pasos del flujo"></ol>
-
-          <section id="step1Panel" class="wizard-panel panel-surface">
-            <div class="section-head">
+          <section
+            id="projectDashboard"
+            class="project-dashboard hidden"
+            aria-label="Dashboard de proyectos"
+          >
+            <div class="project-dashboard-hero panel-surface">
               <div>
-                <span class="eyebrow">Paso 1</span>
-                <h3>Insumos</h3>
+                <span class="eyebrow">RENDEAI</span>
+                <h1>Proyectos</h1>
+                <p>Crea, conversa y genera contenido visual con IA.</p>
               </div>
-              <span id="assetSummary" class="status-chip status-soft">Sin archivos</span>
+              <button
+                id="dashboardNewProjectBtn"
+                type="button"
+                class="button button-primary"
+              >
+                Nuevo proyecto
+              </button>
             </div>
 
-            <div class="step-grid step-grid-assets">
-              <article class="asset-drop-wrapper">
-                <input id="imageInput" class="hidden" type="file" accept="image/*" multiple />
-                <input id="documentInput" class="hidden" type="file" accept="image/*,.pdf" multiple />
-                <input id="customTemplateInput" class="hidden" type="file" accept=".pptx,.potx,.zip,.rar" multiple />
-
-                <button id="assetDropzone" type="button" class="upload-dropzone">
-                  <span class="drop-ornament"></span>
-                  <strong id="assetDropzoneTitle">Sube las referencias del flujo</strong>
-                  <span id="assetDropzoneHint">
-                    Puedes cargar una o varias imagenes; luego defines una principal para que toda la lectura quede vinculada a esa escena.
-                  </span>
-                </button>
-
-                <div class="asset-guide">
-                  <article class="micro-panel">
-                    <span class="eyebrow">Principal</span>
-                    <p>La referencia principal gobierna la lectura, el prompt interno y la salida final.</p>
-                  </article>
-                  <article class="micro-panel">
-                    <span class="eyebrow">Soporte</span>
-                    <p>Las referencias secundarias o documentos complementan el criterio, no reemplazan la escena bloqueada.</p>
-                  </article>
-                </div>
-              </article>
-
-              <article class="asset-lists">
-                <div>
-                  <div class="mini-head">
-                    <span class="eyebrow">Referencias visuales</span>
-                    <strong>Imagenes cargadas</strong>
-                  </div>
-                  <div id="primaryGallery" class="asset-grid"></div>
-                </div>
-
-                <div>
-                  <div class="mini-head">
-                    <span class="eyebrow">Soporte</span>
-                    <strong>PDFs, planos o apoyo extra</strong>
-                  </div>
-                  <div id="supportGallery" class="asset-grid support-grid-list"></div>
-                </div>
-              </article>
-            </div>
-
-          </section>
-
-          <section id="step2Panel" class="wizard-panel panel-surface hidden">
-            <div class="section-head">
-              <div>
-                <span class="eyebrow">Paso 2</span>
-                <h3>Descomposicion inteligente</h3>
-              </div>
-              <div class="section-actions">
-                <span id="analysisStatus" class="status-chip">Esperando referencia principal</span>
-                <button id="refreshAnalysisBtn" type="button" class="button button-secondary">Actualizar lectura IA</button>
-              </div>
-            </div>
-
-            <div class="analysis-stage">
-              <article class="analysis-visual">
-                <div id="analysisCanvas" class="preview-shell">
-                  <div id="analysisPreviewEmpty" class="preview-empty">
-                    <strong>Aqui aparecera la referencia principal</strong>
-                    <span>El paso 2 combina lectura local y lectura IA para que puedas revisar la escena antes de generar.</span>
-                  </div>
-                  <img id="analysisPreview" class="preview-image hidden" alt="Referencia principal" />
-                  <svg id="analysisOverlay" class="preview-overlay hidden" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
-                  <div id="analysisInteractionLayer" class="analysis-interaction-layer hidden"></div>
-                  <div id="annotationDraft" class="annotation-draft hidden"></div>
-                </div>
-              </article>
-
-              <article class="analysis-summary-card">
-                <div class="mini-head">
-                  <span class="eyebrow">Lectura</span>
-                  <strong>Resumen editable</strong>
-                </div>
-                <p id="analysisSummary" class="analysis-summary-text">
-                  Cuando haya una referencia principal, aqui veras una lectura consolidada de escena, materiales, fondo, OCR y riesgos de realismo.
-                </p>
-                <div id="analysisMeta" class="meta-strip"></div>
-              </article>
-            </div>
-
-            <article class="annotation-workbench">
-              <div class="mini-head">
-                <span class="eyebrow">Marcacion manual</span>
-                <strong>Corrige lo que la IA no detecte bien</strong>
-              </div>
-
-              <div class="annotation-toolbar">
-                <label class="field annotation-field">
-                  <span>Categoria</span>
-                  <select id="annotationCategory">
-                    <option value="objects">Objeto</option>
-                    <option value="texts">Texto o rotulo</option>
-                    <option value="materials">Material</option>
-                    <option value="environment">Entorno</option>
-                  </select>
-                </label>
-
-                <label class="field annotation-field annotation-field-wide">
-                  <span>Etiqueta nueva</span>
-                  <input
-                    id="annotationLabel"
-                    type="text"
-                    placeholder="Ejemplo: repisa lateral, rotulo coffee, madera oscura"
-                  />
-                </label>
-
-                <div class="annotation-actions">
-                  <button id="annotationToggleBtn" type="button" class="button button-secondary">Activar marcacion</button>
-                  <button id="annotationResetBtn" type="button" class="button button-ghost">Cancelar</button>
-                </div>
-              </div>
-
-              <p id="annotationHelp" class="annotation-help">
-                Activa la marcacion, arrastra sobre la imagen principal y vincula la nueva lectura al lugar exacto de la escena.
-              </p>
-            </article>
-
-            <div id="analysisEditors" class="analysis-editors"></div>
-          </section>
-
-          <section id="step3Panel" class="wizard-panel panel-surface hidden">
-            <div class="section-head">
-              <div>
-                <span id="step3Eyebrow" class="eyebrow">Paso 3</span>
-                <h3 id="step3Title">Decisiones y contexto</h3>
-              </div>
-            </div>
-
-            <article id="introGoalsCard" class="intro-goals-card hidden">
-              <div class="mini-head">
-                <span class="eyebrow">Objetivo del deck</span>
-                <strong>Publico meta y tipo de entrega</strong>
-              </div>
-              <div id="introGoalsGroups" class="intro-goals-grid"></div>
-              <label class="field intro-context-field">
-                <span>Brief del proyecto (opcional)</span>
-                <textarea
-                  id="introContextBrief"
-                  placeholder="Nombre del proyecto, ubicacion, intencion, programa y objetivos del cliente. La lectura IA usa este texto como contexto maestro."
-                ></textarea>
+            <div class="project-dashboard-toolbar panel-surface">
+              <label class="project-search-field">
+                <span>Buscar</span>
+                <input
+                  id="dashboardSearchInput"
+                  type="search"
+                  placeholder="Restaurante, hotel, brochure..."
+                  autocomplete="off"
+                />
               </label>
-            </article>
-
-            <div class="decision-layout">
-              <article class="context-card">
-                <div class="mini-head">
-                  <span class="eyebrow">Contexto</span>
-                  <strong>La unica escritura libre del flujo</strong>
-                </div>
-                <label class="field">
-                  <span>Contexto maestro</span>
-                  <textarea
-                    id="contextBrief"
-                    placeholder="Escribe el nombre del proyecto, la ubicacion, intencion, programa, objetivos del cliente y cualquier condicion critica que deba respetar el resultado."
-                  ></textarea>
-                </label>
-
-                <label class="field">
-                  <span>Cambio solicitado opcional</span>
-                  <textarea
-                    id="changeRequest"
-                    placeholder="Solo si el cliente pide un ajuste puntual: cambiar iluminacion, agregar personas, reforzar materiales, mantener todo igual excepto..."
-                  ></textarea>
-                </label>
-              </article>
-
-              <div id="decisionGroups" class="decision-groups"></div>
+              <label class="project-search-field compact">
+                <span>Filtro</span>
+                <select id="dashboardFilterSelect">
+                  <option value="all">Todos</option>
+                  <option value="active">Activos</option>
+                  <option value="image">Con imagenes</option>
+                  <option value="video">Con videos</option>
+                  <option value="document">Con documentos</option>
+                </select>
+              </label>
             </div>
 
-            <section id="pdfDeckBuilder" class="pdf-deck-builder hidden"></section>
+            <div id="projectDashboardGrid" class="project-dashboard-grid"></div>
           </section>
 
-          <section id="step4Panel" class="wizard-panel panel-surface hidden">
-            <div class="section-head">
-              <div>
-                <span id="step4Eyebrow" class="eyebrow">Paso 4</span>
-                <h3 id="step4Title">Resultado final</h3>
-              </div>
-              <div class="section-actions">
-                <span id="resultStatus" class="status-chip">Listo para generar</span>
-              </div>
-            </div>
-
-            <div id="pdfSectionStudio" class="pdf-section-studio hidden"></div>
-
-            <div id="resultView" class="result-layout">
-              <article class="result-stage">
-                <div id="resultPrimary" class="result-primary empty-state">
-                  <strong>Aun no hay resultado generado</strong>
-                  <span>Cuando ejecutes el flujo, aqui aparecera la imagen final o la vista previa del deck PDF.</span>
-                </div>
-                <div id="resultSecondary" class="result-secondary"></div>
-              </article>
-
-              <aside class="result-sidebar">
-                <div class="result-actions-card">
-                  <div class="mini-head">
-                    <span class="eyebrow">Descarga</span>
-                    <strong>Acciones del resultado</strong>
-                  </div>
-                  <div class="action-stack">
-                    <button id="downloadResultBtn" type="button" class="button button-secondary">Descargar principal</button>
-                    <button id="downloadAltBtn" type="button" class="button button-ghost">Descargar alterna</button>
-                    <button id="regenerateResultBtn" type="button" class="button button-secondary">Generar nueva version</button>
-                    <button id="restartFlowBtn" type="button" class="button button-ghost">Empezar de nuevo</button>
-                  </div>
-                  <div id="resultMeta" class="result-meta-list"></div>
-                </div>
-
-                <form id="feedbackForm" class="feedback-card">
-                  <div class="mini-head">
-                    <span class="eyebrow">Feedback</span>
-                    <strong>Califica el resultado visible</strong>
-                  </div>
-
+          <section
+            id="conversationShell"
+            class="project-chat-shell hidden"
+            aria-label="Proyecto conversacional"
+          >
+            <div class="project-chat-layout">
+              <section class="project-chat-main panel-surface">
+                <div class="project-chat-header">
                   <div>
-                    <span class="field-label">Categoria</span>
-                    <div id="feedbackCategoryChips" class="choice-inline"></div>
+                    <span id="activeProjectStatus" class="eyebrow"
+                      >Proyecto</span
+                    >
+                    <h1 id="activeProjectTitle">Proyecto</h1>
+                    <p id="activeProjectSubtitle">
+                      Conversacion, assets y generaciones del proyecto.
+                    </p>
                   </div>
-
-                  <div>
-                    <span class="field-label">Valoracion</span>
-                    <div id="feedbackRatingChips" class="choice-inline rating-inline"></div>
+                  <div class="project-chat-actions">
+                    <button
+                      type="button"
+                      class="button button-secondary"
+                      data-open-dashboard
+                    >
+                      Proyectos
+                    </button>
+                    <button
+                      type="button"
+                      class="button button-primary"
+                      data-project-save-current
+                    >
+                      Guardar
+                    </button>
                   </div>
-
-                  <label class="field">
-                    <span>Comentario</span>
-                    <textarea id="feedbackMessage" placeholder="Que deberia mejorar este resultado para la siguiente iteracion."></textarea>
-                  </label>
-
-                  <button id="feedbackSubmitBtn" type="submit" class="button button-primary full">Guardar feedback</button>
-                </form>
-
-                <div class="feedback-history-card">
-                  <div class="mini-head">
-                    <span class="eyebrow">Memoria</span>
-                    <strong>Feedback guardado</strong>
-                  </div>
-                  <div id="feedbackHistory" class="feedback-list"></div>
                 </div>
+
+                <nav
+                  id="projectTabs"
+                  class="project-tabs"
+                  aria-label="Secciones del proyecto"
+                ></nav>
+
+                <div id="projectConversationView" class="project-tab-view">
+                  <div
+                    id="projectConversationMessages"
+                    class="conversation-messages"
+                  ></div>
+                  <div
+                    id="projectQuickChips"
+                    class="project-quick-chips"
+                    aria-label="Acciones rapidas"
+                  ></div>
+                  <form id="projectComposer" class="project-composer">
+                    <input
+                      id="conversationFileInput"
+                      class="hidden"
+                      type="file"
+                      accept="image/*,.pdf,.pptx,.potx,.dxf,.dwg,.doc,.docx,.txt,.webp"
+                      multiple
+                    />
+                    <button
+                      id="conversationAttachBtn"
+                      type="button"
+                      class="composer-icon-button"
+                      title="Adjuntar archivos"
+                      aria-label="Adjuntar archivos"
+                    >
+                      +
+                    </button>
+                    <select
+                      id="conversationActionSelect"
+                      aria-label="Accion rapida"
+                    >
+                      <option value="chat">Conversar</option>
+                      <option value="image">Generar imagen</option>
+                      <option value="video">Generar video</option>
+                      <option value="presentation">Generar presentacion</option>
+                      <option value="pdf">Generar PDF</option>
+                      <option value="analyze">Analizar archivos</option>
+                      <option value="improve">Mejorar prompt</option>
+                    </select>
+                    <textarea
+                      id="conversationPromptInput"
+                      rows="2"
+                      placeholder="Escribe que queres crear, analizar o mejorar dentro de este proyecto."
+                    ></textarea>
+                    <button type="submit" class="button button-primary">
+                      Enviar
+                    </button>
+                  </form>
+                </div>
+
+                <div
+                  id="projectAssetsView"
+                  class="project-tab-view hidden"
+                ></div>
+                <div
+                  id="projectGalleryView"
+                  class="project-tab-view hidden"
+                ></div>
+                <div
+                  id="projectImagesView"
+                  class="project-tab-view hidden"
+                ></div>
+                <div
+                  id="projectVideoStudioView"
+                  class="project-tab-view hidden"
+                ></div>
+                <div
+                  id="projectPresentationsView"
+                  class="project-tab-view hidden"
+                ></div>
+                <div
+                  id="projectSettingsView"
+                  class="project-tab-view hidden"
+                ></div>
+              </section>
+
+              <aside class="project-context-panel panel-surface">
+                <div class="mini-head">
+                  <span class="eyebrow">Providers</span>
+                  <strong>Estado IA</strong>
+                </div>
+                <div id="projectProviderPanel" class="provider-panel"></div>
+
+                <div class="mini-head">
+                  <span class="eyebrow">Assets</span>
+                  <strong>Contexto activo</strong>
+                </div>
+                <div id="projectAssetRail" class="project-asset-rail"></div>
               </aside>
             </div>
           </section>
 
-          <footer class="wizard-footer panel-surface">
-            <div id="stepHint" class="step-hint">
-              Avanza paso por paso. La navegacion siempre mantiene el contexto y la lectura asociada a la referencia principal.
+          <section id="flowScreen" class="flow-screen">
+            <div class="flow-intro panel-surface">
+              <span class="eyebrow">Paso inicial</span>
+              <h3>Primero escoge por que puerta entrar.</h3>
+              <p>
+                Cada recorrido conserva la misma casa visual: paredes blancas
+                texturizadas, materia real, decisiones claras y una IA que no
+                rediseña lo que ya aprobaste.
+              </p>
             </div>
-            <div class="wizard-actions">
-              <button id="prevStepBtn" type="button" class="button button-ghost">Atras</button>
-              <button id="nextStepBtn" type="button" class="button button-primary">Siguiente</button>
+
+            <div class="flow-grid">
+              <button
+                id="flowRenderCard"
+                type="button"
+                class="flow-card panel-surface"
+              >
+                <span class="flow-number">01</span>
+                <strong>Render fiel</strong>
+                <p>
+                  Sube referencias, bloquea una escena principal y genera una
+                  imagen lista para cliente.
+                </p>
+                <span class="flow-meta"
+                  >Lectura + decisiones + salida de imagen</span
+                >
+              </button>
+
+              <button
+                id="flowPdfCard"
+                type="button"
+                class="flow-card panel-surface"
+              >
+                <span class="flow-number">02</span>
+                <strong>Brochure editable</strong>
+                <p>
+                  Organiza soporte visual, define narrativa y exporta un deck
+                  arquitectonico moldeable.
+                </p>
+                <span class="flow-meta"
+                  >Canva/PPT + narrativa + PDF descargable</span
+                >
+              </button>
             </div>
-          </footer>
-        </section>
+          </section>
+
+          <section id="wizardShell" class="wizard-shell hidden">
+            <div class="wizard-heading panel-surface">
+              <button
+                id="backToFlowsBtn"
+                type="button"
+                class="button button-ghost"
+              >
+                Cambiar flujo
+              </button>
+              <div class="wizard-heading-copy">
+                <span id="wizardFlowLabel" class="eyebrow">Flujo</span>
+                <h3 id="wizardFlowTitle">Render fotorrealista</h3>
+                <p id="wizardFlowSummary">
+                  Un recorrido guiado para pasar de insumos a resultado sin
+                  mezclar pasos, feedback o administracion fuera de contexto.
+                </p>
+              </div>
+            </div>
+
+            <ol id="stepper" class="stepper" aria-label="Pasos del flujo"></ol>
+
+            <section id="step1Panel" class="wizard-panel panel-surface">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Paso 1</span>
+                  <h3>Insumos</h3>
+                </div>
+                <span id="assetSummary" class="status-chip status-soft"
+                  >Sin archivos</span
+                >
+              </div>
+
+              <div class="step-grid step-grid-assets">
+                <article class="asset-drop-wrapper">
+                  <input
+                    id="imageInput"
+                    class="hidden"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                  />
+                  <input
+                    id="documentInput"
+                    class="hidden"
+                    type="file"
+                    accept="image/*,.pdf"
+                    multiple
+                  />
+                  <input
+                    id="customTemplateInput"
+                    class="hidden"
+                    type="file"
+                    accept=".pptx,.potx,.zip,.rar"
+                    multiple
+                  />
+
+                  <button
+                    id="assetDropzone"
+                    type="button"
+                    class="upload-dropzone"
+                  >
+                    <span class="drop-ornament"></span>
+                    <strong id="assetDropzoneTitle"
+                      >Sube las referencias del flujo</strong
+                    >
+                    <span id="assetDropzoneHint">
+                      Puedes cargar una o varias imagenes; luego defines una
+                      principal para que toda la lectura quede vinculada a esa
+                      escena.
+                    </span>
+                  </button>
+
+                  <div class="asset-guide">
+                    <article class="micro-panel">
+                      <span class="eyebrow">Principal</span>
+                      <p>
+                        La referencia principal gobierna la lectura, el prompt
+                        interno y la salida final.
+                      </p>
+                    </article>
+                    <article class="micro-panel">
+                      <span class="eyebrow">Soporte</span>
+                      <p>
+                        Las referencias secundarias o documentos complementan el
+                        criterio, no reemplazan la escena bloqueada.
+                      </p>
+                    </article>
+                  </div>
+                </article>
+
+                <article class="asset-lists">
+                  <div>
+                    <div class="mini-head">
+                      <span class="eyebrow">Referencias visuales</span>
+                      <strong>Imagenes cargadas</strong>
+                    </div>
+                    <div id="primaryGallery" class="asset-grid"></div>
+                  </div>
+
+                  <div>
+                    <div class="mini-head">
+                      <span class="eyebrow">Soporte</span>
+                      <strong>PDFs, planos o apoyo extra</strong>
+                    </div>
+                    <div
+                      id="supportGallery"
+                      class="asset-grid support-grid-list"
+                    ></div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="step2Panel" class="wizard-panel panel-surface hidden">
+              <div class="section-head">
+                <div>
+                  <span class="eyebrow">Paso 2</span>
+                  <h3>Descomposicion inteligente</h3>
+                </div>
+                <div class="section-actions">
+                  <span id="analysisStatus" class="status-chip"
+                    >Esperando referencia principal</span
+                  >
+                  <button
+                    id="refreshAnalysisBtn"
+                    type="button"
+                    class="button button-secondary"
+                  >
+                    Actualizar lectura IA
+                  </button>
+                </div>
+              </div>
+
+              <div class="analysis-stage">
+                <article class="analysis-visual">
+                  <div id="analysisCanvas" class="preview-shell">
+                    <div id="analysisPreviewEmpty" class="preview-empty">
+                      <strong>Aqui aparecera la referencia principal</strong>
+                      <span
+                        >El paso 2 combina lectura local y lectura IA para que
+                        puedas revisar la escena antes de generar.</span
+                      >
+                    </div>
+                    <img
+                      id="analysisPreview"
+                      class="preview-image hidden"
+                      alt="Referencia principal"
+                    />
+                    <svg
+                      id="analysisOverlay"
+                      class="preview-overlay hidden"
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                    ></svg>
+                    <div
+                      id="analysisInteractionLayer"
+                      class="analysis-interaction-layer hidden"
+                    ></div>
+                    <div
+                      id="annotationDraft"
+                      class="annotation-draft hidden"
+                    ></div>
+                  </div>
+                </article>
+
+                <article class="analysis-summary-card">
+                  <div class="mini-head">
+                    <span class="eyebrow">Lectura</span>
+                    <strong>Resumen editable</strong>
+                  </div>
+                  <p id="analysisSummary" class="analysis-summary-text">
+                    Cuando haya una referencia principal, aqui veras una lectura
+                    consolidada de escena, materiales, fondo, OCR y riesgos de
+                    realismo.
+                  </p>
+                  <div id="analysisMeta" class="meta-strip"></div>
+                </article>
+              </div>
+
+              <article class="annotation-workbench">
+                <div class="mini-head">
+                  <span class="eyebrow">Marcacion manual</span>
+                  <strong>Corrige lo que la IA no detecte bien</strong>
+                </div>
+
+                <div class="annotation-toolbar">
+                  <label class="field annotation-field">
+                    <span>Categoria</span>
+                    <select id="annotationCategory">
+                      <option value="objects">Objeto</option>
+                      <option value="texts">Texto o rotulo</option>
+                      <option value="materials">Material</option>
+                      <option value="environment">Entorno</option>
+                    </select>
+                  </label>
+
+                  <label class="field annotation-field annotation-field-wide">
+                    <span>Etiqueta nueva</span>
+                    <input
+                      id="annotationLabel"
+                      type="text"
+                      placeholder="Ejemplo: repisa lateral, rotulo coffee, madera oscura"
+                    />
+                  </label>
+
+                  <div class="annotation-actions">
+                    <button
+                      id="annotationToggleBtn"
+                      type="button"
+                      class="button button-secondary"
+                    >
+                      Activar marcacion
+                    </button>
+                    <button
+                      id="annotationResetBtn"
+                      type="button"
+                      class="button button-ghost"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+
+                <p id="annotationHelp" class="annotation-help">
+                  Activa la marcacion, arrastra sobre la imagen principal y
+                  vincula la nueva lectura al lugar exacto de la escena.
+                </p>
+              </article>
+
+              <div id="analysisEditors" class="analysis-editors"></div>
+            </section>
+
+            <section id="step3Panel" class="wizard-panel panel-surface hidden">
+              <div class="section-head">
+                <div>
+                  <span id="step3Eyebrow" class="eyebrow">Paso 3</span>
+                  <h3 id="step3Title">Decisiones y contexto</h3>
+                </div>
+              </div>
+
+              <article id="introGoalsCard" class="intro-goals-card hidden">
+                <div class="mini-head">
+                  <span class="eyebrow">Objetivo del deck</span>
+                  <strong>Publico meta y tipo de entrega</strong>
+                </div>
+                <div id="introGoalsGroups" class="intro-goals-grid"></div>
+                <label class="field intro-context-field">
+                  <span>Brief del proyecto (opcional)</span>
+                  <textarea
+                    id="introContextBrief"
+                    placeholder="Nombre del proyecto, ubicacion, intencion, programa y objetivos del cliente. La lectura IA usa este texto como contexto maestro."
+                  ></textarea>
+                </label>
+              </article>
+
+              <div class="decision-layout">
+                <article class="context-card">
+                  <div class="mini-head">
+                    <span class="eyebrow">Contexto</span>
+                    <strong>La unica escritura libre del flujo</strong>
+                  </div>
+                  <label class="field">
+                    <span>Contexto maestro</span>
+                    <textarea
+                      id="contextBrief"
+                      placeholder="Escribe el nombre del proyecto, la ubicacion, intencion, programa, objetivos del cliente y cualquier condicion critica que deba respetar el resultado."
+                    ></textarea>
+                  </label>
+
+                  <label class="field">
+                    <span>Cambio solicitado opcional</span>
+                    <textarea
+                      id="changeRequest"
+                      placeholder="Solo si el cliente pide un ajuste puntual: cambiar iluminacion, agregar personas, reforzar materiales, mantener todo igual excepto..."
+                    ></textarea>
+                  </label>
+                </article>
+
+                <div id="decisionGroups" class="decision-groups"></div>
+              </div>
+
+              <section
+                id="pdfDeckBuilder"
+                class="pdf-deck-builder hidden"
+              ></section>
+            </section>
+
+            <section id="step4Panel" class="wizard-panel panel-surface hidden">
+              <div class="section-head">
+                <div>
+                  <span id="step4Eyebrow" class="eyebrow">Paso 4</span>
+                  <h3 id="step4Title">Resultado final</h3>
+                </div>
+                <div class="section-actions">
+                  <span id="resultStatus" class="status-chip"
+                    >Listo para generar</span
+                  >
+                </div>
+              </div>
+
+              <div
+                id="pdfSectionStudio"
+                class="pdf-section-studio hidden"
+              ></div>
+
+              <div id="resultView" class="result-layout">
+                <article class="result-stage">
+                  <div id="resultPrimary" class="result-primary empty-state">
+                    <strong>Aun no hay resultado generado</strong>
+                    <span
+                      >Cuando ejecutes el flujo, aqui aparecera la imagen final
+                      o la vista previa del deck PDF.</span
+                    >
+                  </div>
+                  <div id="resultSecondary" class="result-secondary"></div>
+                </article>
+
+                <aside class="result-sidebar">
+                  <div class="result-actions-card">
+                    <div class="mini-head">
+                      <span class="eyebrow">Descarga</span>
+                      <strong>Acciones del resultado</strong>
+                    </div>
+                    <div class="action-stack">
+                      <button
+                        id="downloadResultBtn"
+                        type="button"
+                        class="button button-secondary"
+                      >
+                        Descargar principal
+                      </button>
+                      <button
+                        id="downloadAltBtn"
+                        type="button"
+                        class="button button-ghost"
+                      >
+                        Descargar alterna
+                      </button>
+                      <button
+                        id="regenerateResultBtn"
+                        type="button"
+                        class="button button-secondary"
+                      >
+                        Generar nueva version
+                      </button>
+                      <button
+                        id="restartFlowBtn"
+                        type="button"
+                        class="button button-ghost"
+                      >
+                        Empezar de nuevo
+                      </button>
+                    </div>
+                    <div id="resultMeta" class="result-meta-list"></div>
+                  </div>
+
+                  <form id="feedbackForm" class="feedback-card">
+                    <div class="mini-head">
+                      <span class="eyebrow">Feedback</span>
+                      <strong>Califica el resultado visible</strong>
+                    </div>
+
+                    <div>
+                      <span class="field-label">Categoria</span>
+                      <div
+                        id="feedbackCategoryChips"
+                        class="choice-inline"
+                      ></div>
+                    </div>
+
+                    <div>
+                      <span class="field-label">Valoracion</span>
+                      <div
+                        id="feedbackRatingChips"
+                        class="choice-inline rating-inline"
+                      ></div>
+                    </div>
+
+                    <label class="field">
+                      <span>Comentario</span>
+                      <textarea
+                        id="feedbackMessage"
+                        placeholder="Que deberia mejorar este resultado para la siguiente iteracion."
+                      ></textarea>
+                    </label>
+
+                    <button
+                      id="feedbackSubmitBtn"
+                      type="submit"
+                      class="button button-primary full"
+                    >
+                      Guardar feedback
+                    </button>
+                  </form>
+
+                  <div class="feedback-history-card">
+                    <div class="mini-head">
+                      <span class="eyebrow">Memoria</span>
+                      <strong>Feedback guardado</strong>
+                    </div>
+                    <div id="feedbackHistory" class="feedback-list"></div>
+                  </div>
+                </aside>
+              </div>
+            </section>
+
+            <footer class="wizard-footer panel-surface">
+              <div id="stepHint" class="step-hint">
+                Avanza paso por paso. La navegacion siempre mantiene el contexto
+                y la lectura asociada a la referencia principal.
+              </div>
+              <div class="wizard-actions">
+                <button
+                  id="prevStepBtn"
+                  type="button"
+                  class="button button-ghost"
+                >
+                  Atras
+                </button>
+                <button
+                  id="nextStepBtn"
+                  type="button"
+                  class="button button-primary"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </footer>
+          </section>
         </main>
       </div>
 
-      <aside id="adminDrawer" class="admin-drawer hidden" aria-label="Panel administrativo">
+      <aside
+        id="adminDrawer"
+        class="admin-drawer hidden"
+        aria-label="Panel administrativo"
+      >
         <div class="admin-drawer-header">
           <div>
             <span class="eyebrow">Administrador</span>
             <h3>Memoria y seguimiento</h3>
           </div>
-          <button id="adminCloseBtn" type="button" class="button button-ghost">Cerrar</button>
+          <button id="adminCloseBtn" type="button" class="button button-ghost">
+            Cerrar
+          </button>
         </div>
 
         <div id="adminStats" class="admin-stats"></div>
@@ -548,19 +886,36 @@
         </details>
       </aside>
 
-      <div id="projectCreateModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="projectCreateTitle">
+      <div
+        id="projectCreateModal"
+        class="modal-backdrop hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="projectCreateTitle"
+      >
         <form id="projectCreateForm" class="project-create-modal panel-surface">
           <div class="section-head">
             <div>
               <span class="eyebrow">Nuevo proyecto</span>
               <h3 id="projectCreateTitle">Crear proyecto conversacional</h3>
             </div>
-            <button id="projectCreateCancelBtn" type="button" class="button button-ghost">Cerrar</button>
+            <button
+              id="projectCreateCancelBtn"
+              type="button"
+              class="button button-ghost"
+            >
+              Cerrar
+            </button>
           </div>
 
           <label class="field">
             <span>Nombre del proyecto</span>
-            <input id="modalProjectName" type="text" required placeholder="Restaurante Escazu" />
+            <input
+              id="modalProjectName"
+              type="text"
+              required
+              placeholder="Restaurante Escazu"
+            />
           </label>
 
           <label class="field">
@@ -591,15 +946,20 @@
 
           <label class="field">
             <span>Descripcion opcional</span>
-            <textarea id="modalProjectDescription" placeholder="Contexto, ubicacion, estilo, entregable esperado..."></textarea>
+            <textarea
+              id="modalProjectDescription"
+              placeholder="Contexto, ubicacion, estilo, entregable esperado..."
+            ></textarea>
           </label>
 
-          <button type="submit" class="button button-primary full">Crear proyecto</button>
+          <button type="submit" class="button button-primary full">
+            Crear proyecto
+          </button>
         </form>
       </div>
     </div>
 
-  <script src="./videoTemplates.js?v=3"></script>
-    <script src="./app.js?v=30"></script>
+    <script src="./videoTemplates.js?v=3"></script>
+    <script src="./app.js?v=31"></script>
   </body>
 </html>

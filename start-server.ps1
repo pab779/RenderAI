@@ -799,17 +799,281 @@ function Test-LumaPublicAssetBaseUrl {
   return $true
 }
 
+function Get-SafeUriHost {
+  param(
+    [string]$UriText
+  )
+
+  if ([string]::IsNullOrWhiteSpace($UriText)) {
+    return $null
+  }
+
+  try {
+    $uri = [System.Uri]::new($UriText)
+    return $uri.Host
+  } catch {
+    return $null
+  }
+}
+
+function Get-LumaReadiness {
+  $lumaKey = Get-StoredLumaApiKey
+  $lumaConfigured = -not [string]::IsNullOrWhiteSpace($lumaKey)
+
+  $publicAssetBaseUrl = [string]$env:PUBLIC_ASSET_BASE_URL
+  $publicAssetBaseUrlConfigured = -not [string]::IsNullOrWhiteSpace($publicAssetBaseUrl)
+  $publicAssetBaseUrlIsHttps = $publicAssetBaseUrl -match '^https://'
+
+  $projectAssetRootExists = Test-Path -LiteralPath $script:ProjectAssetRoot
+
+  $reasons = @()
+
+  if (-not $lumaConfigured) {
+    $reasons += "missing_luma_api_key"
+  }
+
+  if (-not $publicAssetBaseUrlConfigured) {
+    $reasons += "missing_public_asset_base_url"
+  } elseif (-not $publicAssetBaseUrlIsHttps) {
+    $reasons += "public_asset_base_url_not_https"
+  } elseif (-not (Test-LumaPublicAssetBaseUrl -Url $publicAssetBaseUrl)) {
+    $reasons += "public_asset_base_url_not_public"
+  }
+
+  if (-not $projectAssetRootExists) {
+    try {
+      New-Item -ItemType Directory -Path $script:ProjectAssetRoot -Force | Out-Null
+      $projectAssetRootExists = Test-Path -LiteralPath $script:ProjectAssetRoot
+    } catch {
+      $reasons += "project_asset_root_unavailable"
+    }
+  }
+
+  $ready = $lumaConfigured -and $publicAssetBaseUrlConfigured -and $publicAssetBaseUrlIsHttps -and (Test-LumaPublicAssetBaseUrl -Url $publicAssetBaseUrl) -and $projectAssetRootExists
+
+  return @{
+    configured = $lumaConfigured
+    ready = $ready
+    source = Get-ProviderSecretSource -Provider "luma" -ApiKey $lumaKey
+    publicAssetBaseUrlConfigured = $publicAssetBaseUrlConfigured
+    publicAssetBaseUrlIsHttps = $publicAssetBaseUrlIsHttps
+    publicAssetBaseUrlHost = Get-SafeUriHost -UriText $publicAssetBaseUrl
+    projectAssetRootExists = $projectAssetRootExists
+    blockedReason = if ($reasons.Count) { $reasons[0] } else { $null }
+    reasons = $reasons
+  }
+}
+
+function Assert-LumaReady {
+  $readiness = Get-LumaReadiness
+
+  if (-not $readiness.configured) {
+    throw "LUMA_NOT_CONFIGURED::Luma no tiene API key configurada."
+  }
+
+  if (-not $readiness.publicAssetBaseUrlConfigured) {
+    throw "LUMA_PUBLIC_ASSET_BASE_URL_MISSING::Luma tiene API key, pero falta PUBLIC_ASSET_BASE_URL para publicar imagenes como HTTPS."
+  }
+
+  if (-not $readiness.publicAssetBaseUrlIsHttps) {
+    throw "LUMA_PUBLIC_ASSET_BASE_URL_NOT_HTTPS::PUBLIC_ASSET_BASE_URL debe iniciar con https://."
+  }
+
+  if ($readiness.reasons -contains "public_asset_base_url_not_public") {
+    throw "LUMA_PUBLIC_ASSET_BASE_URL_NOT_PUBLIC::PUBLIC_ASSET_BASE_URL debe ser una URL publica HTTPS accesible por Luma."
+  }
+
+  if (-not $readiness.projectAssetRootExists) {
+    throw "LUMA_PROJECT_ASSET_ROOT_UNAVAILABLE::No se pudo preparar la carpeta publica de assets para Luma."
+  }
+
+  return $true
+}
+
+function Assert-LumaSourceImageUrl {
+  param(
+    [Parameter(Mandatory = $true)][string]$SourceImageUrl
+  )
+
+  if ([string]::IsNullOrWhiteSpace($SourceImageUrl)) {
+    throw "LUMA_IMAGE_URL_MISSING::No se recibio URL de imagen para Luma."
+  }
+
+  if ($SourceImageUrl -match '^data:image') {
+    throw "LUMA_IMAGE_NOT_PUBLIC::La imagen sigue siendo base64. Debe materializarse como URL publica HTTPS antes de llamar a Luma."
+  }
+
+  if ($SourceImageUrl -match 'localhost|127\.0\.0\.1|0\.0\.0\.0') {
+    throw "LUMA_IMAGE_LOCALHOST::Luma no puede leer imagenes desde localhost o direcciones locales."
+  }
+
+  if ($SourceImageUrl -notmatch '^https://') {
+    throw "LUMA_IMAGE_NOT_HTTPS::Luma requiere una imagen publica HTTPS."
+  }
+
+  if (-not (Test-LumaPublicAssetBaseUrl -Url $SourceImageUrl)) {
+    throw "LUMA_IMAGE_NOT_PUBLIC::La imagen fuente debe ser una URL publica HTTPS accesible por Luma."
+  }
+
+  return $true
+}
+
+function Save-ProjectAssetDataUrl {
+  param(
+    [Parameter(Mandatory = $true)][string]$DataUrl,
+    [string]$ProjectId = "default",
+    [string]$Prefix = "luma-source"
+  )
+
+  if ([string]::IsNullOrWhiteSpace($DataUrl)) {
+    throw "PROJECT_ASSET_DATA_URL_EMPTY::No se recibio imagen base64 para materializar."
+  }
+
+  $part = Convert-DataUrlToImagePart -DataUrl $DataUrl -Index 0
+
+  $safeProjectId = if ([string]::IsNullOrWhiteSpace($ProjectId)) { "default" } else { ($ProjectId -replace '[^a-zA-Z0-9_-]', '-') }
+  $projectFolder = Join-Path $script:ProjectAssetRoot $safeProjectId
+  New-Item -ItemType Directory -Path $projectFolder -Force | Out-Null
+
+  $extension = switch -Regex ($part.MimeType) {
+    'png' { 'png'; break }
+    'jpeg|jpg' { 'jpg'; break }
+    'webp' { 'webp'; break }
+    default { 'png' }
+  }
+
+  $fileName = ("{0}-{1}.{2}" -f ($Prefix -replace '[^a-zA-Z0-9_-]', '-'), ([Guid]::NewGuid().ToString("N")), $extension)
+  $localPath = Join-Path $projectFolder $fileName
+
+  [System.IO.File]::WriteAllBytes($localPath, $part.Bytes)
+
+  $publicAssetBaseUrl = ([string]$env:PUBLIC_ASSET_BASE_URL).TrimEnd("/")
+  if ([string]::IsNullOrWhiteSpace($publicAssetBaseUrl)) {
+    throw "PUBLIC_ASSET_BASE_URL_MISSING::No se puede construir URL publica porque falta PUBLIC_ASSET_BASE_URL."
+  }
+
+  if ($publicAssetBaseUrl -notmatch '^https://') {
+    throw "PUBLIC_ASSET_BASE_URL_NOT_HTTPS::PUBLIC_ASSET_BASE_URL debe iniciar con https://."
+  }
+
+  $relativePath = "outputs/project-assets/$safeProjectId/$fileName"
+  $publicUrl = "$publicAssetBaseUrl/$relativePath"
+
+  return @{
+    localPath = $localPath
+    relativePath = $relativePath
+    publicUrl = $publicUrl
+    mimeType = $part.MimeType
+  }
+}
+
+function Resolve-LumaSourceImage {
+  param(
+    [Parameter(Mandatory = $true)]$ImageInput,
+    [string]$ProjectId = "default"
+  )
+
+  if ($null -eq $ImageInput) {
+    throw "LUMA_IMAGE_INPUT_MISSING::No se recibio imagen fuente para Luma."
+  }
+
+  if ($ImageInput -is [string]) {
+    $rawImageInput = [string]$ImageInput
+    if ($rawImageInput -match '^https://') {
+      Assert-LumaSourceImageUrl -SourceImageUrl $rawImageInput | Out-Null
+      return @{
+        publicUrl = $rawImageInput
+        materialized = $false
+        localPath = $null
+        mimeType = $null
+      }
+    }
+    if ($rawImageInput -match '^data:image') {
+      $saved = Save-ProjectAssetDataUrl -DataUrl $rawImageInput -ProjectId $ProjectId -Prefix "luma-source"
+      Assert-LumaSourceImageUrl -SourceImageUrl $saved.publicUrl | Out-Null
+      return @{
+        publicUrl = $saved.publicUrl
+        materialized = $true
+        localPath = $saved.localPath
+        mimeType = $saved.mimeType
+      }
+    }
+  }
+
+  $candidateUrl = [string](Get-PropValue -Object $ImageInput -Name "publicUrl" -Default "")
+  if (-not [string]::IsNullOrWhiteSpace($candidateUrl)) {
+    Assert-LumaSourceImageUrl -SourceImageUrl $candidateUrl | Out-Null
+    return @{
+      publicUrl = $candidateUrl
+      materialized = $false
+      localPath = $null
+      mimeType = $null
+    }
+  }
+
+  $candidateUrl = [string](Get-PropValue -Object $ImageInput -Name "url" -Default "")
+  if (-not [string]::IsNullOrWhiteSpace($candidateUrl) -and $candidateUrl -match '^https://') {
+    Assert-LumaSourceImageUrl -SourceImageUrl $candidateUrl | Out-Null
+    return @{
+      publicUrl = $candidateUrl
+      materialized = $false
+      localPath = $null
+      mimeType = $null
+    }
+  }
+
+  $dataUrl = [string](Get-PropValue -Object $ImageInput -Name "dataUrl" -Default "")
+  if ([string]::IsNullOrWhiteSpace($dataUrl)) {
+    $dataUrl = [string](Get-PropValue -Object $ImageInput -Name "imageDataUrl" -Default "")
+  }
+
+  if ($dataUrl -match '^data:image') {
+    $saved = Save-ProjectAssetDataUrl -DataUrl $dataUrl -ProjectId $ProjectId -Prefix "luma-source"
+    Assert-LumaSourceImageUrl -SourceImageUrl $saved.publicUrl | Out-Null
+    return @{
+      publicUrl = $saved.publicUrl
+      materialized = $true
+      localPath = $saved.localPath
+      mimeType = $saved.mimeType
+    }
+  }
+
+  throw "LUMA_IMAGE_INPUT_INVALID::La imagen fuente no tiene publicUrl HTTPS ni dataUrl valido para materializar."
+}
+
+function Find-FirstHttpsVideoUrl {
+  param(
+    [Parameter(Mandatory = $true)]$Object
+  )
+
+  if ($null -eq $Object) {
+    return $null
+  }
+
+  $json = $Object | ConvertTo-Json -Depth 50
+  $matches = [regex]::Matches($json, 'https://[^"\\]+')
+  foreach ($match in $matches) {
+    $url = [string]$match.Value
+    if ($url -match '\.(mp4|mov|webm)(\?|$)' -or $url -match 'video') {
+      return $url
+    }
+  }
+
+  return $null
+}
+
 function Resolve-RenderRuntimeInfo {
   $geminiKey = Get-StoredGeminiApiKey
   $openAiKey = Get-StoredOpenAiApiKey
   $lumaKey = Get-StoredLumaApiKey
   $publicAssetBaseUrl = [string]$env:PUBLIC_ASSET_BASE_URL
+  $lumaReadiness = Get-LumaReadiness
   $mockAi = ([string]$env:USE_MOCK_AI).ToLowerInvariant() -eq "true"
   $renderProvider = if (-not [string]::IsNullOrWhiteSpace($geminiKey)) { "gemini" } elseif (-not [string]::IsNullOrWhiteSpace($openAiKey)) { "openai" } else { "local" }
-  $lumaConfigured = -not [string]::IsNullOrWhiteSpace($lumaKey)
+  $lumaConfigured = [bool]$lumaReadiness.configured
   $publicAssetBaseUrlConfigured = -not [string]::IsNullOrWhiteSpace($publicAssetBaseUrl)
   $publicAssetBaseUrlUsable = Test-LumaPublicAssetBaseUrl -Url $publicAssetBaseUrl
-  $lumaReady = $lumaConfigured -and $publicAssetBaseUrlUsable
+  $lumaReady = [bool]$lumaReadiness.ready
   return @{
     renderProvider = $renderProvider
     renderReady = $renderProvider -ne "local"
@@ -822,6 +1086,9 @@ function Resolve-RenderRuntimeInfo {
     mockAi = $mockAi
     publicAssetBaseUrlConfigured = $publicAssetBaseUrlConfigured
     publicAssetBaseUrlUsable = $publicAssetBaseUrlUsable
+    lumaReadiness = $lumaReadiness
+    lumaBlockedReason = $lumaReadiness.blockedReason
+    lumaReasons = $lumaReadiness.reasons
     videoReady = ($lumaReady -or $mockAi)
     videoProvider = if ($lumaReady) { "luma" } elseif ($mockAi) { "mock" } else { "none" }
     renderSecretSource = if ($renderProvider -eq "gemini") { Get-ProviderSecretSource -Provider "gemini" -ApiKey $geminiKey } elseif ($renderProvider -eq "openai") { Get-ProviderSecretSource -Provider "openai" -ApiKey $openAiKey } else { "none" }
@@ -1044,15 +1311,25 @@ function Invoke-LumaImageToVideo {
     [Parameter(Mandatory = $true)][string]$Prompt,
     [Parameter(Mandatory = $true)]$ImageUrls,
     [int]$DurationSeconds = 5,
-    [string]$AspectRatio = "16:9"
+    [string]$AspectRatio = "16:9",
+    [string]$ProjectId = "project"
   )
 
   $apiKey = Get-StoredLumaApiKey
-  if ([string]::IsNullOrWhiteSpace($apiKey)) {
-    throw "Luma no está configurado. Agrega LUMA_API_KEY en el backend para activar generación de video."
-  }
+  Assert-LumaReady | Out-Null
   $frames = @($ImageUrls)
   if (-not $frames.Count) { throw "No approved images were provided for Luma." }
+  $resolvedFrames = @()
+  foreach ($frame in $frames) {
+    $resolvedFrame = Resolve-LumaSourceImage -ImageInput $frame -ProjectId $ProjectId
+    Assert-LumaSourceImageUrl -SourceImageUrl ([string]$resolvedFrame.publicUrl) | Out-Null
+    $resolvedFrames += $resolvedFrame
+  }
+  $readiness = Get-LumaReadiness
+  Write-Host "[Luma] configured:" $readiness.configured
+  Write-Host "[Luma] ready:" $readiness.ready
+  Write-Host "[Luma] source image host:" (Get-SafeUriHost -UriText ([string]$resolvedFrames[0].publicUrl))
+  Write-Host "[Luma] creating generation"
   $duration = if ($DurationSeconds -le 5) { "5s" } else { "9s" }
   $bodyObject = @{
     prompt = $Prompt
@@ -1064,14 +1341,14 @@ function Invoke-LumaImageToVideo {
     keyframes = @{
       frame0 = @{
         type = "image"
-        url = [string]$frames[0]
+        url = [string]$resolvedFrames[0].publicUrl
       }
     }
   }
-  if ($frames.Count -gt 1) {
+  if ($resolvedFrames.Count -gt 1) {
     $bodyObject.keyframes["frame1"] = @{
       type = "image"
-      url = [string]$frames[$frames.Count - 1]
+      url = [string]$resolvedFrames[$resolvedFrames.Count - 1].publicUrl
     }
   }
   $body = $bodyObject | ConvertTo-Json -Depth 20
@@ -1154,6 +1431,60 @@ function Invoke-OpenAiVisualProfile {
   )
   $response = Invoke-OpenAiJsonChatCompletion -Messages $messages -MaxTokens 1000
   return ($response.choices[0].message.content | ConvertFrom-Json)
+}
+
+function New-BrochureImageLayerPrompt {
+  param(
+    $RenderSettings,
+    $SlideContext,
+    $LayerContext
+  )
+
+  $style = [string](Get-PropValue -Object $RenderSettings -Name "style" -Default "photographic")
+  $fidelity = [string](Get-PropValue -Object $RenderSettings -Name "fidelity" -Default "strict")
+  $light = [string](Get-PropValue -Object $RenderSettings -Name "light" -Default "natural")
+  $changeRequest = [string](Get-PropValue -Object $RenderSettings -Name "changeRequest" -Default "")
+  $role = [string](Get-PropValue -Object $LayerContext -Name "role" -Default "image")
+  $slideType = [string](Get-PropValue -Object $SlideContext -Name "slideType" -Default "slide")
+
+  return @"
+You are editing ONE image instance inside a presentation slide.
+
+This render is for a single image slot only.
+Do not affect other images.
+Do not reinterpret the full presentation.
+Do not create a new slide.
+Do not add text unless it already exists in the source image.
+Do not alter architectural geometry.
+
+SLIDE TYPE:
+$slideType
+
+IMAGE ROLE:
+$role
+
+STYLE:
+$style
+
+FIDELITY:
+$fidelity
+
+LIGHT:
+$light
+
+USER REQUEST:
+$changeRequest
+
+STRICT RULES:
+- Preserve architecture, room geometry, walls, doors, windows, ceiling, floor and camera.
+- Preserve visible objects unless the user explicitly asks to change them.
+- Preserve visible text/signage exactly.
+- Improve only photographic quality, lighting, materials, texture and presentation.
+- If this image is a background, leave clean negative space for text.
+- If this image is a hero image, prioritize clarity and composition.
+- If this image is moodboard/reference, prioritize atmosphere while preserving source identity.
+- Output one improved image only.
+"@
 }
 
 function Escape-PdfString {
@@ -2589,9 +2920,13 @@ function Handle-ApiRequest {
       geminiReady = $runtime.geminiReady
       lumaConfigured = $runtime.lumaConfigured
       lumaReady = $runtime.lumaReady
+      lumaBlockedReason = $runtime.lumaBlockedReason
+      lumaReasons = $runtime.lumaReasons
       mockAi = $runtime.mockAi
       publicAssetBaseUrlConfigured = $runtime.publicAssetBaseUrlConfigured
       publicAssetBaseUrlUsable = $runtime.publicAssetBaseUrlUsable
+      publicAssetBaseUrlIsHttps = $runtime.lumaReadiness.publicAssetBaseUrlIsHttps
+      publicAssetBaseUrlHost = $runtime.lumaReadiness.publicAssetBaseUrlHost
       videoReady = $runtime.videoReady
       videoProvider = $runtime.videoProvider
       root = $resolvedRoot
@@ -2609,6 +2944,7 @@ function Handle-ApiRequest {
 
   if ($method -eq "GET" -and $path -eq "/api/providers/status") {
     $runtime = Resolve-RenderRuntimeInfo
+    $lumaReadiness = Get-LumaReadiness
     Write-JsonResponse -Response $response -Payload @{
       ok = $true
       providers = @{
@@ -2623,11 +2959,16 @@ function Handle-ApiRequest {
           secretSource = if ($runtime.renderProvider -eq "gemini") { $runtime.renderSecretSource } else { "none" }
         }
         luma = @{
-          configured = $runtime.lumaConfigured
-          ready = $runtime.lumaReady
-          publicAssetBaseUrlConfigured = $runtime.publicAssetBaseUrlConfigured
-          publicAssetBaseUrlUsable = $runtime.publicAssetBaseUrlUsable
-          secretSource = $runtime.videoSecretSource
+          configured = $lumaReadiness.configured
+          ready = $lumaReadiness.ready
+          source = $lumaReadiness.source
+          secretSource = $lumaReadiness.source
+          publicAssetBaseUrlConfigured = $lumaReadiness.publicAssetBaseUrlConfigured
+          publicAssetBaseUrlIsHttps = $lumaReadiness.publicAssetBaseUrlIsHttps
+          publicAssetBaseUrlHost = $lumaReadiness.publicAssetBaseUrlHost
+          projectAssetRootExists = $lumaReadiness.projectAssetRootExists
+          blockedReason = $lumaReadiness.blockedReason
+          reasons = $lumaReadiness.reasons
         }
         mock = @{
           available = $runtime.mockAi
@@ -2636,6 +2977,17 @@ function Handle-ApiRequest {
       }
       timestamp = (Get-Date).ToString("o")
     }
+    return $true
+  }
+
+  if ($method -eq "GET" -and $path -eq "/api/luma/diagnostics") {
+    $readiness = Get-LumaReadiness
+    Write-JsonResponse -Response $response -Payload @{
+      ok = $true
+      luma = $readiness
+      defaultVideoProvider = $env:DEFAULT_VIDEO_PROVIDER
+      mockAi = ($env:USE_MOCK_AI -eq "true")
+    } -StatusCode 200
     return $true
   }
 
@@ -2789,47 +3141,67 @@ function Handle-ApiRequest {
     if ([string]::IsNullOrWhiteSpace($prompt)) {
       $prompt = [string](Get-PropValue -Object $payload -Name "lumaPrompt" -Default "Architectural video")
     }
-    if ($runtime.mockAi -and (-not $runtime.lumaReady -or ([string](Get-PropValue -Object $payload -Name "provider" -Default "") -eq "mock"))) {
+    $providerPreference = ([string](Get-PropValue -Object $payload -Name "provider" -Default "")).ToLowerInvariant()
+    if ($runtime.mockAi -and $providerPreference -eq "mock") {
       Write-JsonResponse -Response $response -Payload (New-MockVideoResult -ProjectId $projectId -Prompt $prompt)
       return $true
     }
-    if (-not $runtime.lumaConfigured) {
-      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
-        ok = $false
-        message = "Luma no está configurado. Agrega LUMA_API_KEY en el backend para activar generación de video."
+    $lumaReadiness = Get-LumaReadiness
+    if (-not $lumaReadiness.ready) {
+      $lumaMessage = if ($lumaReadiness.blockedReason -eq "missing_luma_api_key") {
+        "Luma no tiene API key configurada."
+      } elseif ($lumaReadiness.blockedReason -eq "missing_public_asset_base_url") {
+        "Luma tiene API key, pero falta PUBLIC_ASSET_BASE_URL para publicar imagenes como HTTPS."
+      } elseif ($lumaReadiness.blockedReason -eq "public_asset_base_url_not_https") {
+        "PUBLIC_ASSET_BASE_URL debe iniciar con https://."
+      } elseif ($lumaReadiness.blockedReason -eq "public_asset_base_url_not_public") {
+        "PUBLIC_ASSET_BASE_URL debe ser una URL publica HTTPS accesible por Luma; localhost o redes privadas no sirven para image-to-video real."
+      } else {
+        "Luma no esta listo para generar video."
       }
-      return $true
-    }
-    if (-not $runtime.publicAssetBaseUrlConfigured) {
       Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
         ok = $false
-        message = "PUBLIC_ASSET_BASE_URL is required so Luma can read project images."
-      }
-      return $true
-    }
-    if (-not $runtime.publicAssetBaseUrlUsable) {
-      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
-        ok = $false
-        message = "PUBLIC_ASSET_BASE_URL debe ser una URL publica HTTPS accesible por Luma; localhost o redes privadas no sirven para image-to-video real."
+        message = $lumaMessage
+        luma = $lumaReadiness
       }
       return $true
     }
     try {
-      $images = @((Get-PropValue -Object $payload -Name "images" -Default @()) | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-      if (-not $images.Count) { throw "No approved images were provided for Luma." }
+      $imageInputs = @()
+      $imagesPayload = Get-PropValue -Object $payload -Name "images" -Default @()
+      if ($null -ne $imagesPayload) {
+        $imageInputs += @($imagesPayload)
+      }
+      $sourceImage = Get-PropValue -Object $payload -Name "sourceImage" -Default $null
+      if ($null -ne $sourceImage) {
+        $imageInputs += $sourceImage
+      }
+      $sourceImageDataUrl = [string](Get-PropValue -Object $payload -Name "sourceImageDataUrl" -Default "")
+      if (-not [string]::IsNullOrWhiteSpace($sourceImageDataUrl)) {
+        $imageInputs += $sourceImageDataUrl
+      }
+      $imageInputs = @($imageInputs | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace(([string]$_)) })
+      if (-not $imageInputs.Count) { throw "No approved images were provided for Luma." }
       $publicImages = @()
-      for ($i = 0; $i -lt $images.Count; $i += 1) {
-        $publicImages += Convert-InputImageToPublicUrl -ProjectId $projectId -Image $images[$i] -Index $i
+      $sourceImageUrls = @()
+      for ($i = 0; $i -lt $imageInputs.Count; $i += 1) {
+        $source = Resolve-LumaSourceImage -ImageInput $imageInputs[$i] -ProjectId $projectId
+        $publicImages += $source
+        $sourceImageUrls += [string]$source.publicUrl
       }
       $result = Invoke-LumaImageToVideo `
         -Prompt $prompt `
         -ImageUrls $publicImages `
         -DurationSeconds ([int](Get-PropValue -Object $payload -Name "durationSeconds" -Default 5)) `
-        -AspectRatio ([string](Get-PropValue -Object $payload -Name "aspectRatio" -Default "16:9"))
+        -AspectRatio ([string](Get-PropValue -Object $payload -Name "aspectRatio" -Default "16:9")) `
+        -ProjectId $projectId
       $generationId = [string](Get-PropValue -Object $result -Name "id" -Default "")
       $stateValue = [string](Get-PropValue -Object $result -Name "state" -Default "queued")
       $assets = Get-PropValue -Object $result -Name "assets" -Default @{}
-      $videoUrl = [string](Get-PropValue -Object $assets -Name "video" -Default "")
+      $videoUrl = Find-FirstHttpsVideoUrl -Object $result
+      if ([string]::IsNullOrWhiteSpace($videoUrl)) {
+        $videoUrl = [string](Get-PropValue -Object $assets -Name "video" -Default "")
+      }
       Write-JsonResponse -Response $response -Payload @{
         ok = $true
         provider = "luma"
@@ -2837,6 +3209,8 @@ function Handle-ApiRequest {
         jobId = $generationId
         status = $stateValue
         videoUrl = $videoUrl
+        sourceImageUrl = if ($sourceImageUrls.Count) { $sourceImageUrls[0] } else { "" }
+        sourceImageHost = if ($sourceImageUrls.Count) { Get-SafeUriHost -UriText $sourceImageUrls[0] } else { "" }
       }
     } catch {
       $detailText = Get-ErrorDetailText -ErrorRecord $_
@@ -2853,13 +3227,17 @@ function Handle-ApiRequest {
     try {
       $result = Get-LumaGenerationStatus -GenerationId $generationId
       $assets = Get-PropValue -Object $result -Name "assets" -Default @{}
+      $videoUrl = Find-FirstHttpsVideoUrl -Object $result
+      if ([string]::IsNullOrWhiteSpace($videoUrl)) {
+        $videoUrl = [string](Get-PropValue -Object $assets -Name "video" -Default "")
+      }
       Write-JsonResponse -Response $response -Payload @{
         ok = $true
         provider = if ($generationId -match '^mock-') { "mock" } else { "luma" }
         generationId = [string](Get-PropValue -Object $result -Name "id" -Default $generationId)
         status = [string](Get-PropValue -Object $result -Name "state" -Default "processing")
         failureReason = [string](Get-PropValue -Object $result -Name "failure_reason" -Default "")
-        videoUrl = [string](Get-PropValue -Object $assets -Name "video" -Default "")
+        videoUrl = $videoUrl
       }
     } catch {
       $detailText = Get-ErrorDetailText -ErrorRecord $_
@@ -2878,6 +3256,117 @@ function Handle-ApiRequest {
       ok = $false
       message = "No video compositor configured. Puedes descargar clips individuales o configurar FFmpeg."
       clipCount = $clips.Count
+    }
+    return $true
+  }
+
+  if ($method -eq "POST" -and $path -eq "/api/brochure/render-image-layer") {
+    $payload = Get-RequestJson -Request $request
+    $runtime = Resolve-RenderRuntimeInfo
+    if (-not $runtime.renderReady) {
+      Write-JsonResponse -Response $response -StatusCode 412 -Payload @{
+        ok = $false
+        message = "No image generation provider is configured. Add GEMINI_API_KEY or OPENAI_API_KEY."
+      }
+      return $true
+    }
+
+    try {
+      $projectId = [string](Get-PropValue -Object $payload -Name "projectId" -Default "")
+      $presentationId = [string](Get-PropValue -Object $payload -Name "presentationId" -Default "")
+      $slideId = [string](Get-PropValue -Object $payload -Name "slideId" -Default "")
+      $layerId = [string](Get-PropValue -Object $payload -Name "layerId" -Default "")
+      $slotInstanceId = [string](Get-PropValue -Object $payload -Name "slotInstanceId" -Default "")
+      $sourceAssetId = [string](Get-PropValue -Object $payload -Name "sourceAssetId" -Default "")
+      $sourceImageDataUrl = [string](Get-PropValue -Object $payload -Name "sourceImageDataUrl" -Default "")
+      $renderSettings = Get-PropValue -Object $payload -Name "renderSettings" -Default @{}
+      $slideContext = Get-PropValue -Object $payload -Name "slideContext" -Default @{}
+      $layerContext = Get-PropValue -Object $payload -Name "layerContext" -Default @{}
+
+      if ([string]::IsNullOrWhiteSpace($sourceImageDataUrl) -or $sourceImageDataUrl -notmatch '^data:image/') {
+        Write-JsonResponse -Response $response -StatusCode 400 -Payload @{
+          ok = $false
+          message = "La imagen seleccionada debe estar disponible como dataUrl para renderizar esta instancia."
+        }
+        return $true
+      }
+
+      $prompt = New-BrochureImageLayerPrompt -RenderSettings $renderSettings -SlideContext $slideContext -LayerContext $layerContext
+      $providerPreference = ([string](Get-PropValue -Object $renderSettings -Name "provider" -Default $env:DEFAULT_IMAGE_PROVIDER)).ToLowerInvariant()
+      if ([string]::IsNullOrWhiteSpace($providerPreference)) { $providerPreference = "auto" }
+      $provider = $runtime.renderProvider
+      if ($providerPreference -eq "openai" -and $runtime.openAiReady) {
+        $provider = "openai"
+      } elseif ($providerPreference -eq "gemini" -and $runtime.geminiReady) {
+        $provider = "gemini"
+      } elseif ($runtime.geminiReady) {
+        $provider = "gemini"
+      } elseif ($runtime.openAiReady) {
+        $provider = "openai"
+      }
+      $usedProvider = $provider
+      $fallbackReason = ""
+
+      Write-Host "[Brochure] render image layer provider=$provider slide=$slideId layer=$layerId slot=$slotInstanceId"
+      if ($provider -eq "gemini") {
+        try {
+          $result = Invoke-GeminiImageGenerate -Prompt $prompt -Images @($sourceImageDataUrl) -Size "1536x1024" -Quality "medium"
+        } catch {
+          $geminiDetail = Get-ErrorDetailText -ErrorRecord $_
+          if (-not $runtime.openAiReady) { throw }
+          $usedProvider = "openai-fallback"
+          $fallbackReason = "Gemini no respondio correctamente; se uso OpenAI como respaldo."
+          try {
+            $result = Invoke-OpenAiRenderEdit -Prompt $prompt -Images @($sourceImageDataUrl) -Size "1536x1024" -Quality "medium" -InputFidelity "high" -OutputFormat "jpeg" -OutputCompression 92
+          } catch {
+            $openAiDetail = Get-ErrorDetailText -ErrorRecord $_
+            throw "Gemini fallo: $geminiDetail OpenAI fallback tambien fallo: $openAiDetail"
+          }
+        }
+      } else {
+        $result = Invoke-OpenAiRenderEdit -Prompt $prompt -Images @($sourceImageDataUrl) -Size "1536x1024" -Quality "medium" -InputFidelity "high" -OutputFormat "jpeg" -OutputCompression 92
+      }
+
+      $mimeType = [string](Get-PropValue -Object $result -Name "mimeType" -Default "image/jpeg")
+      $dataUrl = "data:$mimeType;base64,$($result.imageBase64)"
+      $renderedAsset = @{
+        id = "gallery-" + [Guid]::NewGuid().ToString("N")
+        projectId = $projectId
+        type = "image"
+        source = "generated"
+        provider = $usedProvider
+        dataUrl = $dataUrl
+        url = $dataUrl
+        mimeType = $mimeType
+        name = "Render capa brochure"
+        status = "ready"
+        approvalStatus = "pending"
+        createdAt = (Get-Date).ToString("o")
+        metadata = @{
+          generated = $true
+          parentPresentationId = $presentationId
+          parentSlideId = $slideId
+          parentLayerId = $layerId
+          slotInstanceId = $slotInstanceId
+          sourceAssetId = $sourceAssetId
+          renderSettings = $renderSettings
+          prompt = $prompt
+          fallbackReason = $fallbackReason
+        }
+      }
+
+      Write-JsonResponse -Response $response -Payload @{
+        ok = $true
+        renderedAsset = $renderedAsset
+      }
+    } catch {
+      $statusCode = Get-ErrorStatusCode -ErrorRecord $_ -Default 500
+      $detailText = Get-ErrorDetailText -ErrorRecord $_
+      Write-JsonResponse -Response $response -StatusCode $statusCode -Payload @{
+        ok = $false
+        message = $detailText
+        upstreamStatus = $statusCode
+      }
     }
     return $true
   }
