@@ -24,12 +24,14 @@ $secureStoreBase = if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
 $script:SecureStoreRoot = Join-Path $secureStoreBase "RenderAIStudio"
 $script:SecureOpenAiApiKeyPath = Join-Path $script:SecureStoreRoot "openai_api_key.secure.txt"
 $script:SecureGeminiApiKeyPath = Join-Path $script:SecureStoreRoot "gemini_api_key.secure.txt"
+$script:SecureLumaApiKeyPath = Join-Path $script:SecureStoreRoot "luma_api_key.secure.txt"
 $script:CachedOpenAiApiKey = $null
 $script:CachedGeminiApiKey = $null
 $script:CachedLumaApiKey = $null
 $script:MockVideoJobs = @{}
 $script:OpenAiSecureEntropy = [System.Text.Encoding]::UTF8.GetBytes("RenderAIStudio.OpenAIKey")
 $script:GeminiSecureEntropy = [System.Text.Encoding]::UTF8.GetBytes("RenderAIStudio.GeminiKey")
+$script:LumaSecureEntropy = [System.Text.Encoding]::UTF8.GetBytes("RenderAIStudio.LumaKey")
 $script:ProjectAssetRoot = Join-Path $resolvedRoot "outputs\project-assets"
 $script:ProjectDataRoot = Join-Path $resolvedRoot "outputs\project-data"
 
@@ -150,6 +152,19 @@ function Unprotect-RenderAiSecret {
   $cipherBytes = [Convert]::FromBase64String($ProtectedValue)
   $plainBytes = [System.Security.Cryptography.ProtectedData]::Unprotect($cipherBytes, $Entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
   return [System.Text.Encoding]::UTF8.GetString($plainBytes)
+}
+
+function Protect-RenderAiSecret {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PlainText,
+    [Parameter(Mandatory = $true)]
+    [byte[]]$Entropy
+  )
+
+  $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($PlainText)
+  $cipherBytes = [System.Security.Cryptography.ProtectedData]::Protect($plainBytes, $Entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+  return [Convert]::ToBase64String($cipherBytes)
 }
 
 function Get-ErrorStatusCode {
@@ -313,6 +328,50 @@ function Get-StoredLumaApiKey {
     return $script:CachedLumaApiKey
   }
 
+  if (-not (Test-Path -LiteralPath $script:SecureLumaApiKeyPath -PathType Leaf)) {
+    return $null
+  }
+
+  try {
+    $protectedValue = Get-Content -LiteralPath $script:SecureLumaApiKeyPath -Raw -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($protectedValue)) {
+      return $null
+    }
+
+    $plainText = Unprotect-RenderAiSecret -ProtectedValue $protectedValue.Trim() -Entropy $script:LumaSecureEntropy
+    if ([string]::IsNullOrWhiteSpace($plainText)) {
+      return $null
+    }
+
+    $script:CachedLumaApiKey = $plainText
+    return $script:CachedLumaApiKey
+  } catch {
+    return $null
+  }
+}
+
+function Save-StoredLumaApiKey {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ApiKey
+  )
+
+  if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+    throw "LUMA_API_KEY is empty."
+  }
+
+  New-Item -ItemType Directory -Path $script:SecureStoreRoot -Force | Out-Null
+  $protectedValue = Protect-RenderAiSecret -PlainText $ApiKey.Trim() -Entropy $script:LumaSecureEntropy
+  Set-Content -LiteralPath $script:SecureLumaApiKeyPath -Value $protectedValue -Encoding UTF8
+  $script:CachedLumaApiKey = $ApiKey.Trim()
+  return $true
+}
+
+function Clear-StoredLumaApiKey {
+  $script:CachedLumaApiKey = $null
+  if (Test-Path -LiteralPath $script:SecureLumaApiKeyPath -PathType Leaf) {
+    Remove-Item -LiteralPath $script:SecureLumaApiKeyPath -Force
+  }
   return $null
 }
 
@@ -732,11 +791,11 @@ function Test-LumaPublicAssetBaseUrl {
     return $false
   }
   if ($uri.Scheme -ne "https") { return $false }
-  $host = $uri.Host.ToLowerInvariant()
-  if ([string]::IsNullOrWhiteSpace($host)) { return $false }
-  if ($host -in @("localhost", "127.0.0.1", "0.0.0.0", "::1")) { return $false }
-  if ($host -match '^(10\.|192\.168\.|169\.254\.)') { return $false }
-  if ($host -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') { return $false }
+  $uriHost = $uri.Host.ToLowerInvariant()
+  if ([string]::IsNullOrWhiteSpace($uriHost)) { return $false }
+  if ($uriHost -in @("localhost", "127.0.0.1", "0.0.0.0", "::1")) { return $false }
+  if ($uriHost -match '^(10\.|192\.168\.|169\.254\.)') { return $false }
+  if ($uriHost -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') { return $false }
   return $true
 }
 
@@ -787,7 +846,13 @@ function Read-BackendProjectStore {
   try {
     $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
-    return @($raw | ConvertFrom-Json)
+    $parsed = $raw | ConvertFrom-Json
+    if ($null -eq $parsed) { return @() }
+    if ($parsed -is [System.Array]) { return @($parsed) }
+    if ($parsed.PSObject.Properties["value"] -and $parsed.PSObject.Properties["Count"]) {
+      return @($parsed.value)
+    }
+    return @($parsed)
   } catch {
     return @()
   }
@@ -796,7 +861,11 @@ function Read-BackendProjectStore {
 function Write-BackendProjectStore {
   param([Parameter(Mandatory = $true)]$Projects)
   $path = Get-BackendProjectStorePath
-  ($Projects | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $path -Encoding UTF8
+  $normalizedProjects = @($Projects)
+  if ($normalizedProjects.Count -eq 1 -and $normalizedProjects[0].PSObject.Properties["value"] -and $normalizedProjects[0].PSObject.Properties["Count"]) {
+    $normalizedProjects = @($normalizedProjects[0].value)
+  }
+  ($normalizedProjects | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $path -Encoding UTF8
 }
 
 function New-BackendProjectRecord {
@@ -816,10 +885,13 @@ function New-BackendProjectRecord {
     coverAssetId = ""
     messages = @()
     assets = @()
+    gallery = @()
+    miniProjects = @()
     generationJobs = @()
     videoJobs = @()
     settings = @{}
-    version = 2
+    version = 3
+    schemaVersion = 3
   }
 }
 
@@ -866,7 +938,38 @@ function Convert-InputImageToPublicUrl {
     [int]$Index = 0
   )
 
-  if ($Image -match '^https?://') { return $Image }
+  $publicBase = Get-PublicAssetBaseUrl
+  if ($Image -match '^https?://') {
+    try {
+      $uri = [Uri]$Image
+    } catch {
+      throw "Invalid image URL for Luma."
+    }
+
+    if (Test-LumaPublicAssetBaseUrl -Url $Image) { return $Image.Trim() }
+
+    $uriHost = $uri.Host.ToLowerInvariant()
+    $isLocalOrPrivate = $uriHost -in @("localhost", "127.0.0.1", "0.0.0.0", "::1") `
+      -or $uriHost -match '^(10\.|192\.168\.|169\.254\.)' `
+      -or $uriHost -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.'
+    if ($isLocalOrPrivate -and -not [string]::IsNullOrWhiteSpace($publicBase)) {
+      return "$publicBase$($uri.AbsolutePath)$($uri.Query)"
+    }
+
+    throw "Luma requires a public HTTPS image URL. Localhost, private networks and plain HTTP URLs are not valid for real image-to-video."
+  }
+  if ($Image.StartsWith("/")) {
+    if ([string]::IsNullOrWhiteSpace($publicBase)) {
+      throw "PUBLIC_ASSET_BASE_URL is required so Luma can read project images."
+    }
+    return "$publicBase$Image"
+  }
+  if ($Image -match '^(outputs/|outputs\\)') {
+    if ([string]::IsNullOrWhiteSpace($publicBase)) {
+      throw "PUBLIC_ASSET_BASE_URL is required so Luma can read project images."
+    }
+    return "$publicBase/$($Image -replace '\\', '/')"
+  }
   if ($Image -match '^data:image/') {
     $saved = Save-ProjectDataUrlAsset -ProjectId $ProjectId -DataUrl $Image -Prefix ("luma-frame-{0}" -f $Index)
     if ([string]::IsNullOrWhiteSpace($saved.publicUrl)) {
@@ -2504,6 +2607,38 @@ function Handle-ApiRequest {
     return $true
   }
 
+  if ($method -eq "GET" -and $path -eq "/api/providers/status") {
+    $runtime = Resolve-RenderRuntimeInfo
+    Write-JsonResponse -Response $response -Payload @{
+      ok = $true
+      providers = @{
+        openai = @{
+          configured = $runtime.openAiReady
+          ready = $runtime.openAiReady
+          secretSource = $runtime.analysisSecretSource
+        }
+        gemini = @{
+          configured = $runtime.geminiReady
+          ready = $runtime.geminiReady
+          secretSource = if ($runtime.renderProvider -eq "gemini") { $runtime.renderSecretSource } else { "none" }
+        }
+        luma = @{
+          configured = $runtime.lumaConfigured
+          ready = $runtime.lumaReady
+          publicAssetBaseUrlConfigured = $runtime.publicAssetBaseUrlConfigured
+          publicAssetBaseUrlUsable = $runtime.publicAssetBaseUrlUsable
+          secretSource = $runtime.videoSecretSource
+        }
+        mock = @{
+          available = $runtime.mockAi
+          ready = $runtime.mockAi
+        }
+      }
+      timestamp = (Get-Date).ToString("o")
+    }
+    return $true
+  }
+
   if ($method -eq "GET" -and $path -eq "/api/projects") {
     Write-JsonResponse -Response $response -Payload @{
       ok = $true
@@ -2646,7 +2781,7 @@ function Handle-ApiRequest {
     return $true
   }
 
-  if ($method -eq "POST" -and $path -eq "/api/video/luma/image-to-video") {
+  if ($method -eq "POST" -and ($path -eq "/api/video/luma/image-to-video" -or $path -eq "/api/luma/image-to-video")) {
     $payload = Get-RequestJson -Request $request
     $runtime = Resolve-RenderRuntimeInfo
     $projectId = [string](Get-PropValue -Object $payload -Name "projectId" -Default "project")
@@ -2713,7 +2848,7 @@ function Handle-ApiRequest {
     return $true
   }
 
-  if ($method -eq "GET" -and $path -match '^/api/video/luma/status/([^/]+)$') {
+  if ($method -eq "GET" -and ($path -match '^/api/video/luma/status/([^/]+)$' -or $path -match '^/api/luma/generations/([^/]+)$')) {
     $generationId = [System.Uri]::UnescapeDataString($Matches[1])
     try {
       $result = Get-LumaGenerationStatus -GenerationId $generationId
@@ -2732,6 +2867,17 @@ function Handle-ApiRequest {
         ok = $false
         message = $detailText
       }
+    }
+    return $true
+  }
+
+  if ($method -eq "POST" -and $path -eq "/api/video/compose") {
+    $payload = Get-RequestJson -Request $request
+    $clips = @(Get-PropValue -Object $payload -Name "clips" -Default @())
+    Write-JsonResponse -Response $response -StatusCode 501 -Payload @{
+      ok = $false
+      message = "No video compositor configured. Puedes descargar clips individuales o configurar FFmpeg."
+      clipCount = $clips.Count
     }
     return $true
   }
