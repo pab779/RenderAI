@@ -1,0 +1,1150 @@
+/* ============================================================
+   RENDERAI PREMIUM UI LAYER
+   Visual-only redesign. Loaded after styles.css.
+   No backend logic. No AI logic. No Luma logic.
+   ============================================================ */
+
+:root {
+  --rai-bg: #ede8dc;
+  --rai-bg-soft: #f7f3ea;
+  --rai-bg-warm: #f3eadb;
+  --rai-surface: #fffdf8;
+  --rai-surface-soft: #f6f1e8;
+  --rai-surface-warm: #fbf6ea;
+  --rai-surface-glass: rgba(255, 253, 248, 0.86);
+  --rai-ink: #12100d;
+  --rai-ink-soft: #28231d;
+  --rai-muted: #7a7166;
+  --rai-muted-2: #a39788;
+  --rai-line: rgba(31, 25, 18, 0.12);
+  --rai-line-strong: rgba(31, 25, 18, 0.2);
+  --rai-charcoal: #11100e;
+  --rai-charcoal-2: #1b1713;
+  --rai-wood: #2a1c13;
+  --rai-espresso: #3b2518;
+  --rai-olive: #1f3324;
+  --rai-olive-soft: #344b35;
+  --rai-gold: #b99a5b;
+  --rai-clay: #9c6448;
+  --rai-sand: #d8c5a6;
+  --rai-danger: #8b3e33;
+  --rai-success: #294a33;
+  --rai-warning: #a2753a;
+  --rai-font-heading: "Fraunces", Georgia, serif;
+  --rai-font-ui: "Manrope", system-ui, sans-serif;
+  --rai-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --rai-radius-xs: 8px;
+  --rai-radius-sm: 12px;
+  --rai-radius-md: 18px;
+  --rai-radius-lg: 24px;
+  --rai-radius-xl: 32px;
+  --rai-sidebar-w: 292px;
+  --rai-topbar-h: 76px;
+  --rai-gap: 22px;
+  --rai-shadow-xs: 0 2px 8px rgba(31, 25, 18, 0.04);
+  --rai-shadow-sm: 0 8px 24px rgba(31, 25, 18, 0.07);
+  --rai-shadow-md: 0 20px 60px rgba(31, 25, 18, 0.12);
+  --rai-shadow-lg: 0 34px 90px rgba(31, 25, 18, 0.18);
+}
+
+/* ============================================================
+   GLOBAL BACKGROUND
+   ============================================================ */
+
+html,
+body {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: var(--rai-font-ui) !important;
+  color: var(--rai-ink) !important;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 253, 248, 0.7) 0%,
+      transparent 30%
+    ),
+    linear-gradient(135deg, #f7f2e9 0%, #ede8dc 58%, #e5dccd 100%) !important;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image: linear-gradient(
+      rgba(60, 48, 34, 0.045) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(60, 48, 34, 0.045) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  opacity: 0.24;
+  background: linear-gradient(90deg, rgba(185, 154, 91, 0.08), transparent 42%),
+    linear-gradient(180deg, transparent 38%, rgba(31, 51, 36, 0.06) 100%);
+}
+
+.page-ambient,
+.page-raster {
+  display: none !important;
+}
+
+* {
+  box-sizing: border-box;
+  letter-spacing: 0 !important;
+}
+
+/* ============================================================
+   TYPOGRAPHY
+   ============================================================ */
+
+h1,
+h2,
+h3,
+h4,
+.project-dashboard-card h3,
+.asset-view-head h2,
+.image-studio-head h2,
+.video-studio-head h2,
+.presentation-bridge h2,
+.gallery-head h2 {
+  font-family: var(--rai-font-heading) !important;
+  color: var(--rai-ink) !important;
+}
+
+h1 {
+  font-size: 58px !important;
+  line-height: 0.98 !important;
+}
+
+h2 {
+  font-size: 40px !important;
+  line-height: 1.05 !important;
+}
+
+h3 {
+  font-size: 28px !important;
+  line-height: 1.12 !important;
+}
+
+p {
+  color: var(--rai-muted) !important;
+}
+
+.eyebrow,
+.field > span,
+.field-label {
+  font-family: var(--rai-font-mono) !important;
+  color: var(--rai-muted) !important;
+}
+
+/* ============================================================
+   FULL WIDTH APP STRUCTURE
+   ============================================================ */
+
+#appShell.app-shell {
+  min-height: 100dvh !important;
+  width: 100vw !important;
+  max-width: none !important;
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow-x: hidden !important;
+  background: transparent !important;
+}
+
+#projectSidebar.project-sidebar {
+  position: fixed !important;
+  inset: 0 auto 0 0 !important;
+  width: var(--rai-sidebar-w) !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  overflow-y: auto !important;
+  z-index: 60 !important;
+  padding: 22px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0.01)
+    ),
+    linear-gradient(180deg, var(--rai-charcoal-2) 0%, var(--rai-charcoal) 100%) !important;
+  box-shadow: 18px 0 50px rgba(18, 16, 13, 0.16) !important;
+  color: rgba(255, 253, 248, 0.8) !important;
+}
+
+.topbar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 50 !important;
+  width: calc(100vw - var(--rai-sidebar-w)) !important;
+  max-width: none !important;
+  min-height: var(--rai-topbar-h) !important;
+  margin: 0 0 0 var(--rai-sidebar-w) !important;
+  padding: 14px 28px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  border-bottom: 1px solid var(--rai-line) !important;
+  background: var(--rai-surface-glass) !important;
+  backdrop-filter: blur(22px) saturate(1.12) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.12) !important;
+  box-shadow: 0 8px 30px rgba(31, 25, 18, 0.05) !important;
+}
+
+.app-workspace {
+  width: calc(100vw - var(--rai-sidebar-w)) !important;
+  min-height: calc(100dvh - var(--rai-topbar-h)) !important;
+  margin-left: var(--rai-sidebar-w) !important;
+  padding: 0 !important;
+  display: block !important;
+  overflow: visible !important;
+}
+
+.app-stage {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 24px 28px 38px !important;
+}
+
+.project-chat-shell,
+.project-dashboard,
+.flow-screen,
+.wizard-shell {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+.project-chat-layout {
+  width: 100% !important;
+  max-width: none !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 336px) !important;
+  gap: 22px !important;
+  align-items: start !important;
+}
+
+.project-chat-layout.is-brochure-tab,
+.project-chat-layout:has(#projectPresentationsView) {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.project-chat-main {
+  width: 100% !important;
+  min-width: 0 !important;
+  border-radius: var(--rai-radius-xl) !important;
+}
+
+.project-context-panel {
+  width: 100% !important;
+  min-width: 0 !important;
+  position: sticky !important;
+  top: calc(var(--rai-topbar-h) + 24px) !important;
+}
+
+.project-chat-layout.is-brochure-tab .project-context-panel,
+.project-chat-layout:has(#projectPresentationsView) .project-context-panel {
+  display: none !important;
+}
+
+/* ============================================================
+   PREMIUM SURFACES
+   ============================================================ */
+
+.panel-surface,
+.project-chat-main,
+.project-context-panel,
+.project-dashboard-card,
+.project-asset-card,
+.asset-workbench-panel,
+.video-workflow-shell,
+.active-stage-panel,
+.presentation-bridge,
+.settings-panel,
+.gallery-card,
+.wizard-panel,
+.flow-card,
+.feedback-card,
+.result-actions-card,
+.feedback-history-card,
+.context-card,
+.decision-card {
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.92),
+      rgba(255, 253, 248, 0.86)
+    ),
+    var(--rai-surface) !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: var(--rai-radius-xl) !important;
+  box-shadow: var(--rai-shadow-sm) !important;
+  color: var(--rai-ink) !important;
+}
+
+.panel-surface::before {
+  pointer-events: none;
+}
+
+/* ============================================================
+   BUTTONS / INPUTS
+   ============================================================ */
+
+.button {
+  min-height: 42px !important;
+  border-radius: 14px !important;
+  padding: 0 18px !important;
+  font-family: var(--rai-font-ui) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease !important;
+}
+
+.button:hover {
+  transform: translateY(-1px) !important;
+}
+
+.button-primary,
+button.primary,
+[type="submit"].primary {
+  background: linear-gradient(180deg, #1c1a17 0%, #0f0e0d 100%) !important;
+  color: #fffdf8 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.1) inset,
+    0 12px 26px rgba(17, 16, 14, 0.18) !important;
+}
+
+.button-secondary,
+.button.button-secondary {
+  background: #fffdf8 !important;
+  color: var(--rai-ink) !important;
+  border: 1px solid var(--rai-line) !important;
+  box-shadow: var(--rai-shadow-xs) !important;
+}
+
+.button-ghost {
+  color: var(--rai-muted) !important;
+  background: transparent !important;
+}
+
+input,
+textarea,
+select,
+.field input,
+.field textarea,
+.field select {
+  background: #fffdf8 !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: 14px !important;
+  color: var(--rai-ink) !important;
+  box-shadow: none !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  border-color: rgba(185, 154, 91, 0.72) !important;
+  box-shadow: 0 0 0 4px rgba(185, 154, 91, 0.16) !important;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+.project-sidebar h3,
+.project-sidebar strong,
+.project-sidebar .eyebrow,
+.project-sidebar label span {
+  color: rgba(255, 253, 248, 0.92) !important;
+}
+
+.project-sidebar .project-sidebar-head {
+  gap: 14px !important;
+}
+
+.project-sidebar .project-sidebar-actions {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 10px !important;
+}
+
+.project-sidebar input,
+.project-sidebar .project-search-input,
+.project-memory-card,
+.project-memory-meta {
+  background: rgba(255, 255, 255, 0.055) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 253, 248, 0.88) !important;
+  box-shadow: none !important;
+}
+
+.project-memory-card {
+  border-radius: 18px !important;
+  padding: 14px !important;
+}
+
+.project-memory-card:hover {
+  background: rgba(255, 255, 255, 0.075) !important;
+}
+
+.project-memory-card.active {
+  background: linear-gradient(
+    90deg,
+    rgba(185, 154, 91, 0.16),
+    rgba(255, 255, 255, 0.055)
+  ) !important;
+  border-color: rgba(185, 154, 91, 0.38) !important;
+  box-shadow: inset 3px 0 0 var(--rai-gold) !important;
+}
+
+/* ============================================================
+   TOPBAR
+   ============================================================ */
+
+.brand-lockup {
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+}
+
+.brand-mark {
+  border-radius: 16px !important;
+  background: linear-gradient(
+    180deg,
+    var(--rai-ink-soft),
+    var(--rai-charcoal)
+  ) !important;
+  box-shadow: var(--rai-shadow-sm) !important;
+}
+
+.topbar h2 {
+  font-size: 18px !important;
+  font-family: var(--rai-font-heading) !important;
+}
+
+.topbar-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.status-chip {
+  min-height: 30px !important;
+  border-radius: 999px !important;
+  padding: 0 12px !important;
+  background: rgba(255, 253, 248, 0.78) !important;
+  border: 1px solid var(--rai-line) !important;
+  color: var(--rai-success) !important;
+  font-family: var(--rai-font-mono) !important;
+  font-size: 10px !important;
+}
+
+/* ============================================================
+   PROJECT HEADER + TABS
+   ============================================================ */
+
+.project-chat-header,
+.project-dashboard-hero,
+.asset-view-head,
+.gallery-head,
+.image-studio-head,
+.video-studio-head,
+.presentation-bridge {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.project-chat-header {
+  display: flex !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+  align-items: flex-start !important;
+  margin-bottom: 22px !important;
+}
+
+.project-chat-header h1,
+.project-dashboard-hero h1 {
+  font-size: 58px !important;
+  line-height: 0.98 !important;
+}
+
+.project-tabs,
+.project-studio-nav {
+  width: 100% !important;
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  overflow-x: auto !important;
+  padding: 8px !important;
+  margin-bottom: 22px !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 253, 248, 0.76) !important;
+  box-shadow: var(--rai-shadow-xs) !important;
+  backdrop-filter: blur(16px) !important;
+}
+
+.project-tab,
+.project-studio-nav button {
+  flex: 0 0 auto !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  padding: 11px 16px !important;
+  min-height: 36px !important;
+  background: transparent !important;
+  color: var(--rai-muted) !important;
+  font-family: var(--rai-font-ui) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+}
+
+.project-tab.active,
+.project-studio-nav button.active {
+  background: var(--rai-charcoal) !important;
+  color: #fffdf8 !important;
+  box-shadow: var(--rai-shadow-sm) !important;
+}
+
+/* ============================================================
+   HOME / DASHBOARD
+   ============================================================ */
+
+.project-dashboard-grid {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important;
+  gap: 20px !important;
+}
+
+.project-dashboard-card {
+  min-height: 280px !important;
+  padding: 22px !important;
+  overflow: hidden !important;
+}
+
+/* ============================================================
+   ASSETS
+   ============================================================ */
+
+.project-asset-card,
+.asset-workbench-panel {
+  overflow: hidden !important;
+}
+
+.project-asset-card {
+  min-height: 270px !important;
+}
+
+.asset-actions {
+  display: flex !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+
+/* ============================================================
+   GALLERY
+   ============================================================ */
+
+.gallery-grid {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important;
+  gap: 20px !important;
+}
+
+.gallery-card {
+  min-height: 430px !important;
+  overflow: hidden !important;
+}
+
+.gallery-card-media,
+.gallery-media,
+.result-preview,
+.asset-preview {
+  width: 100% !important;
+  overflow: hidden !important;
+  background: linear-gradient(135deg, #e4dacb, #f7f1e6) !important;
+}
+
+.gallery-card-media {
+  aspect-ratio: 16 / 10 !important;
+}
+
+.gallery-card-media img,
+.gallery-card-media video,
+.gallery-media img,
+.gallery-media video,
+.result-preview img,
+.result-preview video,
+.asset-preview img,
+.asset-preview video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+/* ============================================================
+   PICTURE STUDIO
+   ============================================================ */
+
+.image-studio-head {
+  margin-bottom: 22px !important;
+}
+
+.image-studio-head h2 {
+  font-size: 48px !important;
+}
+
+.image-studio-layout,
+.image-studio-grid,
+.asset-workbench-layout {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr) !important;
+  gap: 22px !important;
+}
+
+.image-studio-preview,
+.generated-preview,
+.render-preview {
+  min-height: 560px !important;
+  border-radius: var(--rai-radius-xl) !important;
+  border: 1px solid var(--rai-line) !important;
+  background: linear-gradient(135deg, #f4eadc, #fffdf8) !important;
+  overflow: hidden !important;
+}
+
+/* ============================================================
+   VIDEO STUDIO
+   ============================================================ */
+
+.video-workflow-shell,
+.active-stage-panel {
+  width: 100% !important;
+}
+
+.video-workflow-scroll,
+.workflow-board {
+  min-height: 680px !important;
+  overflow: auto !important;
+  border-radius: var(--rai-radius-xl) !important;
+  border: 1px solid var(--rai-line) !important;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 253, 248, 0.98),
+      rgba(246, 241, 232, 0.94)
+    ),
+    var(--rai-surface) !important;
+}
+
+.workflow-lanes {
+  min-width: 1680px !important;
+  padding: 44px !important;
+  gap: 44px !important;
+}
+
+.workflow-node,
+.video-stage-card,
+.video-template-card,
+.clip-card,
+.base-image-card {
+  border-radius: 22px !important;
+  border: 1px solid var(--rai-line) !important;
+  background: #fffdf8 !important;
+  box-shadow: var(--rai-shadow-sm) !important;
+  overflow: hidden !important;
+}
+
+.workflow-node__media,
+.workflow-node-media,
+.video-stage-card-media,
+.clip-card-media,
+.base-image-card-media {
+  height: 150px !important;
+  background: linear-gradient(135deg, #dcd0be, #f6efe3) !important;
+}
+
+.workflow-node__media img,
+.workflow-node-media img,
+.workflow-node__media video,
+.workflow-node-media video,
+.video-stage-card-media img,
+.video-stage-card-media video,
+.clip-card-media img,
+.clip-card-media video,
+.base-image-card-media img,
+.base-image-card-media video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+.video-step-rail,
+.stage-rail,
+.workflow-stepper {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  overflow-x: auto !important;
+  padding: 8px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--rai-line) !important;
+  background: rgba(255, 253, 248, 0.78) !important;
+}
+
+.video-step-rail button,
+.stage-rail button,
+.workflow-stepper button {
+  border-radius: 999px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--rai-muted) !important;
+  font-weight: 800 !important;
+}
+
+.video-step-rail button.active,
+.stage-rail button.active,
+.workflow-stepper button.active {
+  background: var(--rai-charcoal) !important;
+  color: #fffdf8 !important;
+}
+
+/* ============================================================
+   BROCHURE STUDIO / PRESENTATIONS
+   ============================================================ */
+
+#projectPresentationsView,
+.presentation-bridge,
+.creative-editor-workspace,
+.pdf-section-studio {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.presentation-bridge,
+.creative-editor-workspace,
+.pdf-section-studio {
+  padding: 22px !important;
+  border-radius: var(--rai-radius-xl) !important;
+}
+
+.presentation-toolbar,
+.creative-editor-toolbar,
+.pdf-toolbar,
+.editor-toolbar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+  padding: 10px !important;
+  border-radius: 18px !important;
+  border: 1px solid var(--rai-line) !important;
+  background: rgba(255, 253, 248, 0.82) !important;
+  box-shadow: var(--rai-shadow-xs) !important;
+}
+
+.presentation-toolbar button,
+.creative-editor-toolbar button,
+.pdf-toolbar button,
+.editor-toolbar button {
+  border-radius: 999px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--rai-muted) !important;
+  font-weight: 800 !important;
+}
+
+.presentation-toolbar button.active,
+.creative-editor-toolbar button.active,
+.pdf-toolbar button.active,
+.editor-toolbar button.active {
+  background: var(--rai-charcoal) !important;
+  color: #fffdf8 !important;
+}
+
+.creative-editor-layout,
+.presentation-editor-layout,
+.brochure-editor-layout,
+.pdf-editor-layout {
+  width: 100% !important;
+  min-height: 720px !important;
+  display: grid !important;
+  grid-template-columns: 230px minmax(0, 1fr) 300px !important;
+  gap: 18px !important;
+  align-items: stretch !important;
+}
+
+.slide-sidebar,
+.presentation-slide-list,
+.brochure-slide-list {
+  border-radius: var(--rai-radius-lg) !important;
+  border: 1px solid var(--rai-line) !important;
+  background: var(--rai-surface-soft) !important;
+  padding: 14px !important;
+  overflow-y: auto !important;
+}
+
+.slide-thumb,
+.presentation-slide-thumb,
+.brochure-slide-thumb {
+  border-radius: 16px !important;
+  border: 1px solid var(--rai-line) !important;
+  background: #fffdf8 !important;
+  padding: 10px !important;
+  margin-bottom: 10px !important;
+}
+
+.slide-thumb.active,
+.presentation-slide-thumb.active,
+.brochure-slide-thumb.active {
+  border-color: rgba(185, 154, 91, 0.72) !important;
+  box-shadow:
+    0 0 0 3px rgba(185, 154, 91, 0.14),
+    var(--rai-shadow-xs) !important;
+}
+
+.slide-canvas-area,
+.presentation-canvas-area,
+.brochure-canvas-area,
+.canvas-stage {
+  border-radius: var(--rai-radius-lg) !important;
+  border: 1px solid var(--rai-line) !important;
+  background: linear-gradient(180deg, #f9f4eb, #f0e7d9) !important;
+  padding: 28px !important;
+  overflow: auto !important;
+}
+
+.slide-canvas,
+.presentation-canvas,
+.brochure-canvas,
+.pdf-canvas {
+  width: min(100%, 1180px) !important;
+  aspect-ratio: 16 / 9 !important;
+  margin: 0 auto !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(31, 25, 18, 0.18) !important;
+  background: #fffdf8 !important;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 28px 80px rgba(31, 25, 18, 0.15) !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.layers-panel,
+.properties-panel,
+.presentation-properties,
+.brochure-properties {
+  border-radius: var(--rai-radius-lg) !important;
+  border: 1px solid var(--rai-line) !important;
+  background: var(--rai-surface-soft) !important;
+  padding: 14px !important;
+  overflow-y: auto !important;
+}
+
+.layer-item,
+.property-row {
+  border-radius: 12px !important;
+  border: 1px solid var(--rai-line) !important;
+  background: #fffdf8 !important;
+  padding: 10px 12px !important;
+  margin-bottom: 8px !important;
+}
+
+.moodboard-panel,
+.image-editor-panel,
+.selected-image-editor {
+  width: 100% !important;
+  border-radius: var(--rai-radius-lg) !important;
+  border: 1px solid var(--rai-line) !important;
+  background: var(--rai-surface-soft) !important;
+  box-shadow: var(--rai-shadow-xs) !important;
+  padding: 16px !important;
+}
+
+/* ============================================================
+   CONTEXT / PROVIDER PANEL
+   ============================================================ */
+
+.project-context-panel {
+  border-radius: var(--rai-radius-xl) !important;
+}
+
+.project-context-panel .context-card,
+.provider-card,
+.health-card {
+  border-radius: 18px !important;
+  border: 1px solid var(--rai-line) !important;
+  background: rgba(255, 253, 248, 0.72) !important;
+}
+
+/* ============================================================
+   SCROLLBARS
+   ============================================================ */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 25, 18, 0.28) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(31, 25, 18, 0.22);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 25, 18, 0.36);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+
+@media (max-width: 1280px) {
+  :root {
+    --rai-sidebar-w: 260px;
+  }
+
+  .project-chat-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .project-context-panel {
+    position: static !important;
+  }
+
+  .creative-editor-layout,
+  .presentation-editor-layout,
+  .brochure-editor-layout,
+  .pdf-editor-layout {
+    grid-template-columns: 180px minmax(0, 1fr) !important;
+  }
+
+  .layers-panel,
+  .properties-panel,
+  .presentation-properties,
+  .brochure-properties {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --rai-sidebar-w: 0px;
+  }
+
+  h1,
+  .project-chat-header h1,
+  .project-dashboard-hero h1 {
+    font-size: 40px !important;
+  }
+
+  h2,
+  .image-studio-head h2 {
+    font-size: 32px !important;
+  }
+
+  h3 {
+    font-size: 24px !important;
+  }
+
+  #projectSidebar.project-sidebar {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    border-radius: 0 !important;
+  }
+
+  .topbar {
+    width: 100vw !important;
+    margin-left: 0 !important;
+  }
+
+  .app-workspace {
+    width: 100vw !important;
+    margin-left: 0 !important;
+  }
+
+  .app-stage {
+    padding: 18px !important;
+  }
+
+  .image-studio-layout,
+  .image-studio-grid,
+  .asset-workbench-layout,
+  .creative-editor-layout,
+  .presentation-editor-layout,
+  .brochure-editor-layout,
+  .pdf-editor-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ============================================================
+   BROCHURE LAYERS + INSTANCE EDITOR
+   ============================================================ */
+
+.creative-context-toolbar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+  margin: 10px 0 !important;
+  padding: 10px !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: 18px !important;
+  background: rgba(255, 253, 248, 0.78) !important;
+  box-shadow: var(--rai-shadow-xs) !important;
+}
+
+.creative-context-toolbar button {
+  min-height: 32px !important;
+  padding: 0 12px !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: 999px !important;
+  background: #fffdf8 !important;
+  color: var(--rai-ink) !important;
+  font: 800 12px/1 var(--rai-font-ui) !important;
+}
+
+.creative-context-toolbar button.active,
+.creative-editor-toolbar button.active {
+  background: var(--rai-charcoal) !important;
+  color: #fffdf8 !important;
+}
+
+.layout-variant-toolbar button {
+  display: grid !important;
+  gap: 3px !important;
+  min-height: 46px !important;
+  text-align: left !important;
+  border-radius: 14px !important;
+}
+
+.layout-variant-toolbar small {
+  max-width: 220px !important;
+  overflow: hidden !important;
+  color: var(--rai-muted) !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.image-instance-layout {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(180px, 1fr)) !important;
+  gap: 14px !important;
+  margin: 14px 0 !important;
+}
+
+.image-instance-preview {
+  min-height: 180px !important;
+  overflow: hidden !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: 18px !important;
+  background: #fffdf8 !important;
+}
+
+.image-instance-preview span {
+  display: block !important;
+  padding: 10px 12px !important;
+  color: var(--rai-muted) !important;
+  font: 800 11px/1 var(--rai-font-mono) !important;
+  text-transform: uppercase !important;
+}
+
+.image-instance-preview img {
+  width: 100% !important;
+  height: 150px !important;
+  object-fit: cover !important;
+}
+
+.image-instance-actions,
+.image-instance-controls {
+  display: flex !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin: 12px 0 !important;
+}
+
+.image-instance-controls label {
+  display: grid !important;
+  gap: 6px !important;
+  min-width: 190px !important;
+  flex: 1 1 190px !important;
+  color: var(--rai-muted) !important;
+  font: 800 11px/1.2 var(--rai-font-mono) !important;
+  text-transform: uppercase !important;
+}
+
+.image-instance-controls textarea {
+  min-height: 78px !important;
+}
+
+.instance-badge {
+  max-width: 220px !important;
+  overflow: hidden !important;
+  padding: 8px 10px !important;
+  border: 1px solid var(--rai-line) !important;
+  border-radius: 999px !important;
+  color: var(--rai-muted) !important;
+  font: 700 11px/1 var(--rai-font-mono) !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.brochure-palette-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.palette-dot {
+  display: inline-block !important;
+  width: 32px !important;
+  height: 32px !important;
+  border: 1px solid rgba(24, 23, 21, 0.12) !important;
+  border-radius: 999px !important;
+}
