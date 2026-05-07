@@ -509,6 +509,37 @@ function Get-GeminiImageSizeTier {
   return "1K"
 }
 
+function Resolve-InputFidelity {
+  param(
+    [string]$Fidelity = "strict"
+  )
+
+  if ($Fidelity -in @("absolute", "high", "strict", "estricta")) {
+    return "high"
+  }
+
+  return "low"
+}
+
+function Add-GeminiSourceImagePolicy {
+  param(
+    [string]$Prompt = ""
+  )
+
+  if ($Prompt -match 'SOURCE IMAGE POLICY:') {
+    return $Prompt
+  }
+
+  $sourcePolicy = @"
+SOURCE IMAGE POLICY:
+Input image 1 is the PRIMARY SOURCE IMAGE. It is locked. Preserve geometry, camera, objects, proportions, text and material identity.
+Input image 2, if present, is a REFERENCE ONLY. Use it only for style/material mood. Do not copy layout, objects or architecture.
+Input image 3, if present, is a SECONDARY REFERENCE ONLY. Do not override the primary source image.
+"@
+
+  return "$sourcePolicy`n`n$Prompt"
+}
+
 function Invoke-GeminiImageGenerate {
   param(
     [Parameter(Mandatory = $true)][string]$Prompt,
@@ -528,7 +559,8 @@ function Invoke-GeminiImageGenerate {
     throw "No images were provided for Gemini image generation."
   }
 
-  $parts = @(@{ text = $Prompt })
+  $promptWithSourcePolicy = Add-GeminiSourceImagePolicy -Prompt $Prompt
+  $parts = @(@{ text = $promptWithSourcePolicy })
   for ($index = 0; $index -lt $usableImages.Count; $index += 1) {
     $imagePart = Convert-DataUrlToImagePart -DataUrl ([string]$usableImages[$index]) -Index $index
     $parts += @{
@@ -667,7 +699,7 @@ function Invoke-OpenAiImageEditApi {
     [string]$Model = "gpt-image-1.5",
     [string]$Size = "1536x1024",
     [string]$Quality = "medium",
-    [string]$InputFidelity = "low",
+    [string]$InputFidelity = "high",
     [string]$OutputFormat = "jpeg",
     [int]$OutputCompression = 92
   )
@@ -676,6 +708,7 @@ function Invoke-OpenAiImageEditApi {
   if (-not $usableImages.Count) {
     throw "No images were provided for render generation."
   }
+  $InputFidelity = Resolve-InputFidelity -Fidelity $InputFidelity
 
   $apiKey = Get-StoredOpenAiApiKey
   if ([string]::IsNullOrWhiteSpace($apiKey)) {
@@ -764,12 +797,13 @@ function Invoke-OpenAiRenderEdit {
     [Parameter(Mandatory = $true)]$Images,
     [string]$Size = "1536x1024",
     [string]$Quality = "medium",
-    [string]$InputFidelity = "low",
+    [string]$InputFidelity = "high",
     [string]$OutputFormat = "jpeg",
     [int]$OutputCompression = 92
   )
 
-  $response = Invoke-OpenAiImageEditApi -Prompt $Prompt -Images $Images -Size $Size -Quality $Quality -InputFidelity $InputFidelity -OutputFormat $OutputFormat -OutputCompression $OutputCompression
+  $resolvedInputFidelity = Resolve-InputFidelity -Fidelity $InputFidelity
+  $response = Invoke-OpenAiImageEditApi -Prompt $Prompt -Images $Images -Size $Size -Quality $Quality -InputFidelity $resolvedInputFidelity -OutputFormat $OutputFormat -OutputCompression $OutputCompression
   $result = Get-PropValue -Object (@($response.data)[0]) -Name "b64_json" -Default ""
   if ([string]::IsNullOrWhiteSpace($result)) {
     throw "OpenAI did not return an image payload."
@@ -1445,45 +1479,77 @@ function New-BrochureImageLayerPrompt {
   $light = [string](Get-PropValue -Object $RenderSettings -Name "light" -Default "natural")
   $changeRequest = [string](Get-PropValue -Object $RenderSettings -Name "changeRequest" -Default "")
   $role = [string](Get-PropValue -Object $LayerContext -Name "role" -Default "image")
+  $layerName = [string](Get-PropValue -Object $LayerContext -Name "name" -Default "")
+  $slotInstanceId = [string](Get-PropValue -Object $LayerContext -Name "slotInstanceId" -Default "")
   $slideType = [string](Get-PropValue -Object $SlideContext -Name "slideType" -Default "slide")
 
   return @"
-You are editing ONE image instance inside a presentation slide.
+ROLE:
+You are editing ONE image instance inside a professional architectural presentation.
 
-This render is for a single image slot only.
-Do not affect other images.
-Do not reinterpret the full presentation.
-Do not create a new slide.
-Do not add text unless it already exists in the source image.
-Do not alter architectural geometry.
+PRESENTATION CONTEXT:
+This render is for a single image slot only. Do not affect other images, reinterpret the full presentation, or create a new slide.
 
 SLIDE TYPE:
 $slideType
 
-IMAGE ROLE:
+LAYER ROLE:
 $role
+Layer name: $layerName
 
-STYLE:
-$style
+IMAGE INSTANCE:
+slotInstanceId: $slotInstanceId
+This is an independent image instance. Do not change the original asset globally.
 
-FIDELITY:
-$fidelity
+SOURCE IMAGE POLICY:
+Use the assigned source image as the primary locked source. Preserve architecture, objects, camera, visible text and composition.
 
-LIGHT:
-$light
+VISUAL INVENTORY:
+Summary: Use the provided image as the only source of truth.
+Camera: Preserve original camera, crop, lens feeling, perspective and composition.
+Architecture / composition: Preserve all visible architecture and composition.
+Objects: Preserve all visible objects unless explicitly requested.
+Materials: Preserve material identity and improve realism only.
+Visible text/signage: Preserve any visible text exactly if present.
+Environment: Do not invent background or site context.
+Realism risks: Avoid geometry drift, fake materials, warped text and artificial lighting.
+
+GEOMETRY LOCK:
+Do not change architectural geometry, walls, doors, windows, floor, ceiling, furniture positions or proportions.
+
+OBJECT LOCK:
+Do not move, replace, resize, remove or invent objects unless explicitly requested for this image instance.
+
+TEXT LOCK:
+Do not alter, invent, translate, distort or blur visible text/signage.
+
+ALLOWED CHANGES:
+- Improve visual quality for this slide.
+- Improve lighting, texture and finish.
+- Adapt to selected style: $style.
+- Adapt to selected light: $light.
+- Fidelity mode: $fidelity.
+- If this is a background image, preserve clean negative space for text.
+- If this is a hero image, prioritize clarity and premium architectural composition.
+- If this is a moodboard image, prioritize atmosphere while preserving identity.
+
+FORBIDDEN CHANGES:
+- No global asset replacement.
+- No changes to other image instances.
+- No geometry drift.
+- No camera drift.
+- No object replacement.
+- No invented architecture.
+- No warped text.
 
 USER REQUEST:
 $changeRequest
 
-STRICT RULES:
-- Preserve architecture, room geometry, walls, doors, windows, ceiling, floor and camera.
-- Preserve visible objects unless the user explicitly asks to change them.
-- Preserve visible text/signage exactly.
-- Improve only photographic quality, lighting, materials, texture and presentation.
-- If this image is a background, leave clean negative space for text.
-- If this image is a hero image, prioritize clarity and composition.
-- If this image is moodboard/reference, prioritize atmosphere while preserving source identity.
-- Output one improved image only.
+OUTPUT REQUIREMENTS:
+Return one improved image for this layer only.
+
+NEGATIVE PROMPT:
+changed architecture, changed furniture, changed camera, invented objects, extra rooms, warped text, fake materials, plastic look, distorted walls, distorted doors, distorted windows.
 "@
 }
 
@@ -1639,7 +1705,8 @@ function Invoke-OpenAiPresentationOutline {
   param(
     [string]$Context = "",
     $Analysis,
-    $Settings
+    $Settings,
+    [string]$PresentationContractPrompt = ""
   )
 
   $analysisObjects = Sanitize-OpenAiText -Text ([string]::Join(", ", @((Get-PropValue -Object $Analysis -Name "objects" -Default @()) | ForEach-Object { [string]$_ })))
@@ -1726,6 +1793,8 @@ function Invoke-OpenAiPresentationOutline {
     $blueprintLines += ("- {0}: {1} | {2} | role={3} | layout={4} | textMode={5} | imageSource={6} | arrangement={7} | moodBoardLayout={8} | useProjectImages={9} | materials={10} | objects={11} | moodSources={12}" -f $blueprintSection, (Sanitize-OpenAiText -Text $blueprintTitle), (Sanitize-OpenAiText -Text $blueprintSubtitle), $blueprintRole, $blueprintLayout, $blueprintTextMode, $blueprintImageMode, $blueprintArrangement, $blueprintMoodBoardLayout, $blueprintUseProjectImages, (Sanitize-OpenAiText -Text $blueprintMaterials), (Sanitize-OpenAiText -Text $blueprintObjects), (Sanitize-OpenAiText -Text $blueprintMoodSources))
   }
   $userBriefParts = @(
+    $PresentationContractPrompt
+    ""
     "Project: $(Sanitize-OpenAiText -Text $Context)"
     "Scene: $analysisSummary"
   )
@@ -3141,6 +3210,13 @@ function Handle-ApiRequest {
     if ([string]::IsNullOrWhiteSpace($prompt)) {
       $prompt = [string](Get-PropValue -Object $payload -Name "lumaPrompt" -Default "Architectural video")
     }
+    if ($prompt -notmatch 'NO MORPHING:' -or $prompt -notmatch 'ARCHITECTURE LOCK:' -or $prompt -notmatch 'OBJECT LOCK:') {
+      Write-JsonResponse -Response $response -StatusCode 400 -Payload @{
+        ok = $false
+        message = "LUMA_PROMPT_CONTRACT_INVALID::El prompt de Luma debe incluir NO MORPHING, ARCHITECTURE LOCK y OBJECT LOCK."
+      }
+      return $true
+    }
     $providerPreference = ([string](Get-PropValue -Object $payload -Name "provider" -Default "")).ToLowerInvariant()
     if ($runtime.mockAi -and $providerPreference -eq "mock") {
       Write-JsonResponse -Response $response -Payload (New-MockVideoResult -ProjectId $projectId -Prompt $prompt)
@@ -3282,6 +3358,7 @@ function Handle-ApiRequest {
       $renderSettings = Get-PropValue -Object $payload -Name "renderSettings" -Default @{}
       $slideContext = Get-PropValue -Object $payload -Name "slideContext" -Default @{}
       $layerContext = Get-PropValue -Object $payload -Name "layerContext" -Default @{}
+      $prompt = [string](Get-PropValue -Object $payload -Name "prompt" -Default "")
 
       if ([string]::IsNullOrWhiteSpace($sourceImageDataUrl) -or $sourceImageDataUrl -notmatch '^data:image/') {
         Write-JsonResponse -Response $response -StatusCode 400 -Payload @{
@@ -3291,7 +3368,16 @@ function Handle-ApiRequest {
         return $true
       }
 
-      $prompt = New-BrochureImageLayerPrompt -RenderSettings $renderSettings -SlideContext $slideContext -LayerContext $layerContext
+      if ([string]::IsNullOrWhiteSpace($prompt)) {
+        $prompt = New-BrochureImageLayerPrompt -RenderSettings $renderSettings -SlideContext $slideContext -LayerContext $layerContext
+      }
+      if ($prompt -notmatch 'ROLE:' -or $prompt -notmatch 'PRESENTATION CONTEXT:' -or $prompt -notmatch 'OUTPUT REQUIREMENTS:' -or $prompt -notmatch 'NEGATIVE PROMPT:') {
+        Write-JsonResponse -Response $response -StatusCode 400 -Payload @{
+          ok = $false
+          message = "PROMPT_CONTRACT_INVALID::Brochure image layer prompts must include presentation contract sections."
+        }
+        return $true
+      }
       $providerPreference = ([string](Get-PropValue -Object $renderSettings -Name "provider" -Default $env:DEFAULT_IMAGE_PROVIDER)).ToLowerInvariant()
       if ([string]::IsNullOrWhiteSpace($providerPreference)) { $providerPreference = "auto" }
       $provider = $runtime.renderProvider
@@ -3351,6 +3437,7 @@ function Handle-ApiRequest {
           sourceAssetId = $sourceAssetId
           renderSettings = $renderSettings
           prompt = $prompt
+          model = if ($usedProvider -match "gemini") { "gemini-3.1-flash-image-preview" } elseif ($usedProvider -match "openai") { "gpt-image-1.5" } else { $usedProvider }
           fallbackReason = $fallbackReason
         }
       }
@@ -3384,14 +3471,23 @@ function Handle-ApiRequest {
 
     try {
       $prompt = [string](Get-PropValue -Object $payload -Name "prompt" -Default "Architectural image edit")
+      if ($prompt -notmatch 'ROLE:' -or $prompt -notmatch 'OUTPUT REQUIREMENTS:' -or $prompt -notmatch 'NEGATIVE PROMPT:') {
+        Write-JsonResponse -Response $response -StatusCode 400 -Payload @{
+          ok = $false
+          message = "PROMPT_CONTRACT_INVALID::Image generation prompts must include ROLE, OUTPUT REQUIREMENTS and NEGATIVE PROMPT sections."
+        }
+        return $true
+      }
       $images = Get-PropValue -Object $payload -Name "images" -Default @()
       $size = [string](Get-PropValue -Object $payload -Name "size" -Default "1536x1024")
       $quality = [string](Get-PropValue -Object $payload -Name "quality" -Default "medium")
-      $inputFidelity = [string](Get-PropValue -Object $payload -Name "inputFidelity" -Default "low")
+      $inputFidelity = [string](Get-PropValue -Object $payload -Name "inputFidelity" -Default "strict")
       $providerPreference = ([string](Get-PropValue -Object $payload -Name "providerPreference" -Default "auto")).ToLowerInvariant()
       $strictFidelity = [bool](Get-PropValue -Object $payload -Name "strictFidelity" -Default $false)
       $outputFormat = [string](Get-PropValue -Object $payload -Name "outputFormat" -Default "jpeg")
       $outputCompression = [int](Get-PropValue -Object $payload -Name "outputCompression" -Default 92)
+      if ($strictFidelity) { $inputFidelity = "high" }
+      $inputFidelity = Resolve-InputFidelity -Fidelity $inputFidelity
       $provider = $runtime.renderProvider
       if (($providerPreference -eq "openai" -or $providerPreference -eq "openai-strict") -and $runtime.openAiReady) {
         $provider = "openai"
@@ -3497,6 +3593,7 @@ function Handle-ApiRequest {
         imageBase64 = $result.imageBase64
         revisedPrompt = $result.revisedPrompt
         provider = $usedProvider
+        model = if ($usedProvider -match "gemini") { "gemini-3.1-flash-image-preview" } elseif ($usedProvider -match "openai") { "gpt-image-1.5" } else { $usedProvider }
         fallbackReason = $fallbackReason
         mimeType = [string](Get-PropValue -Object $result -Name "mimeType" -Default "image/jpeg")
         fidelityScore = $fidelityScore
@@ -3556,10 +3653,19 @@ function Handle-ApiRequest {
     }
 
     try {
+      $presentationContractPrompt = [string](Get-PropValue -Object $payload -Name "presentationUpgradePrompt" -Default "")
+      if ($presentationContractPrompt -notmatch 'ROLE:' -or $presentationContractPrompt -notmatch 'INPUT PRESENTATION:' -or $presentationContractPrompt -notmatch 'EDITABLE LAYERS:' -or $presentationContractPrompt -notmatch 'OUTPUT JSON SCHEMA:') {
+        Write-JsonResponse -Response $response -StatusCode 400 -Payload @{
+          ok = $false
+          message = "PROMPT_CONTRACT_INVALID::Presentation upgrade prompts must include editable presentation contract sections."
+        }
+        return $true
+      }
       $outline = Invoke-OpenAiPresentationOutline `
         -Context ([string](Get-PropValue -Object $payload -Name "context" -Default "")) `
         -Analysis (Get-PropValue -Object $payload -Name "analysis" -Default @{}) `
-        -Settings (Get-PropValue -Object $payload -Name "settings" -Default @{})
+        -Settings (Get-PropValue -Object $payload -Name "settings" -Default @{}) `
+        -PresentationContractPrompt $presentationContractPrompt
       Write-JsonResponse -Response $response -Payload @{
         ok = $true
         outline = $outline

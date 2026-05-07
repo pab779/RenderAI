@@ -8681,3 +8681,51 @@ button.primary,
     grid-template-columns: 1fr;
   }
 }
+
+.prompt-inspector-backdrop {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.prompt-inspector-modal {
+  width: min(960px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--surface, #fff);
+  color: var(--text, #181715);
+  border: 1px solid var(--border, rgba(24, 23, 21, 0.12));
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+  padding: 22px;
+}
+
+.prompt-inspector-modal .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.prompt-inspector-modal section {
+  border-top: 1px solid var(--border, rgba(24, 23, 21, 0.12));
+  padding: 14px 0;
+}
+
+.prompt-inspector-modal h2,
+.prompt-inspector-modal h3 {
+  margin: 0 0 8px;
+}
+
+.prompt-inspector-modal pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow: auto;
+  background: rgba(24, 23, 21, 0.04);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
