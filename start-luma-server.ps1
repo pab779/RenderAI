@@ -70,6 +70,7 @@ if ([string]::IsNullOrWhiteSpace($publicUrl)) {
 }
 
 $env:PUBLIC_ASSET_BASE_URL = $publicUrl
+$env:DEFAULT_VIDEO_PROVIDER = "luma"
 $env:USE_MOCK_AI = "false"
 Set-Content -LiteralPath (Join-Path $runtimeRoot "public_asset_base_url.txt") -Value $publicUrl -Encoding UTF8
 

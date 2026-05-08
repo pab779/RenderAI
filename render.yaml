@@ -7,15 +7,36 @@ services:
     envVars:
       - key: RENDERAI_PUBLIC_BIND
         value: "1"
+
       - key: OPENAI_API_KEY
         sync: false
+
       - key: GEMINI_API_KEY
         sync: false
+
+      - key: LUMA_API_KEY
+        sync: false
+
+      - key: PUBLIC_ASSET_BASE_URL
+        value: "https://renderai-j6g0.onrender.com"
+
+      - key: DEFAULT_IMAGE_PROVIDER
+        value: "gemini"
+
+      - key: DEFAULT_VIDEO_PROVIDER
+        value: "luma"
+
+      - key: USE_MOCK_AI
+        value: "false"
+
       - key: RENDERAI_ADMIN_USER
-        value: admin
+        value: "admin"
+
       - key: RENDERAI_ADMIN_PASSWORD
-        sync: false
+        value: "123"
+
       - key: RENDERAI_ARCHITECT_USER
-        value: arquitecto
+        value: "arquitecto"
+
       - key: RENDERAI_ARCHITECT_PASSWORD
-        sync: false
+        value: "123"

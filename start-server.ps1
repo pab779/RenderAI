@@ -963,6 +963,10 @@ function Save-ProjectAssetDataUrl {
     throw "PROJECT_ASSET_DATA_URL_EMPTY::No se recibio imagen base64 para materializar."
   }
 
+  if ($DataUrl -notmatch '^data:image') {
+    throw "PROJECT_ASSET_DATA_URL_INVALID::La imagen no es data:image valido."
+  }
+
   $part = Convert-DataUrlToImagePart -DataUrl $DataUrl -Index 0
 
   $safeProjectId = if ([string]::IsNullOrWhiteSpace($ProjectId)) { "default" } else { ($ProjectId -replace '[^a-zA-Z0-9_-]', '-') }
@@ -1032,6 +1036,9 @@ function Resolve-LumaSourceImage {
         mimeType = $saved.mimeType
       }
     }
+    if (-not [string]::IsNullOrWhiteSpace($rawImageInput)) {
+      Assert-LumaSourceImageUrl -SourceImageUrl $rawImageInput | Out-Null
+    }
   }
 
   $candidateUrl = [string](Get-PropValue -Object $ImageInput -Name "publicUrl" -Default "")
@@ -1046,7 +1053,7 @@ function Resolve-LumaSourceImage {
   }
 
   $candidateUrl = [string](Get-PropValue -Object $ImageInput -Name "url" -Default "")
-  if (-not [string]::IsNullOrWhiteSpace($candidateUrl) -and $candidateUrl -match '^https://') {
+  if (-not [string]::IsNullOrWhiteSpace($candidateUrl)) {
     Assert-LumaSourceImageUrl -SourceImageUrl $candidateUrl | Out-Null
     return @{
       publicUrl = $candidateUrl
@@ -2925,6 +2932,90 @@ function Write-PptxResponse {
   $Response.OutputStream.Write($bytes, 0, $bytes.Length)
 }
 
+function Get-StaticContentType {
+  param([string]$Path = "")
+
+  $extension = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
+  $contentType = switch ($extension) {
+    ".html" { "text/html; charset=utf-8" }
+    ".css" { "text/css; charset=utf-8" }
+    ".js" { "application/javascript; charset=utf-8" }
+    ".json" { "application/json; charset=utf-8" }
+    ".png" { "image/png" }
+    ".jpg" { "image/jpeg" }
+    ".jpeg" { "image/jpeg" }
+    ".svg" { "image/svg+xml" }
+    ".webp" { "image/webp" }
+    ".mp4" { "video/mp4" }
+    ".webm" { "video/webm" }
+    ".ico" { "image/x-icon" }
+    default { "application/octet-stream" }
+  }
+  return $contentType
+}
+
+function Try-ServeProjectAssetRequest {
+  param(
+    [Parameter(Mandatory = $true)]$Context
+  )
+
+  $requestPath = [string]$Context.Request.Url.AbsolutePath
+  if ($requestPath -notmatch '^/outputs/project-assets(/|$)') {
+    return $false
+  }
+
+  try {
+    if (-not (Test-Path -LiteralPath $script:ProjectAssetRoot)) {
+      New-Item -ItemType Directory -Path $script:ProjectAssetRoot -Force | Out-Null
+    }
+
+    $rootFullPath = [System.IO.Path]::GetFullPath($script:ProjectAssetRoot)
+    $relativeUrlPath = $requestPath.Substring("/outputs/project-assets".Length).TrimStart("/")
+    $relativePath = [System.Uri]::UnescapeDataString($relativeUrlPath).Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+    $candidatePath = [System.IO.Path]::GetFullPath((Join-Path $rootFullPath $relativePath))
+    $rootWithSeparator = $rootFullPath.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+
+    if ($candidatePath -eq $rootFullPath) {
+      Write-JsonResponse -Response $Context.Response -StatusCode 404 -Payload @{
+        ok = $false
+        message = "Project asset file path is required."
+      }
+      return $true
+    }
+
+    if (-not $candidatePath.StartsWith($rootWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Write-JsonResponse -Response $Context.Response -StatusCode 403 -Payload @{
+        ok = $false
+        message = "Path traversal is not allowed."
+      }
+      return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+      Write-JsonResponse -Response $Context.Response -StatusCode 404 -Payload @{
+        ok = $false
+        message = "Project asset not found."
+      }
+      return $true
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($candidatePath)
+    $Context.Response.StatusCode = 200
+    $Context.Response.ContentType = Get-StaticContentType -Path $candidatePath
+    Apply-CorsHeaders -Response $Context.Response
+    $Context.Response.Headers["Cache-Control"] = "public, max-age=86400"
+    $Context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+    return $true
+  } catch {
+    $message = [System.Text.Encoding]::UTF8.GetBytes($_.Exception.Message)
+    $Context.Response.StatusCode = 500
+    $Context.Response.ContentType = "text/plain; charset=utf-8"
+    Apply-CorsHeaders -Response $Context.Response
+    $Context.Response.OutputStream.Write($message, 0, $message.Length)
+    return $true
+  }
+}
+
 function Handle-ApiRequest {
   param(
     [Parameter(Mandatory = $true)]$Context
@@ -3014,8 +3105,21 @@ function Handle-ApiRequest {
   if ($method -eq "GET" -and $path -eq "/api/providers/status") {
     $runtime = Resolve-RenderRuntimeInfo
     $lumaReadiness = Get-LumaReadiness
+    $lumaStatus = @{
+      configured = $lumaReadiness.configured
+      ready = $lumaReadiness.ready
+      source = $lumaReadiness.source
+      secretSource = $lumaReadiness.source
+      publicAssetBaseUrlConfigured = $lumaReadiness.publicAssetBaseUrlConfigured
+      publicAssetBaseUrlIsHttps = $lumaReadiness.publicAssetBaseUrlIsHttps
+      publicAssetBaseUrlHost = $lumaReadiness.publicAssetBaseUrlHost
+      projectAssetRootExists = $lumaReadiness.projectAssetRootExists
+      blockedReason = $lumaReadiness.blockedReason
+      reasons = $lumaReadiness.reasons
+    }
     Write-JsonResponse -Response $response -Payload @{
       ok = $true
+      luma = $lumaStatus
       providers = @{
         openai = @{
           configured = $runtime.openAiReady
@@ -3027,18 +3131,7 @@ function Handle-ApiRequest {
           ready = $runtime.geminiReady
           secretSource = if ($runtime.renderProvider -eq "gemini") { $runtime.renderSecretSource } else { "none" }
         }
-        luma = @{
-          configured = $lumaReadiness.configured
-          ready = $lumaReadiness.ready
-          source = $lumaReadiness.source
-          secretSource = $lumaReadiness.source
-          publicAssetBaseUrlConfigured = $lumaReadiness.publicAssetBaseUrlConfigured
-          publicAssetBaseUrlIsHttps = $lumaReadiness.publicAssetBaseUrlIsHttps
-          publicAssetBaseUrlHost = $lumaReadiness.publicAssetBaseUrlHost
-          projectAssetRootExists = $lumaReadiness.projectAssetRootExists
-          blockedReason = $lumaReadiness.blockedReason
-          reasons = $lumaReadiness.reasons
-        }
+        luma = $lumaStatus
         mock = @{
           available = $runtime.mockAi
           ready = $runtime.mockAi
@@ -3055,7 +3148,7 @@ function Handle-ApiRequest {
       ok = $true
       luma = $readiness
       defaultVideoProvider = $env:DEFAULT_VIDEO_PROVIDER
-      mockAi = ($env:USE_MOCK_AI -eq "true")
+      mockAi = (([string]$env:USE_MOCK_AI).ToLowerInvariant() -eq "true")
     } -StatusCode 200
     return $true
   }
@@ -3809,6 +3902,10 @@ try {
         continue
       }
 
+      if (Try-ServeProjectAssetRequest -Context $context) {
+        continue
+      }
+
       $requestPath = $context.Request.Url.AbsolutePath
       $relativePath = $requestPath.TrimStart("/")
       if ([string]::IsNullOrWhiteSpace($relativePath)) {
@@ -3823,25 +3920,9 @@ try {
 
       $fullPath = if (Test-Path -LiteralPath $candidatePath -PathType Leaf) { $candidatePath } else { Join-Path $resolvedRoot "index.html" }
       $bytes = [System.IO.File]::ReadAllBytes($fullPath)
-      $extension = [System.IO.Path]::GetExtension($fullPath).ToLowerInvariant()
-      $contentType = switch ($extension) {
-        ".html" { "text/html; charset=utf-8" }
-        ".css" { "text/css; charset=utf-8" }
-        ".js" { "application/javascript; charset=utf-8" }
-        ".json" { "application/json; charset=utf-8" }
-        ".png" { "image/png" }
-        ".jpg" { "image/jpeg" }
-        ".jpeg" { "image/jpeg" }
-        ".svg" { "image/svg+xml" }
-        ".webp" { "image/webp" }
-        ".mp4" { "video/mp4" }
-        ".webm" { "video/webm" }
-        ".ico" { "image/x-icon" }
-        default { "application/octet-stream" }
-      }
 
       $context.Response.StatusCode = 200
-      $context.Response.ContentType = $contentType
+      $context.Response.ContentType = Get-StaticContentType -Path $fullPath
       Apply-CorsHeaders -Response $context.Response
       $context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
       $context.Response.OutputStream.Write($bytes, 0, $bytes.Length)

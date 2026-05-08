@@ -29,8 +29,12 @@ function getLumaStatusRecord(providerStatus) {
   return providerStatus?.luma || providerStatus?.providers?.luma || providerStatus?.providerStatus?.luma || null;
 }
 
+function getProviderLumaStatus(providerStatus) {
+  return getLumaStatusRecord(providerStatus);
+}
+
 function getLumaStatusMessage(providerStatus) {
-  const luma = getLumaStatusRecord(providerStatus) || {
+  const luma = getProviderLumaStatus(providerStatus) || {
     ready: providerStatus?.lumaReady,
     blockedReason: providerStatus?.lumaBlockedReason,
   };
@@ -40,10 +44,16 @@ function getLumaStatusMessage(providerStatus) {
 }
 
 function isLumaReady(providerStatus) {
-  const luma = getLumaStatusRecord(providerStatus) || {
+  const luma = getProviderLumaStatus(providerStatus) || {
     ready: providerStatus?.lumaReady,
   };
   return Boolean(luma?.ready);
+}
+
+function canGenerateRealVideo(providerStatus) {
+  const videoProvider = providerStatus?.videoProvider || providerStatus?.health?.videoProvider || "";
+  if (videoProvider === "mock") return true;
+  return isLumaReady(providerStatus);
 }
 const STRICT_ARCHITECTURAL_FIDELITY_PROMPT = `
 Preserve the exact architectural identity from the provided inputs.
@@ -6796,9 +6806,19 @@ function buildRenderTargetDescriptors(renderTargets) {
   });
 }
 
+function normalizeOrRejectImagePrompt(rawPrompt, promptContext) {
+  const candidate = String(rawPrompt || "").trim();
+  if (candidate) {
+    const validation = validatePromptContract(candidate, "imageRender");
+    if (validation.ok) return candidate;
+  }
+  return buildImageRenderPrompt(promptContext);
+}
+
 async function requestAiRenderPromptsForTargets(renderTargets) {
   const descriptors = buildRenderTargetDescriptors(renderTargets);
   if (!descriptors.length) return {};
+  const targetByKey = new Map(safeArray(renderTargets).map((target) => [target.key || target.targetKey, target]));
   const deckSettings = pickDeckSettings();
   const settingsPayload = {
     brochureLanguage: deckSettings.brochureLanguage,
@@ -6829,8 +6849,30 @@ async function requestAiRenderPromptsForTargets(renderTargets) {
   const byKey = {};
   rawPrompts.forEach((entry) => {
     if (!entry || !entry.targetKey) return;
+    const target = targetByKey.get(entry.targetKey) || {};
+    const image = findProjectMediaItem(target.imageId) || state.images.find((item) => item.id === target.imageId) || null;
+    const promptContext = buildPromptContext({
+      project: state.project,
+      module: "brochureStudio",
+      targetOutput: "imageRender",
+      primaryAssetId: image?.id || target.imageId || state.project?.coverAssetId || null,
+      selectedAssetIds: [image?.id || target.imageId].filter(Boolean),
+      userOptions: {
+        ...deckSettings,
+        changeRequest: target.config?.prompt || entry.cameraNotes || "",
+      },
+      userFeedback: [
+        target.blueprint?.title ? `Slide: ${target.blueprint.title}` : "",
+        target.config?.prompt ? `User request: ${target.config.prompt}` : "",
+      ].filter(Boolean).join("\n"),
+      slide: target.blueprint || null,
+      layer: target.config || null,
+    });
+    if (image?.analysis || image?.metadata?.analysis) {
+      promptContext.visualInventory = buildVisualInventoryFromAnalysis(image.analysis || image.metadata?.analysis);
+    }
     byKey[entry.targetKey] = {
-      geminiPrompt: String(entry.geminiPrompt || "").trim(),
+      geminiPrompt: normalizeOrRejectImagePrompt(entry.geminiPrompt, promptContext),
       negativePrompt: String(entry.negativePrompt || "").trim(),
       cameraNotes: String(entry.cameraNotes || "").trim(),
       materialsToPreserve: safeArray(entry.materialsToPreserve),
@@ -6865,9 +6907,25 @@ async function requestAiBoardPromptsForTargets(boardTargets) {
   const byKey = {};
   rawPrompts.forEach((entry) => {
     if (!entry || !entry.targetKey) return;
+    const target = safeArray(boardTargets).find((item) => item.targetKey === entry.targetKey || item.key === entry.targetKey) || {};
+    const selectedAssetIds = safeArray(state.projectUi?.presentationSelectedAssetIds).filter((id) => getAssetById(id));
+    const promptContext = buildPromptContext({
+      project: state.project,
+      module: "brochureStudio",
+      targetOutput: "boardImage",
+      primaryAssetId: selectedAssetIds[0] || state.project?.coverAssetId || null,
+      selectedAssetIds,
+      galleryReferenceIds: safeArray(state.projectUi?.presentationSelectedAssetIds).filter((id) => getGalleryItemById(id)),
+      userOptions: {
+        ...deckSettings,
+        changeRequest: `Create visual board for ${entry.kind || target.kind || target.targetKey || "presentation board"}.`,
+      },
+      userFeedback: target.label || target.targetKey || "",
+      slide: target,
+    });
     byKey[entry.targetKey] = {
       kind: String(entry.kind || "").trim(),
-      geminiPrompt: String(entry.geminiPrompt || "").trim(),
+      geminiPrompt: normalizeOrRejectImagePrompt(entry.geminiPrompt, promptContext),
       keywords: safeArray(entry.keywords),
       materials: safeArray(entry.materials),
     };
@@ -10296,47 +10354,321 @@ async function downloadPdfVariant(kind) {
 }
 
 async function downloadEditablePptx(deck) {
-  const slides = await prepareSlidesForPptExport(deck.slides);
-  if (!slides.some((slide) => safeArray(slide.layerManifest).length)) {
-    toast("Esta plantilla no conserva capas editables. Sube una plantilla PPTX editable o usa otra.", "warn");
+  const editorState = state.settings.deckEditor?.slides?.length ? state.settings.deckEditor : null;
+  return exportPresentationToPptx(
+    state.project,
+    state.project?.activePresentationId || state.project?.presentationState?.id || editorState?.id || "",
+    editorState || deck
+  );
+}
+
+const PPT_LAYOUT = {
+  widthIn: 13.333,
+  heightIn: 7.5,
+  widthPx: 1120,
+  heightPx: 630,
+};
+
+function pxToInX(px) {
+  return (Number(px || 0) / PPT_LAYOUT.widthPx) * PPT_LAYOUT.widthIn;
+}
+
+function pxToInY(px) {
+  return (Number(px || 0) / PPT_LAYOUT.heightPx) * PPT_LAYOUT.heightIn;
+}
+
+function layerRectToPpt(layer) {
+  return {
+    x: pxToInX(layer.x),
+    y: pxToInY(layer.y),
+    w: pxToInX(layer.width),
+    h: pxToInY(layer.height),
+  };
+}
+
+function sanitizeFileName(value) {
+  return String(value || "archivo")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "archivo";
+}
+
+function normalizeHexColor(value, fallback = "FFFFFF") {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(text)) return text.slice(1);
+  if (/^[0-9a-fA-F]{6}$/.test(text)) return text;
+  return fallback;
+}
+
+function normalizePptTransparency(opacity = 1) {
+  return Math.round((1 - clamp(Number(opacity ?? 1), 0, 1)) * 100);
+}
+
+function getPresentationById(project, presentationId) {
+  const presentations = safeArray(project?.presentations);
+  return presentations.find((presentation) => presentation.id === presentationId)
+    || (project?.presentationState?.id === presentationId ? project.presentationState : null)
+    || presentations[0]
+    || project?.presentationState
+    || null;
+}
+
+function normalizePptxExportLayer(layer = {}, index = 0) {
+  const style = { ...(layer.style || {}) };
+  const content = layer.content ?? layer.text ?? "";
+  const type = layer.type === "shape" && layer.shapeType === "line" ? "line" : (layer.type || "shape");
+  return {
+    ...layer,
+    id: layer.id || createId(`pptx_layer_${type}`),
+    type,
+    name: layer.name || `Capa ${index + 1}`,
+    role: layer.role || "",
+    x: Number(layer.x || 0),
+    y: Number(layer.y || 0),
+    width: Number(layer.width || 100),
+    height: Number(layer.height || (type === "line" ? 1 : 40)),
+    zIndex: Number(layer.zIndex ?? layer.layer ?? index),
+    visible: layer.visible !== false,
+    locked: Boolean(layer.locked),
+    opacity: Number(layer.opacity ?? 1),
+    rotation: Number(layer.rotation || 0),
+    text: String(content || ""),
+    content: String(content || ""),
+    src: layer.src || layer.url || layer.dataUrl || "",
+    objectFit: layer.objectFit || "cover",
+    colors: safeArray(layer.colors),
+    style: {
+      ...style,
+      fontFamily: style.fontFamily || "Aptos",
+      fontSize: Number(style.fontSize || 18),
+      fontWeight: style.fontWeight || 400,
+      color: style.color || "#161412",
+      fill: style.fill || style.backgroundColor || "#F8F4EA",
+      stroke: style.stroke || style.borderColor || "#D7C7AA",
+      strokeWidth: Number(style.strokeWidth || style.borderWidth || 1),
+      radius: Number(style.radius || style.borderRadius || 0),
+      lineStyle: style.lineStyle || "solid",
+    },
+  };
+}
+
+function normalizePptxExportPresentation(project, presentationId, presentationOverride = null) {
+  const source = presentationOverride || getPresentationById(project, presentationId) || state.settings.deckEditor || state.result.deck || {};
+  const rawSlides = safeArray(source.slides);
+  return {
+    id: source.id || presentationId || createId("presentation"),
+    title: source.title || project?.name || "RenderAI presentacion",
+    aspectRatio: source.aspectRatio || "16:9",
+    slides: rawSlides.map((slide, slideIndex) => {
+      const layerSource = safeArray(slide.layers || slide.elements || slide.layerManifest);
+      return {
+        ...slide,
+        id: slide.id || slide.key || `slide-${slideIndex + 1}`,
+        name: slide.name || slide.title || `Slide ${slideIndex + 1}`,
+        slideType: slide.slideType || slide.sectionId || "brochure",
+        layoutVariantId: slide.layoutVariantId || slide.layout || "",
+        width: slide.width || source.width || PPT_LAYOUT.widthPx,
+        height: slide.height || source.height || PPT_LAYOUT.heightPx,
+        background: slide.background || { type: "color", value: "#FFFFFF" },
+        layers: layerSource.map(normalizePptxExportLayer),
+      };
+    }),
+  };
+}
+
+function applySlideBackgroundToPpt(slide, slideModel) {
+  const background = slideModel.background || {};
+  if (background.type === "color") {
+    slide.background = {
+      color: normalizeHexColor(background.color || background.value, "FFFFFF"),
+    };
     return;
   }
-  const template = getBrochureTemplateGalleryEntry(state.settings.brochureStyle);
-  const response = await apiRequest("/api/export-pptx", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title: deck.title,
-      summary: deck.summary,
-      fileName: `${slugify(deck.title || "proyecto-deck")}-editable.pptx`,
-      slides,
-      template: {
-        value: template?.value || state.settings.brochureStyle,
-        label: template?.label || "",
-        canvaId: template?.canvaId || "",
-        canvaUrl: template?.canvaUrl || "",
-      },
-      theme: {
-        palette: state.settings.selectedPalette?.length ? state.settings.selectedPalette : getSuggestedPalette(getMainImage()?.analysis || buildAnalysisFallback()),
-        titleFont: state.settings.titleFont || "Cormorant Garamond",
-        bodyFont: state.settings.bodyFont || "Manrope",
-        brochureStyle: state.settings.brochureStyle,
-        language: state.settings.brochureLanguage,
-      },
-    }),
+  slide.background = { color: "FFFFFF" };
+}
+
+function addLayerToPptSlide(pptx, slide, layer, project) {
+  if (layer.type === "text") return addTextLayerToPpt(pptx, slide, layer);
+  if (layer.type === "image") return addImageLayerToPpt(pptx, slide, layer, project);
+  if (layer.type === "line" || layer.shapeType === "line") return addLineLayerToPpt(pptx, slide, layer);
+  if (layer.type === "palette") return addPaletteLayerToPpt(pptx, slide, layer);
+  return addShapeLayerToPpt(pptx, slide, layer);
+}
+
+function addTextLayerToPpt(pptx, slide, layer) {
+  const rect = layerRectToPpt(layer);
+  const style = layer.style || {};
+  slide.addText(String(layer.text || layer.content || ""), {
+    ...rect,
+    fontFace: style.fontFamily || "Aptos",
+    fontSize: Number(style.fontSize || 18),
+    bold: Number(style.fontWeight || 400) >= 700,
+    italic: Boolean(style.italic) || style.fontStyle === "italic",
+    underline: Boolean(style.underline) || style.textDecoration === "underline",
+    color: normalizeHexColor(style.color, "161412"),
+    align: style.textAlign || style.align || "left",
+    valign: style.verticalAlign || "top",
+    margin: 0.05,
+    breakLine: false,
+    fit: "shrink",
+    transparency: normalizePptTransparency(layer.opacity),
+    rotate: Number(layer.rotation || 0),
+  });
+}
+
+function getLayerImageData(layer, project) {
+  const gallery = safeArray(project?.gallery);
+  const assets = safeArray(project?.assets);
+  const rendered = layer.renderedAssetId && gallery.find((item) => item.id === layer.renderedAssetId);
+  const source = layer.sourceAssetId && assets.find((item) => item.id === layer.sourceAssetId);
+  const gallerySource = layer.sourceGalleryItemId && gallery.find((item) => item.id === layer.sourceGalleryItemId);
+  const direct = gallery.find((item) => item.id === layer.assetId) || assets.find((item) => item.id === layer.assetId);
+  const item = rendered || source || gallerySource || direct || null;
+  return item?.dataUrl || item?.imageDataUrl || item?.url || layer.dataUrl || layer.src || "";
+}
+
+function addImageLayerToPpt(pptx, slide, layer, project) {
+  const rect = layerRectToPpt(layer);
+  const imageData = getLayerImageData(layer, project);
+  const shapeType = pptx.ShapeType || window.PptxGenJS?.ShapeType || {};
+  if (!imageData) {
+    slide.addShape(shapeType.rect || "rect", {
+      ...rect,
+      fill: { color: "F8F4EA" },
+      line: { color: "D7C7AA", transparency: 20 },
+    });
+    slide.addText("Imagen pendiente", {
+      ...rect,
+      fontSize: 10,
+      color: "7A7166",
+      align: "center",
+      valign: "mid",
+    });
+    return;
+  }
+  const imageOptions = {
+    ...rect,
+    transparency: normalizePptTransparency(layer.opacity),
+    rotate: Number(layer.rotation || 0),
+  };
+  if (String(imageData).startsWith("data:image")) {
+    slide.addImage({ data: imageData, ...imageOptions });
+    return;
+  }
+  slide.addImage({ path: imageData, ...imageOptions });
+}
+
+function addShapeLayerToPpt(pptx, slide, layer) {
+  const rect = layerRectToPpt(layer);
+  const style = layer.style || {};
+  const shapeType = pptx.ShapeType || window.PptxGenJS?.ShapeType || {};
+  const pptShapeType = layer.shapeType === "circle" ? (shapeType.ellipse || "ellipse") : (shapeType.rect || "rect");
+  slide.addShape(pptShapeType, {
+    ...rect,
+    fill: {
+      color: normalizeHexColor(style.fill || style.backgroundColor, "F8F4EA"),
+      transparency: normalizePptTransparency(layer.opacity),
+    },
+    line: {
+      color: normalizeHexColor(style.stroke || style.borderColor, "D7C7AA"),
+      width: Number(style.strokeWidth || style.borderWidth || 1),
+    },
+    rotate: Number(layer.rotation || 0),
+  });
+}
+
+function addLineLayerToPpt(pptx, slide, layer) {
+  const style = layer.style || {};
+  const shapeType = pptx.ShapeType || window.PptxGenJS?.ShapeType || {};
+  slide.addShape(shapeType.line || "line", {
+    x: pxToInX(layer.x),
+    y: pxToInY(layer.y),
+    w: pxToInX(layer.width),
+    h: pxToInY(layer.height || 0),
+    line: {
+      color: normalizeHexColor(style.stroke || style.borderColor, "161412"),
+      width: Number(style.strokeWidth || style.borderWidth || 1),
+      dash: style.lineStyle === "dashed" ? "dash" : style.lineStyle === "dotted" ? "dot" : "solid",
+      transparency: normalizePptTransparency(layer.opacity),
+    },
+    rotate: Number(layer.rotation || 0),
+  });
+}
+
+function addPaletteLayerToPpt(pptx, slide, layer) {
+  const colors = safeArray(layer.colors);
+  const rect = layerRectToPpt(layer);
+  const shapeType = pptx.ShapeType || window.PptxGenJS?.ShapeType || {};
+  const swatchWidth = rect.w / Math.max(colors.length, 1);
+  colors.forEach((color, index) => {
+    slide.addShape(shapeType.ellipse || "ellipse", {
+      x: rect.x + index * swatchWidth,
+      y: rect.y,
+      w: Math.min(swatchWidth * 0.75, 0.32),
+      h: Math.min(rect.h, 0.32),
+      fill: { color: normalizeHexColor(color, "FFFFFF") },
+      line: { color: "FFFFFF", transparency: 100 },
+    });
+  });
+}
+
+async function exportPresentationToPptx(project, presentationId, presentationOverride = null) {
+  const presentation = normalizePptxExportPresentation(project, presentationId, presentationOverride);
+  if (!presentation || !safeArray(presentation.slides).length) {
+    throw new Error("PPTX_EXPORT_NO_PRESENTATION::No hay presentacion seleccionada.");
+  }
+  if (!window.PptxGenJS) {
+    throw new Error("PPTX_EXPORT_LIBRARY_MISSING::PptxGenJS no esta cargado.");
+  }
+
+  const pptx = new window.PptxGenJS();
+  pptx.layout = "LAYOUT_WIDE";
+  pptx.author = "RenderAI Studio";
+  pptx.subject = presentation.title || project?.name || "RenderAI presentation";
+  pptx.title = presentation.title || project?.name || "RenderAI presentation";
+  pptx.company = "RenderAI Studio";
+  pptx.lang = "es-CR";
+  pptx.theme = {
+    headFontFace: "Aptos Display",
+    bodyFontFace: "Aptos",
+    lang: "es-CR",
+  };
+
+  safeArray(presentation.slides).forEach((slideModel) => {
+    const slide = pptx.addSlide();
+    applySlideBackgroundToPpt(slide, slideModel);
+    safeArray(slideModel.layers)
+      .filter((layer) => layer.visible !== false)
+      .sort((a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0))
+      .forEach((layer) => addLayerToPptSlide(pptx, slide, layer, project));
   });
 
-  if (!response.ok) {
-    toast("No se pudo exportar el PPT editable.", "error");
-    return;
-  }
-  const blob = await response.blob();
+  const fileName = `${sanitizeFileName(presentation.title || project?.name || "renderai-presentacion")}.pptx`;
+  const rawBlob = await pptx.write({ outputType: "blob" });
+  const blob = rawBlob instanceof Blob
+    ? rawBlob
+    : new Blob([rawBlob], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
   const url = URL.createObjectURL(blob);
-  const fileName = `${slugify(deck.title || "proyecto-deck")}-editable.pptx`;
-  await saveDeckOutputToGallery({ blob, objectUrl: url, fileName, type: "pptx", deck });
+  await saveDeckOutputToGallery({
+    blob,
+    objectUrl: url,
+    fileName,
+    type: "pptx",
+    deck: {
+      title: presentation.title,
+      slides: presentation.slides,
+      metadata: {
+        module: "brochureStudio",
+        action: "exportPptx",
+        slideCount: safeArray(presentation.slides).length,
+      },
+    },
+  });
   triggerDownload(url, fileName);
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  toast("PPT editable exportado.", "ok");
+  toast("PPTX generado correctamente.", "ok");
+  return { fileName, slideCount: safeArray(presentation.slides).length };
 }
 
 function validateEditablePptxTemplate(fileOrTemplate) {
@@ -10384,6 +10716,7 @@ async function saveDeckOutputToGallery({ blob, objectUrl, fileName, type, deck }
     status: "ready",
     approvalStatus: "pending",
     metadata: {
+      ...(deck?.metadata || {}),
       generated: true,
       deckTitle: deck?.title || "",
       slideCount: safeArray(deck?.slides).length,
@@ -13527,7 +13860,7 @@ function addProjectAsset(project, asset = {}) {
     createdAt: asset.createdAt || new Date().toISOString(),
   }, targetProject.id || state.projects.activeId || "");
   targetProject.assets = safeArray(targetProject.assets);
-  targetProject.assets.push(normalized);
+  targetProject.assets.unshift(normalized);
   return normalized;
 }
 
@@ -14015,6 +14348,7 @@ function normalizeProjectRecord(record = {}) {
   };
 
   const existingAssetIds = new Set(safeArray(normalized.assets).map((asset) => asset.id));
+  const existingGalleryIds = new Set(safeArray(normalized.gallery).map((item) => item.id));
   safeArray(normalized.images).forEach((image) => {
     const asset = assetFromLegacyImage(image, "uploaded");
     if (asset && !existingAssetIds.has(asset.id)) {
@@ -14030,9 +14364,9 @@ function normalizeProjectRecord(record = {}) {
     }
   });
   if (normalized.result?.render?.url) {
-    const renderAsset = createProjectAsset({
+    const renderOutput = createGalleryItemFromLegacyAsset({
       id: normalized.result.render.assetId || normalized.result.render.id || cryptoRandom(),
-      type: "image",
+      type: "render",
       name: normalized.result.render.title || "Render generado",
       url: normalized.result.render.url,
       source: "generated",
@@ -14040,8 +14374,11 @@ function normalizeProjectRecord(record = {}) {
       prompt: normalized.result.render.prompt || normalized.result.render.metadata?.prompt || "",
       metadata: { ...(normalized.result.render.metadata || {}), generated: true, stage: "render" },
       createdAt: normalized.result.render.createdAt || normalized.updatedAt,
-    });
-    if (!existingAssetIds.has(renderAsset.id)) normalized.assets.unshift(renderAsset);
+    }, normalized.id);
+    if (!existingGalleryIds.has(renderOutput.id)) {
+      normalized.gallery.unshift(renderOutput);
+      existingGalleryIds.add(renderOutput.id);
+    }
   }
 
   if (!normalized.coverAssetId) {
@@ -15691,6 +16028,8 @@ function renderVideoStagePlan(context) {
 function renderClipStagePanel(approvedBaseImages, clips, approvedClips) {
   const progress = state.projectUi.videoClipProgress;
   const readyClipCount = safeArray(clips).filter(isClipReadyForReview).length;
+  const canGenerateClips = approvedBaseImages.length > 0 && (isLumaReady(state.server) || state.server.mockAi);
+  const clipBlockedMessage = getLumaStatusMessage(state.server);
   return `
     ${progress ? `<div class="video-progress-line"><span style="width:${Math.round((progress.done / Math.max(progress.total, 1)) * 100)}%"></span></div><p class="section-note">Generando clips: ${progress.done} de ${progress.total}${progress.label ? ` · ${escapeHtml(progress.label)}` : ""}</p>` : ""}
     <div class="stage-control-grid">
@@ -15705,8 +16044,8 @@ function renderClipStagePanel(approvedBaseImages, clips, approvedClips) {
         <p>${approvedClips.length} clips aprobados para composicion final.</p>
       </div>
       <div class="stage-control-card action-card">
-        <button type="button" class="button button-primary" data-video-generate-clips ${approvedBaseImages.length ? "" : "disabled"}>Generar clips con imagenes aprobadas</button>
-        <span>${!isLumaReady(state.server) && !state.server.mockAi ? escapeHtml(getLumaStatusMessage(state.server)) : "Despues aprueba o pide cambios clip por clip en el board."}</span>
+        <button type="button" class="button button-primary" data-video-generate-clips ${canGenerateClips ? "" : "disabled"}>Generar clips con imagenes aprobadas</button>
+        <span>${!approvedBaseImages.length ? "Aprueba al menos una imagen base." : (!isLumaReady(state.server) && !state.server.mockAi ? escapeHtml(clipBlockedMessage) : "Despues aprueba o pide cambios clip por clip en el board.")}</span>
       </div>
     </div>
   `;
@@ -22209,7 +22548,7 @@ class CreativeDeckEditor {
     if (action === "export-ppt") return this.export("ppt");
     if (action === "export-images") return this.export("images");
     if (action === "render-selected-photo") return this.renderActivePhotoInstance();
-    if (action === "render-deck") return prepareBrochureResult("rendered");
+    if (action === "render-deck") return this.export("ppt");
     if (action === "preview") {
       return prepareBrochureResult("preview");
     }
@@ -22774,8 +23113,17 @@ class CreativeDeckEditor {
       await exportCreativeDeckImages(this.serialize());
       return;
     }
+    if (kind === "ppt") {
+      try {
+        await exportPresentationToPptx(state.project, this.state.id || state.project?.activePresentationId || "", this.serialize());
+      } catch (error) {
+        console.error(error);
+        toast(error.message || "No se pudo generar PPTX.", "error");
+      }
+      return;
+    }
     state.result.deck = await buildDeckFromCreativeEditorExportDeck(this.serialize());
-    await downloadPdfVariant(kind === "ppt" ? "alternate" : "final");
+    await downloadPdfVariant("final");
   }
 }
 
