@@ -55,6 +55,686 @@ Do not distort walls, openings, furniture, signage or scale.
 Do not change style unless the user explicitly requests it.
 `;
 
+const PROMPT_CONTRACTS = {
+  imageRender: [
+    "ROLE",
+    "SOURCE IMAGE POLICY",
+    "VISUAL INVENTORY",
+    "GEOMETRY LOCK",
+    "CAMERA LOCK",
+    "OBJECT LOCK",
+    "TEXT LOCK",
+    "MATERIAL LOCK",
+    "ALLOWED CHANGES",
+    "FORBIDDEN CHANGES",
+    "USER REQUEST",
+    "OUTPUT REQUIREMENTS",
+    "NEGATIVE PROMPT",
+  ],
+
+  videoStage: [
+    "ROLE",
+    "TEMPLATE",
+    "CURRENT STAGE",
+    "STAGE OBJECTIVE",
+    "MANDATORY STAGE DELTA",
+    "VISUAL INVENTORY",
+    "PREVIOUS APPROVED STAGE LOCK",
+    "GEOMETRY LOCK",
+    "CAMERA LOCK",
+    "OBJECT LOCK",
+    "TEXT LOCK",
+    "ALLOWED CHANGES",
+    "FORBIDDEN CHANGES",
+    "NO FINAL EARLY",
+    "OUTPUT REQUIREMENTS",
+    "NEGATIVE PROMPT",
+  ],
+
+  lumaClip: [
+    "ROLE",
+    "SOURCE IMAGE",
+    "CLIP PURPOSE",
+    "CAMERA MOVEMENT",
+    "SUBJECT STABILITY",
+    "ARCHITECTURE LOCK",
+    "OBJECT LOCK",
+    "NO MORPHING",
+    "NO TEXT DISTORTION",
+    "DURATION",
+    "OUTPUT REQUIREMENTS",
+  ],
+
+  brochureImageLayer: [
+    "ROLE",
+    "PRESENTATION CONTEXT",
+    "SLIDE TYPE",
+    "LAYER ROLE",
+    "IMAGE INSTANCE",
+    "SOURCE IMAGE POLICY",
+    "VISUAL INVENTORY",
+    "GEOMETRY LOCK",
+    "OBJECT LOCK",
+    "TEXT LOCK",
+    "ALLOWED CHANGES",
+    "FORBIDDEN CHANGES",
+    "OUTPUT REQUIREMENTS",
+    "NEGATIVE PROMPT",
+  ],
+
+  presentationUpgrade: [
+    "ROLE",
+    "INPUT PRESENTATION",
+    "CONTENT PRESERVATION",
+    "STYLE SYSTEM",
+    "SLIDE BY SLIDE PLAN",
+    "EDITABLE LAYERS",
+    "LAYOUT RULES",
+    "TYPOGRAPHY RULES",
+    "IMAGE SLOT RULES",
+    "FORBIDDEN CHANGES",
+    "OUTPUT JSON SCHEMA",
+  ],
+};
+
+const PROMPT_ENGINE = {
+  contracts: PROMPT_CONTRACTS,
+  normalizePromptText,
+  validatePromptContract,
+  assertPromptContract,
+  createPromptTrace,
+  buildPromptContext,
+  buildVisualInventoryFromAnalysis,
+  buildVisualInventoryLock,
+  buildImageRenderPrompt,
+  buildVideoStagePrompt: (...args) => buildVideoStagePrompt(...args),
+  buildLumaClipPrompt,
+  buildBrochureImageLayerPrompt,
+  buildPresentationUpgradePrompt,
+};
+
+function normalizePromptText(value) {
+  return String(value || "").replace(/\r/g, "").trim();
+}
+
+function validatePromptContract(prompt, contractName) {
+  const text = normalizePromptText(prompt);
+  const requiredSections = PROMPT_CONTRACTS[contractName] || [];
+  const missing = requiredSections.filter((section) => !text.includes(`${section}:`));
+
+  return {
+    ok: missing.length === 0,
+    contractName,
+    missing,
+  };
+}
+
+function assertPromptContract(prompt, contractName) {
+  const validation = validatePromptContract(prompt, contractName);
+  if (!validation.ok) {
+    throw new Error(
+      `PROMPT_CONTRACT_INVALID::${contractName}::Missing sections: ${validation.missing.join(", ")}`
+    );
+  }
+  return true;
+}
+
+function createPromptTrace({
+  module,
+  provider,
+  model,
+  prompt,
+  negativePrompt = "",
+  sourceAssetIds = [],
+  visualInventory = null,
+  userOptions = {},
+  userFeedback = "",
+  stage = null,
+  parentOutputId = null,
+  contractName = "",
+}) {
+  return {
+    module,
+    provider,
+    model,
+    prompt,
+    negativePrompt,
+    sourceAssetIds,
+    visualInventory,
+    userOptions,
+    userFeedback,
+    stage,
+    parentOutputId,
+    contractName,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function inferPromptModel(provider = "") {
+  const value = String(provider || "").toLowerCase();
+  if (value.includes("luma")) return "luma";
+  if (value.includes("gemini")) return "gemini-3.1-flash-image-preview";
+  if (value.includes("openai")) return "gpt-image-1.5";
+  if (value.includes("mock")) return "mock";
+  return value || "local";
+}
+
+function buildPromptContext({
+  project,
+  module,
+  targetOutput,
+  primaryAssetId = null,
+  selectedAssetIds = [],
+  referenceAssetIds = [],
+  galleryReferenceIds = [],
+  userOptions = {},
+  userFeedback = "",
+  stage = null,
+  slide = null,
+  layer = null,
+}) {
+  const assets = safeArray(project?.assets);
+  const gallery = safeArray(project?.gallery);
+
+  const findAsset = (id) =>
+    assets.find((item) => item.id === id) ||
+    gallery.find((item) => item.id === id) ||
+    null;
+
+  const primaryAsset = findAsset(primaryAssetId) || assets[0] || null;
+
+  const selectedAssets = selectedAssetIds
+    .map(findAsset)
+    .filter(Boolean);
+
+  const referenceAssets = referenceAssetIds
+    .map(findAsset)
+    .filter(Boolean);
+
+  const galleryReferences = galleryReferenceIds
+    .map(findAsset)
+    .filter(Boolean);
+
+  const analysis =
+    primaryAsset?.analysis ||
+    primaryAsset?.metadata?.analysis ||
+    project?.analysis ||
+    project?.visualAnalysis ||
+    null;
+
+  const visualInventory = buildVisualInventoryFromAnalysis(analysis);
+
+  return {
+    projectId: project?.id || null,
+    projectName: project?.name || project?.title || "",
+    module,
+    targetOutput,
+    primaryAsset,
+    selectedAssets,
+    referenceAssets,
+    galleryReferences,
+    visualInventory,
+    userOptions,
+    userFeedback,
+    stage,
+    slide,
+    layer,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function buildVisualInventoryFromAnalysis(analysis) {
+  if (!analysis) {
+    return {
+      summary: "",
+      camera: "",
+      architecture: [],
+      objects: [],
+      largeObjects: [],
+      mediumObjects: [],
+      smallObjects: [],
+      materials: [],
+      visibleText: [],
+      environment: [],
+      composition: [],
+      realismRisks: [],
+    };
+  }
+
+  return {
+    summary: analysis.summary || analysis.sourceSummary || "",
+    camera: analysis.cameraNotes || analysis.camera || "",
+    architecture: safeArray(analysis.architecture || analysis.composition),
+    objects: safeArray(analysis.objects || analysis.furniture || analysis.mustKeep),
+    largeObjects: safeArray(analysis.largeObjects),
+    mediumObjects: safeArray(analysis.mediumObjects),
+    smallObjects: safeArray(analysis.smallObjects),
+    materials: safeArray(analysis.materials),
+    visibleText: safeArray(analysis.texts || analysis.visibleText),
+    environment: safeArray(analysis.environment),
+    composition: safeArray(analysis.composition),
+    realismRisks: safeArray(analysis.realismRisks),
+  };
+}
+
+function promptInventoryList(value, fallback = "") {
+  const items = safeArray(value)
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return "";
+      return item.label || item.name || item.title || item.description || JSON.stringify(item);
+    })
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+  return items.length ? items.join("\n") : fallback;
+}
+
+function buildVisualInventoryLock(visualInventory) {
+  const inventory = visualInventory || {};
+
+  return `
+VISUAL INVENTORY:
+Summary: ${inventory.summary || "Use the provided image as the only source of truth."}
+
+Camera:
+${inventory.camera || "Preserve original camera, crop, lens feeling, perspective and composition."}
+
+Architecture / composition:
+${promptInventoryList(inventory.architecture, "Preserve all visible architecture and composition.")}
+
+Objects:
+${promptInventoryList(inventory.objects, "Preserve all visible objects unless explicitly requested.")}
+
+Large objects:
+${promptInventoryList(inventory.largeObjects, "Preserve or add only if the stage explicitly allows it.")}
+
+Medium objects:
+${promptInventoryList(inventory.mediumObjects, "Preserve or add only if the stage explicitly allows it.")}
+
+Small objects:
+${promptInventoryList(inventory.smallObjects, "Preserve or add only if the stage explicitly allows it.")}
+
+Materials:
+${promptInventoryList(inventory.materials, "Preserve material identity and improve realism only.")}
+
+Visible text/signage:
+${promptInventoryList(inventory.visibleText, "Preserve any visible text exactly if present.")}
+
+Environment:
+${promptInventoryList(inventory.environment, "Do not invent background or site context.")}
+
+Realism risks:
+${promptInventoryList(inventory.realismRisks, "Avoid geometry drift, fake materials, warped text and artificial lighting.")}
+`;
+}
+
+function buildImageRenderPrompt(promptContext) {
+  const {
+    visualInventory,
+    userOptions = {},
+    userFeedback = "",
+  } = promptContext || {};
+
+  const fidelity = userOptions.fidelity || userOptions.fidelityLevel || "strict";
+  const representationStyle = userOptions.representationStyle || userOptions.renderLanguage || userOptions.visualStyle || "photographic";
+  const timeOfDay = userOptions.timeOfDay || "preserve existing";
+  const lightScenario = userOptions.lightScenario || userOptions.light || "natural";
+  const occupancy = userOptions.occupancy || "none";
+  const changeRequest = userFeedback || userOptions.changeRequest || userOptions.prompt || "";
+  const allowPeople = occupancy !== "none" && occupancy !== "no-people";
+
+  const prompt = `
+ROLE:
+You are a professional architectural image editor. Your job is to improve or render the provided source image while preserving the project exactly.
+
+SOURCE IMAGE POLICY:
+Input image 1 is the PRIMARY SOURCE IMAGE. It is locked. Preserve geometry, camera, architecture, objects, scale, composition and visible text.
+Reference images, if present, are secondary style/material references only. They must not override the source image.
+Fidelity mode: ${fidelity}.
+
+${buildVisualInventoryLock(visualInventory)}
+
+GEOMETRY LOCK:
+Do not change room shape, walls, facade, ceiling, floor, columns, beams, doors, windows, openings, roofline, built-in elements or proportions.
+
+CAMERA LOCK:
+Preserve original camera angle, crop, perspective, horizon, lens feeling, vanishing points and composition unless the user explicitly requests a camera change.
+
+OBJECT LOCK:
+Do not move, delete, replace, resize, morph or restyle existing objects unless the user explicitly requests it.
+
+TEXT LOCK:
+Do not alter, invent, translate, distort, blur or replace visible text or signage.
+
+MATERIAL LOCK:
+Preserve material identity. Improve realism, PBR behavior, reflections, roughness, texture and lighting only.
+
+ALLOWED CHANGES:
+- Improve realism.
+- Improve lighting and shadows.
+- Improve texture detail.
+- Improve material quality.
+- Apply selected style: ${representationStyle}.
+- Apply selected light scenario: ${lightScenario}.
+- Apply time of day only if compatible: ${timeOfDay}.
+${allowPeople ? "- Add people only if natural, secondary and not blocking design." : "- Do not add people."}
+
+FORBIDDEN CHANGES:
+- No geometry changes.
+- No camera drift.
+- No object replacement.
+- No invented furniture.
+- No invented architecture.
+- No fake background.
+- No extra rooms.
+- No warped text.
+- No changes to doors/windows/walls/floor/ceiling.
+- No people unless explicitly enabled.
+- No cars unless explicitly enabled.
+
+USER REQUEST:
+${changeRequest || "Improve the image quality while preserving the source exactly."}
+
+OUTPUT REQUIREMENTS:
+Create one high-quality architectural image. The result must look professional, realistic and faithful to the source.
+
+NEGATIVE PROMPT:
+geometry drift, changed camera, changed furniture, changed layout, invented objects, invented architecture, extra rooms, warped text, fake materials, plastic surfaces, distorted doors, distorted windows, melted objects, unrealistic lighting.
+`;
+
+  assertPromptContract(prompt, "imageRender");
+  return prompt;
+}
+
+function buildPreviousApprovedStageLock(previousApprovedStages = []) {
+  const stages = safeArray(previousApprovedStages);
+
+  if (!stages.length) {
+    return "No previous approved stage exists. Use the primary source image as the lock.";
+  }
+
+  return stages.map((item, index) => {
+    const inventory = item.visualInventory || item.metadata?.visualInventory || {};
+    return `
+Previous approved stage ${index + 1}:
+Stage: ${item.stageName || item.title || item.id || "unknown"}
+Locked objects: ${promptInventoryList(item.lockedObjects || inventory.objects, "preserve all visible objects")}
+Locked camera: ${item.lockedCamera || inventory.camera || "preserve camera continuity"}
+Locked geometry: ${promptInventoryList(item.lockedGeometry || inventory.architecture, "preserve geometry")}
+Do not move, replace, remove, resize or restyle these approved elements.
+`;
+  }).join("\n");
+}
+
+function enrichProgressiveDecorationStage(stage = {}) {
+  const id = stage.id;
+
+  const rules = {
+    "empty-space": `
+STAGE-SPECIFIC RULE:
+Remove movable furniture, decor, textiles and accessories.
+Preserve only architecture, floor, walls, ceiling, windows, doors, camera and proportions.
+Do not show furniture or final decoration.
+`,
+    "large-objects": `
+STAGE-SPECIFIC RULE:
+Add only large furniture such as bed, sofa, main table, wardrobe or primary furniture.
+Do not add rugs, lamps, plants, cushions, books, art, small decor or final styling.
+`,
+    "medium-objects": `
+STAGE-SPECIFIC RULE:
+Add only medium functional objects such as chairs, side tables, lamps, curtains, rugs or shelves.
+Do not move or replace large furniture from the previous stage.
+`,
+    "small-decor": `
+STAGE-SPECIFIC RULE:
+Add only small decor such as books, vases, plants, cushions, art and accessories.
+Do not change architecture, camera, large objects or medium objects.
+`,
+    "final-style-lighting": `
+STAGE-SPECIFIC RULE:
+Improve lighting, textures, realism, materials and final atmosphere only.
+Do not move, replace or redesign any object.
+`,
+  };
+
+  return {
+    ...stage,
+    stageDeltaInstructions: `${stage.stageDeltaInstructions || ""}\n${rules[id] || ""}`,
+  };
+}
+
+function buildLumaClipPrompt({
+  template,
+  stage,
+  baseImage,
+  promptContext,
+  durationSeconds = 5,
+}) {
+  const clipMotion = stage?.clipMotion || {};
+
+  const prompt = `
+ROLE:
+You are creating a short architectural video clip from a still image.
+
+SOURCE IMAGE:
+Use the provided image as the only visual source. Keep architecture, objects, materials and composition stable.
+
+CLIP PURPOSE:
+This clip belongs to template "${template?.name || template?.id || "video"}", stage "${stage?.stageName || baseImage?.stageName || stage?.id || "stage"}".
+
+CAMERA MOVEMENT:
+${clipMotion.cameraMove || stage?.motionPrompt || template?.defaultCameraMotion || "slow stable cinematic push-in"}
+
+SUBJECT STABILITY:
+The space, architecture, furniture, objects, text and materials must remain stable through the entire clip.
+
+ARCHITECTURE LOCK:
+Do not morph, bend, melt, move or redesign walls, doors, windows, ceiling, floor, furniture, columns, facade or built-in elements.
+
+OBJECT LOCK:
+Do not add, remove, replace, resize, move or transform objects.
+
+NO MORPHING:
+No shape shifting, no hallucinated transformations, no changing furniture identity, no changing room layout.
+
+NO TEXT DISTORTION:
+Do not distort, invent, translate, replace or animate visible text/signage.
+
+DURATION:
+${durationSeconds} seconds.
+
+OUTPUT REQUIREMENTS:
+Smooth, premium, stable architectural motion. Only camera movement and subtle cinematic depth. No content transformation.
+${promptContext?.userFeedback ? `\nUSER FEEDBACK:\n${promptContext.userFeedback}` : ""}
+`;
+
+  assertPromptContract(prompt, "lumaClip");
+  return prompt;
+}
+
+function buildBrochureImageLayerPrompt(promptContext) {
+  const { slide, layer, visualInventory, userOptions = {}, userFeedback = "" } = promptContext || {};
+
+  const prompt = `
+ROLE:
+You are editing ONE image instance inside a professional architectural presentation.
+
+PRESENTATION CONTEXT:
+Project: ${promptContext?.projectName || ""}
+This render belongs only to one slide and one image layer. Do not affect other instances.
+
+SLIDE TYPE:
+${slide?.slideType || slide?.sectionId || "unknown"}
+
+LAYER ROLE:
+${layer?.role || "image"}
+Layer name: ${layer?.name || ""}
+
+IMAGE INSTANCE:
+slotInstanceId: ${layer?.slotInstanceId || ""}
+This is an independent image instance. Do not change the original asset globally.
+
+SOURCE IMAGE POLICY:
+Use the assigned source image as the primary locked source. Preserve architecture, objects, camera, visible text and composition.
+
+${buildVisualInventoryLock(visualInventory)}
+
+GEOMETRY LOCK:
+Do not change architectural geometry, walls, doors, windows, floor, ceiling, furniture positions or proportions.
+
+OBJECT LOCK:
+Do not move, replace, resize, remove or invent objects unless explicitly requested for this image instance.
+
+TEXT LOCK:
+Do not alter, invent, translate, distort or blur visible text/signage.
+
+ALLOWED CHANGES:
+- Improve visual quality for this slide.
+- Improve lighting, texture and finish.
+- Adapt to selected style: ${userOptions.style || "photographic"}.
+- Adapt to selected light: ${userOptions.light || "natural"}.
+- If this is a background image, preserve clean negative space for text.
+- If this is a hero image, prioritize clarity and premium architectural composition.
+- If this is a moodboard image, prioritize atmosphere while preserving identity.
+
+FORBIDDEN CHANGES:
+- No global asset replacement.
+- No changes to other image instances.
+- No geometry drift.
+- No camera drift.
+- No object replacement.
+- No invented architecture.
+- No warped text.
+
+USER REQUEST:
+${userFeedback || userOptions.changeRequest || "Improve this image instance while preserving the source."}
+
+OUTPUT REQUIREMENTS:
+Return one improved image for this layer only.
+
+NEGATIVE PROMPT:
+changed architecture, changed furniture, changed camera, invented objects, extra rooms, warped text, fake materials, plastic look, distorted walls, distorted doors, distorted windows.
+`;
+
+  assertPromptContract(prompt, "brochureImageLayer");
+  return prompt;
+}
+
+function buildPresentationUpgradePrompt({
+  project,
+  extractedDeck,
+  referenceStyle,
+  userOptions = {},
+}) {
+  const prompt = `
+ROLE:
+You are a professional presentation designer and architecture deck editor.
+
+INPUT PRESENTATION:
+You will receive a basic presentation structure. Treat it as editable content, not as a flat image.
+Project: ${project?.name || project?.title || ""}
+Slide count: ${safeArray(extractedDeck?.slides).length}
+
+CONTENT PRESERVATION:
+Preserve all user-provided text, titles, numbers, names, project descriptions and slide intent.
+Do not invent factual content.
+Do not remove important information.
+You may improve wording only when requested.
+
+STYLE SYSTEM:
+Use the selected or extracted visual style:
+- Typography system
+- Color palette
+- Spacing rules
+- Image treatment
+- Shape language
+- Cover style
+- Editorial hierarchy
+Reference style: ${referenceStyle?.name || userOptions.style || "premium architectural editorial"}
+
+SLIDE BY SLIDE PLAN:
+For each slide, classify:
+- slideType
+- layoutVariant
+- content hierarchy
+- image slots
+- text layers
+- shape layers
+- decorative layers
+- notes
+
+EDITABLE LAYERS:
+Return every slide as editable layers:
+- text
+- image
+- shape
+- line
+- palette
+- background
+Do not flatten the slide into a single image.
+
+LAYOUT RULES:
+Use professional spacing, margins, alignment, grids and hierarchy.
+Use layouts similar to Canva/PPT premium decks.
+
+TYPOGRAPHY RULES:
+Use no more than 2 font families.
+Create clear title, subtitle, body, caption and label hierarchy.
+
+IMAGE SLOT RULES:
+Assign images to specific image layers.
+Each image slot must be independently renderable.
+Do not globally replace repeated images.
+
+FORBIDDEN CHANGES:
+- Do not flatten slides.
+- Do not delete user content.
+- Do not invent facts.
+- Do not merge all objects into one image.
+- Do not ignore existing slide order unless asked.
+- Do not use gallery outputs as original assets unless explicitly selected.
+
+OUTPUT JSON SCHEMA:
+Return JSON only:
+{
+  "deckTitle": "",
+  "styleSystem": {
+    "fonts": [],
+    "colors": [],
+    "spacing": "",
+    "visualTone": ""
+  },
+  "slides": [
+    {
+      "id": "",
+      "name": "",
+      "slideType": "",
+      "layoutVariantId": "",
+      "reason": "",
+      "layers": [
+        {
+          "type": "text|image|shape|line|palette|background",
+          "role": "",
+          "name": "",
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0,
+          "zIndex": 0,
+          "text": "",
+          "style": {}
+        }
+      ]
+    }
+  ]
+}
+`;
+
+  assertPromptContract(prompt, "presentationUpgrade");
+  return prompt;
+}
+
 const PROJECT_TABS = [
   { id: "assets", label: "Assets" },
   { id: "gallery", label: "Gallery" },
@@ -5487,41 +6167,35 @@ function buildRenderPrompt() {
   const context = (state.settings.contextBrief || "").trim();
   const changeRequest = (state.settings.changeRequest || "").trim();
   const manualRegions = buildManualOverlaySummary(analysis);
+  const promptContext = buildPromptContext({
+    project: state.project,
+    module: "render",
+    targetOutput: "imageRender",
+    primaryAssetId: main?.id || state.project?.coverAssetId || null,
+    selectedAssetIds: [main?.id].filter(Boolean),
+    userOptions: {
+      ...state.settings,
+      fidelity: state.settings.fidelity || getRenderRequestProfile().inputFidelity || "strict",
+      representationStyle: buildStyleDescriptor(),
+      renderLanguage: getDecisionLabel("renderLanguage"),
+      lightScenario: getDecisionLabel("lightScenario"),
+      occupancy: state.settings.occupancy || getDecisionLabel("occupancy") || "none",
+      changeRequest,
+    },
+    userFeedback: [
+      context ? `Project context: ${context}` : "",
+      changeRequest ? `Requested change: ${changeRequest}. Everything else stays locked.` : "",
+      manualRegions ? `Manual annotations: ${manualRegions}.` : "",
+      buildRenderDecisionManifest(),
+      buildStrictStyleDirective(),
+      buildOccupancyDirective(),
+      buildRepresentationDirective(),
+      buildVisualTreatmentLine(),
+    ].filter(Boolean).join("\n"),
+  });
+  promptContext.visualInventory = buildVisualInventoryFromAnalysis(analysis);
 
-  const lines = [
-    `IMAGE-TO-IMAGE LOCKED TRANSFORMATION. Convert the attached architectural reference into the requested output style: ${buildStyleDescriptor()}.`,
-    "Treat the input as approved final geometry, not inspiration. The image is a locked camera and a locked composition.",
-    "NON-NEGOTIABLE: preserve camera, crop, perspective, geometry, object count, furniture placement, material identity, visible background, and all signage/text exactly. Do not redesign.",
-  ];
-
-  if (context) lines.push(`Project: ${context}`);
-  if (changeRequest) lines.push(`Requested change: ${changeRequest}. Everything else stays locked.`);
-
-  lines.push(`Lock: same geometry, composition, framing, camera angle, objects, signage, background.`);
-  lines.push(buildGeometryLockDirective(analysis, Boolean(changeRequest)));
-  lines.push("Resolve the whole image at the same quality level: foreground, midground, background, glass, signage, micro-objects, materials, and visible exterior.");
-  lines.push(buildAiRoleAndSkillContract("render"));
-  lines.push(buildPublicReleaseQualityContract("render"));
-  lines.push(buildRenderDecisionManifest());
-  lines.push(buildStrictStyleDirective());
-
-  const sceneDetails = [];
-  if ((analysis.objects || []).length) sceneDetails.push(`Objects: ${analysis.objects.slice(0, 10).join(", ")}`);
-  if ((analysis.texts || []).length) sceneDetails.push(`Text/signage (preserve verbatim): ${analysis.texts.slice(0, 8).join(", ")}`);
-  if ((analysis.materials || []).length) sceneDetails.push(`Materials: ${analysis.materials.slice(0, 8).join(", ")}`);
-  if ((analysis.environment || []).length) sceneDetails.push(`Environment: ${analysis.environment.slice(0, 6).join(", ")}`);
-  if (sceneDetails.length) lines.push(`Scene: ${sceneDetails.join(". ")}.`);
-
-  if ((analysis.realismRisks || []).length) lines.push(`Fix: ${analysis.realismRisks.slice(0, 5).join(", ")}.`);
-  if (manualRegions) lines.push(`Manual annotations: ${manualRegions}.`);
-
-  lines.push(buildOccupancyDirective());
-  lines.push(buildRepresentationDirective());
-
-  lines.push(buildVisualTreatmentLine());
-  lines.push("Goal: premium real architectural photography, not a pretty CGI render. Real material weight, real glass behavior, realistic tonal separation, controlled highlights, physically credible depth.");
-
-  return lines.filter(Boolean).join("\n");
+  return buildImageRenderPrompt(promptContext);
 }
 
 function buildGeometryLockDirective(analysis = {}, hasChangeRequest = false) {
@@ -5907,12 +6581,14 @@ async function generateRenderResult() {
 
   let output = null;
   let aiRenderError = null;
+  let renderPrompt = buildRenderPrompt();
   if (state.server.aiReady) {
     try {
       output = await requestAiRender(main, {
-        prompt: buildRenderPrompt(),
+        prompt: renderPrompt,
         size: pickImageSize(main),
         profile: getRenderRequestProfile(),
+        contractName: "imageRender",
       });
     } catch (error) {
       aiRenderError = error;
@@ -5926,19 +6602,34 @@ async function generateRenderResult() {
     if (!occupancyCheck.valid) {
       state.generation.stage = occupancyCheck.message;
       renderAll();
+      renderPrompt = `${buildRenderPrompt()}\n\nUSER REQUEST:\nCORRECCION OBLIGATORIA DE PERSONAS: ${occupancyCheck.retryInstruction}`;
       output = await requestAiRender(main, {
-        prompt: `${buildRenderPrompt()}\nCORRECCION OBLIGATORIA DE PERSONAS: ${occupancyCheck.retryInstruction}`,
+        prompt: renderPrompt,
         size: pickImageSize(main),
         profile: getRenderRequestProfile(),
+        contractName: "imageRender",
       }).catch(() => output);
     }
   }
   if (!output) output = await buildLocalRenderFallback(main);
+  const promptTrace = createPromptTrace({
+    module: "render",
+    provider: output.provider || output.source || "local",
+    model: output.model || inferPromptModel(output.provider || output.source || "local"),
+    prompt: renderPrompt,
+    sourceAssetIds: [main.id].filter(Boolean),
+    visualInventory: buildVisualInventoryFromAnalysis(main?.analysis || null),
+    userOptions: { ...state.settings, profile: getRenderRequestProfile() },
+    userFeedback: state.settings.changeRequest || "",
+    contractName: "imageRender",
+  });
 
   const result = {
     id: cryptoRandom(),
     url: output.url,
     source: output.source,
+    metadata: promptTrace,
+    prompt: renderPrompt,
     createdAt: new Date().toISOString(),
     title: output.source === "gemini" ? "Render Gemini" : output.source === "openai" ? "Render OpenAI" : "Render local",
   };
@@ -5989,11 +6680,13 @@ async function generatePdfDeck() {
 async function requestAiRender(main, options = {}) {
   const profile = options.profile || getRenderRequestProfile();
   const sourceImages = safeArray(options.images).length ? safeArray(options.images) : [main.url];
+  const prompt = options.prompt || buildRenderPrompt();
+  if (options.contractName) assertPromptContract(prompt, options.contractName);
   const response = await apiRequest("/api/generate-render-image", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt: options.prompt || buildRenderPrompt(),
+      prompt,
       size: options.size || pickImageSize(main),
       images: sourceImages,
       quality: profile.quality,
@@ -6007,7 +6700,18 @@ async function requestAiRender(main, options = {}) {
   const payload = await response.json();
   if (!response.ok || !payload.ok || !payload.imageBase64) throw new Error(payload.message || `Status ${response.status}`);
   const mimeType = payload.mimeType || "image/jpeg";
-  return { url: `data:${mimeType};base64,${payload.imageBase64}`, source: payload.provider || "openai" };
+  const provider = payload.provider || "openai";
+  return {
+    url: `data:${mimeType};base64,${payload.imageBase64}`,
+    source: provider,
+    provider,
+    model: payload.model || inferPromptModel(provider),
+    revisedPrompt: payload.revisedPrompt || "",
+    fallbackReason: payload.fallbackReason || "",
+    fidelityScore: payload.fidelityScore,
+    fidelityViolations: safeArray(payload.fidelityViolations),
+    fidelityWarnings: payload.fidelityWarnings || "",
+  };
 }
 
 async function requestAiAnalysis(main) {
@@ -6028,13 +6732,22 @@ async function requestAiAnalysis(main) {
 async function requestAiDeck() {
   const blueprints = computePdfSlideBlueprints();
   const projectAnalysis = getPdfDeckAnalysis();
+  const deckSettings = pickDeckSettings();
+  const presentationUpgradePrompt = buildPresentationUpgradePrompt({
+    project: state.project,
+    extractedDeck: { slides: blueprints },
+    referenceStyle: buildTemplateReferenceBlock(),
+    userOptions: deckSettings,
+  });
   const response = await apiRequest("/api/generate-presentation-outline", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       context: state.settings.contextBrief,
       analysis: projectAnalysis,
-      settings: pickDeckSettings(),
+      settings: deckSettings,
+      presentationUpgradePrompt,
+      contractName: "presentationUpgrade",
     }),
   });
   const payload = await response.json();
@@ -6363,12 +7076,20 @@ async function buildPdfProjectVisuals(main) {
       promptParts.push(`Signage/text to preserve verbatim: ${aiPromptEntry.textsToPreserve.join("; ")}`);
     }
     if (aiPromptEntry?.negativePrompt) promptParts.push(`Avoid: ${aiPromptEntry.negativePrompt}`);
-    const finalPrompt = promptParts.filter(Boolean).join("\n");
+    const finalPrompt = buildContractedBrochureLegacyPrompt({
+      image,
+      legacyPrompt: promptParts.filter(Boolean).join("\n"),
+      slideType: target.blueprint?.sectionId || target.slideKey || "brochure",
+      layerRole: target.config?.renderTreatment || "image",
+      layerName: target.blueprint?.title || target.key || "Visual brochure",
+      userOptions: target.config || {},
+    });
     const rendered = await requestAiRender(image, {
       prompt: finalPrompt,
       size: pickImageSize(image),
       images: [image.url],
       profile: { quality: "high", inputFidelity: "high", outputCompression: 95, providerPreference: "auto-strict", strictFidelity: true },
+      contractName: "brochureImageLayer",
     }).catch(() => null);
     if (rendered?.source) renderedProvider = rendered.source;
     const outputUrl = rendered?.url || image.url;
@@ -6422,7 +7143,42 @@ function buildPdfProjectRenderPrompt(image, blueprint = null, config = {}) {
   if (config.prompt) lines.push(`USER SLOT CHANGE REQUEST: ${String(config.prompt).slice(0, 800)}. Respect this request without changing locked geometry or signage.`);
   lines.push(buildVisualTreatmentLine());
   lines.push("Fidelity priority: do not add furniture, do not remove objects, do not invent architecture, do not distort signs, do not replace the project with an alternate design. If a sign/text is visible, preserve it exactly or keep that source area visually unchanged.");
-  return lines.filter(Boolean).join("\n");
+  return buildContractedBrochureLegacyPrompt({
+    image,
+    legacyPrompt: lines.filter(Boolean).join("\n"),
+    slideType: blueprint?.sectionId || "brochure",
+    layerRole: config.renderTreatment || "image",
+    layerName: slideLabel,
+    userOptions: { ...config, style: representation, light: state.settings.lightScenario || "natural" },
+  });
+}
+
+function buildContractedBrochureLegacyPrompt({ image, legacyPrompt, slideType = "brochure", layerRole = "image", layerName = "Imagen", userOptions = {} } = {}) {
+  const promptContext = buildPromptContext({
+    project: state.project,
+    module: "brochureStudio",
+    targetOutput: "imageLayer",
+    primaryAssetId: image?.id || state.project?.coverAssetId || null,
+    selectedAssetIds: [image?.id].filter(Boolean),
+    userOptions: {
+      ...state.settings,
+      ...userOptions,
+      changeRequest: legacyPrompt,
+    },
+    userFeedback: legacyPrompt,
+    slide: {
+      slideType,
+      sectionId: slideType,
+      layout: userOptions.layout || "",
+    },
+    layer: {
+      role: layerRole,
+      name: layerName,
+      slotInstanceId: userOptions.slotInstanceId || createId("slot"),
+    },
+  });
+  promptContext.visualInventory = buildVisualInventoryFromAnalysis(image?.analysis || getPdfDeckAnalysis());
+  return buildBrochureImageLayerPrompt(promptContext);
 }
 
 function buildOccupancyDirectiveForValue(value) {
@@ -6463,6 +7219,7 @@ async function buildAiDeckVisualKit(main, projectVisuals) {
       prompt: buildRenderPrompt(),
       size: pickImageSize(main),
       profile: { quality: "medium", inputFidelity: "high", outputCompression: 92, providerPreference: "auto-strict", strictFidelity: true },
+      contractName: "imageRender",
     });
   const projectUrls = safeArray(projectVisuals?.orderedRenderedUrls).length
     ? safeArray(projectVisuals?.orderedRenderedUrls)
@@ -6488,13 +7245,21 @@ async function buildAiDeckVisualKit(main, projectVisuals) {
     const promptEntry = boardPromptByTarget[target.targetKey];
     const fallbackKind = target.kind === "materials" || target.kind === "palette" ? "materials" : "moodboard";
     const layoutPrompt = getMoodBoardLayoutPrompt(target.moodBoardLayout);
-    const prompt = [
+    const legacyPrompt = [
       promptEntry?.geminiPrompt || buildPdfVisualPrompt(fallbackKind, target.moodBoardLayout),
       layoutPrompt,
       target.materialHighlights?.length ? `Prioritize these selected materials: ${target.materialHighlights.join(", ")}.` : null,
       target.objectHighlights?.length ? `Include these selected object cues as physical mood-board objects, without labels: ${target.objectHighlights.join(", ")}.` : null,
       "Output must be one finished hyperrealistic collage/flatlay image for this brochure slide only.",
     ].filter(Boolean).join("\n");
+    const prompt = buildContractedBrochureLegacyPrompt({
+      image: main,
+      legacyPrompt,
+      slideType: target.kind || fallbackKind,
+      layerRole: fallbackKind,
+      layerName: target.targetKey || fallbackKind,
+      userOptions: { style: fallbackKind, light: "studio", slotInstanceId: target.targetKey },
+    });
     const sourceImages = target.kind === "materials" || target.kind === "palette" ? materialsSources : moodboardSources;
     state.generation.stage = `Generando board IA ${index + 1} de ${boardTargets.length}...`;
     renderAll();
@@ -6503,6 +7268,7 @@ async function buildAiDeckVisualKit(main, projectVisuals) {
       size: "1024x1024",
       images: sourceImages,
       profile: { quality: "high", inputFidelity: "high", outputCompression: 95, providerPreference: "gemini" },
+      contractName: "brochureImageLayer",
     }).catch(() => null);
     if (renderedBoard?.url) {
       boardsBySlideKey[target.slideKey] = renderedBoard.url;
@@ -6513,19 +7279,35 @@ async function buildAiDeckVisualKit(main, projectVisuals) {
 
   if (!moodboard) {
     moodboard = await requestAiRender(main, {
-      prompt: buildPdfVisualPrompt("moodboard", "object-flatlay"),
+      prompt: buildContractedBrochureLegacyPrompt({
+        image: main,
+        legacyPrompt: buildPdfVisualPrompt("moodboard", "object-flatlay"),
+        slideType: "moodboard",
+        layerRole: "moodboard",
+        layerName: "Moodboard",
+        userOptions: { style: "moodboard", light: "studio" },
+      }),
       size: "1024x1024",
       images: moodboardSources,
       profile: { quality: "high", inputFidelity: "high", outputCompression: 95, providerPreference: "gemini" },
+      contractName: "brochureImageLayer",
     }).catch(() => null);
   }
 
   if (!materials) {
     materials = await requestAiRender(main, {
-      prompt: buildPdfVisualPrompt("materials", "grid-separated"),
+      prompt: buildContractedBrochureLegacyPrompt({
+        image: main,
+        legacyPrompt: buildPdfVisualPrompt("materials", "grid-separated"),
+        slideType: "materials",
+        layerRole: "materials",
+        layerName: "Materiales",
+        userOptions: { style: "materials", light: "studio" },
+      }),
       size: "1024x1024",
       images: materialsSources,
       profile: { quality: "high", inputFidelity: "high", outputCompression: 95, providerPreference: "gemini" },
+      contractName: "brochureImageLayer",
     }).catch(() => null);
   }
 
@@ -9829,7 +10611,7 @@ function handleDelegatedClick(event) {
   const galleryPromptButton = target.closest("[data-gallery-show-prompt]");
   if (galleryPromptButton) {
     const item = getGalleryItemById(galleryPromptButton.dataset.galleryShowPrompt);
-    window.alert(item?.prompt || "Sin prompt guardado.");
+    openPromptInspectorModal(item);
     return;
   }
 
@@ -12725,6 +13507,30 @@ function addProjectGalleryItem(project, item = {}) {
   return normalized;
 }
 
+function addProjectAsset(project, asset = {}) {
+  const targetProject = project || state.project;
+
+  if (
+    asset.source === "ai-generated" ||
+    asset.source === "generated" ||
+    asset.generated === true ||
+    asset.output === true ||
+    ["render", "base_image", "clip", "video", "pdf", "pptx", "brochure"].includes(asset.type)
+  ) {
+    throw new Error("ASSET_POLICY_ERROR::Generated outputs must go to Gallery, not Assets.");
+  }
+
+  const normalized = normalizeAsset({
+    ...asset,
+    id: asset.id || createId("asset"),
+    source: asset.source || "user-uploaded",
+    createdAt: asset.createdAt || new Date().toISOString(),
+  }, targetProject.id || state.projects.activeId || "");
+  targetProject.assets = safeArray(targetProject.assets);
+  targetProject.assets.push(normalized);
+  return normalized;
+}
+
 function getBrochureImageLayerOriginalUrl(layer) {
   if (!layer) return "";
   const source = findProjectMediaItem(layer.sourceAssetId || layer.sourceGalleryItemId || layer.metadata?.sourceItemId);
@@ -12861,6 +13667,8 @@ function createBaseImageItem(input = {}) {
     stageName: input.stageName || "Imagen base",
     prompt: input.prompt || "",
     negativePrompt: input.negativePrompt || "",
+    metadata: cloneProjectValue(input.metadata || {}, {}),
+    visualInventory: input.visualInventory || input.metadata?.visualInventory || null,
     feedbackHistory: safeArray(input.feedbackHistory).map((item) => createFeedbackItem({ ...item, targetType: "base_image" })),
     status: input.status || "queued",
     error: input.error || "",
@@ -12878,6 +13686,7 @@ function createClipItem(input = {}) {
     videoAssetId: input.videoAssetId || "",
     lumaGenerationId: input.lumaGenerationId || "",
     motionPrompt: input.motionPrompt || "",
+    metadata: cloneProjectValue(input.metadata || {}, {}),
     durationSeconds: Number(input.durationSeconds || 5),
     transitionIn: input.transitionIn || "soft cut",
     transitionOut: input.transitionOut || "cross dissolve",
@@ -12900,10 +13709,13 @@ function createVideoProduction(input = {}) {
     currentStage: input.currentStage || (input.templateId ? "inputs" : "template"),
     stageStatus: cloneProjectValue(input.stageStatus || {}, {}),
     sourceAssetIds: safeArray(input.sourceAssetIds),
+    analysis: input.analysis || null,
+    plan: input.plan || null,
     baseImages: safeArray(input.baseImages).map(createBaseImageItem),
     clips: safeArray(input.clips).map(createClipItem),
     finalVideoAssetId: input.finalVideoAssetId || "",
     settings: createVideoProductionSettings(input.settings || input),
+    auditTrail: safeArray(input.auditTrail),
     createdAt: input.createdAt || now,
     updatedAt: input.updatedAt || now,
   };
@@ -12920,6 +13732,8 @@ const VIDEO_STAGES = [
   "clips_review",
   "final",
 ];
+
+const VIDEO_WORKFLOW_STAGES = VIDEO_STAGES;
 
 function markVideoOutdated(items, reason) {
   return safeArray(items).map((item) => ({
@@ -13223,6 +14037,8 @@ function normalizeProjectRecord(record = {}) {
       url: normalized.result.render.url,
       source: "generated",
       provider: normalized.result.render.source || "manual",
+      prompt: normalized.result.render.prompt || normalized.result.render.metadata?.prompt || "",
+      metadata: { ...(normalized.result.render.metadata || {}), generated: true, stage: "render" },
       createdAt: normalized.result.render.createdAt || normalized.updatedAt,
     });
     if (!existingAssetIds.has(renderAsset.id)) normalized.assets.unshift(renderAsset);
@@ -14324,6 +15140,7 @@ function renderGalleryView() {
 function renderGalleryCard(item) {
   const mini = safeArray(state.project.miniProjects).find((entry) => entry.id === item.miniProjectId);
   const providerLabel = item.provider === "mock" ? "MOCK" : item.provider || "local";
+  const hasPromptTrace = Boolean(item.prompt || item.metadata?.prompt);
   return `
     <article class="gallery-card status-${escapeHtml(item.status || "ready")}">
       <button type="button" class="gallery-card-media" data-gallery-preview="${escapeHtml(item.id)}">
@@ -14348,12 +15165,77 @@ function renderGalleryCard(item) {
           ${["image", "render", "base_image"].includes(item.type) ? `<button type="button" class="button button-ghost" data-gallery-use-picture="${escapeHtml(item.id)}">Picture</button>` : ""}
           ${["image", "render", "base_image"].includes(item.type) ? `<button type="button" class="button button-ghost" data-gallery-use-video="${escapeHtml(item.id)}">Video</button>` : ""}
           <button type="button" class="button button-ghost" data-gallery-use-brochure="${escapeHtml(item.id)}">Brochure</button>
-          ${item.prompt ? `<button type="button" class="button button-ghost" data-gallery-show-prompt="${escapeHtml(item.id)}">Prompt</button>` : ""}
+          ${hasPromptTrace ? `<button type="button" class="button button-ghost" data-gallery-show-prompt="${escapeHtml(item.id)}">Ver flujo</button>` : ""}
           <button type="button" class="button button-danger" data-gallery-delete="${escapeHtml(item.id)}">Eliminar</button>
         </div>
       </div>
     </article>
   `;
+}
+
+function renderPromptInspectorModal(output) {
+  const metadata = output?.metadata || {};
+
+  return `
+    <div class="prompt-inspector-modal">
+      <div class="modal-header">
+        <h2>Prompt y flujo</h2>
+        <button type="button" class="button button-ghost" data-action="close-modal">Cerrar</button>
+      </div>
+
+      <section>
+        <h3>Modulo</h3>
+        <p>${escapeHtml(metadata.module || "No disponible")}</p>
+      </section>
+
+      <section>
+        <h3>Proveedor / Modelo</h3>
+        <p>${escapeHtml(metadata.provider || output?.provider || "")} ${escapeHtml(metadata.model || "")}</p>
+      </section>
+
+      <section>
+        <h3>Contrato</h3>
+        <p>${escapeHtml(metadata.contractName || "No disponible")}</p>
+      </section>
+
+      <section>
+        <h3>Prompt</h3>
+        <pre>${escapeHtml(metadata.prompt || output?.prompt || "No se guardo prompt.")}</pre>
+      </section>
+
+      <section>
+        <h3>Negative Prompt</h3>
+        <pre>${escapeHtml(metadata.negativePrompt || output?.negativePrompt || "")}</pre>
+      </section>
+
+      <section>
+        <h3>Opciones</h3>
+        <pre>${escapeHtml(JSON.stringify(metadata.userOptions || {}, null, 2))}</pre>
+      </section>
+
+      <section>
+        <h3>Inventario visual</h3>
+        <pre>${escapeHtml(JSON.stringify(metadata.visualInventory || {}, null, 2))}</pre>
+      </section>
+    </div>
+  `;
+}
+
+function closePromptInspectorModal() {
+  document.querySelector(".prompt-inspector-backdrop")?.remove();
+}
+
+function openPromptInspectorModal(output) {
+  closePromptInspectorModal();
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop prompt-inspector-backdrop";
+  backdrop.innerHTML = renderPromptInspectorModal(output);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop || event.target.closest("[data-action='close-modal']")) {
+      closePromptInspectorModal();
+    }
+  });
+  document.body.appendChild(backdrop);
 }
 
 function renderImageStudio() {
@@ -14419,23 +15301,57 @@ function createPictureMiniProject(name = "Render arquitectonico") {
   return createMiniProject(state.project, "picture", name, sources.assets.map((item) => item.id), sources.gallery.map((item) => item.id));
 }
 
+function buildPicturePromptContext({ sourceAsset, galleryRefs = [], userPrompt = "", module = "pictureStudio", targetOutput = "imageRender" } = {}) {
+  const promptContext = buildPromptContext({
+    project: state.project,
+    module,
+    targetOutput,
+    primaryAssetId: sourceAsset?.id || null,
+    selectedAssetIds: [sourceAsset?.id].filter(Boolean),
+    galleryReferenceIds: safeArray(galleryRefs).map((item) => item?.id).filter(Boolean),
+    userOptions: {
+      ...state.settings,
+      ...state.projectUi,
+      fidelity: state.settings.fidelity || state.projectUi.videoFidelityLevel || "strict",
+      representationStyle: getDecisionLabel("representationStyle") || state.settings.representationStyle || "photographic",
+      renderLanguage: getDecisionLabel("renderLanguage") || state.settings.renderLanguage || "",
+      lightScenario: getDecisionLabel("lightScenario") || state.settings.lightScenario || "natural",
+      occupancy: getDecisionLabel("occupancy") || state.settings.occupancy || "none",
+      changeRequest: userPrompt,
+    },
+    userFeedback: userPrompt,
+  });
+  promptContext.visualInventory = buildVisualInventoryFromAnalysis(sourceAsset?.analysis || sourceAsset?.metadata?.analysis || null);
+  return promptContext;
+}
+
 function buildPicturePrompt({ sourceAsset, galleryRefs = [], userPrompt = "" } = {}) {
-  return [
-    userPrompt || "Render hiperrealista fiel al asset de referencia. Mejora realismo, materiales, textura, iluminacion fisicamente plausible y calidad fotografica sin cambiar objetos ni arquitectura.",
-    sourceAsset ? `Main source asset: ${sourceAsset.name}.` : "",
-    galleryRefs.length ? `Approved Gallery references: ${galleryRefs.map((item) => item.name).join(", ")}.` : "",
-    buildRenderDecisionManifest(),
-    STRICT_ARCHITECTURAL_FIDELITY_PROMPT,
-  ].filter(Boolean).join("\n");
+  return buildImageRenderPrompt(buildPicturePromptContext({ sourceAsset, galleryRefs, userPrompt }));
 }
 
 async function generatePictureResult({ sourceAsset, prompt, miniProject } = {}) {
   const sourceImage = buildImageSourceFromAsset(sourceAsset);
   if (!sourceImage) throw new Error("Asset fuente sin imagen usable.");
+  assertPromptContract(prompt, "imageRender");
   const output = state.server.aiReady
-    ? await requestAiRender(sourceImage, { prompt, size: pickImageSize(sourceImage), images: [sourceImage.url], profile: getRenderRequestProfile() }).catch(() => null)
+    ? await requestAiRender(sourceImage, { prompt, size: pickImageSize(sourceImage), images: [sourceImage.url], profile: getRenderRequestProfile(), contractName: "imageRender" }).catch(() => null)
     : null;
   const fallback = output || await buildLocalRenderFallback(sourceImage);
+  const promptTrace = createPromptTrace({
+    module: "pictureStudio",
+    provider: fallback.provider || fallback.source || "local",
+    model: fallback.model || inferPromptModel(fallback.provider || fallback.source || "local"),
+    prompt,
+    sourceAssetIds: [sourceAsset.id].filter(Boolean),
+    visualInventory: buildVisualInventoryFromAnalysis(sourceAsset?.analysis || sourceAsset?.metadata?.analysis || null),
+    userOptions: {
+      ...state.settings,
+      ...state.projectUi,
+      changeRequest: state.projectUi.imagePrompt || "",
+    },
+    userFeedback: state.projectUi.imagePrompt || "",
+    contractName: "imageRender",
+  });
   const item = upsertGalleryItem({
     type: "render",
     name: `${sourceAsset.name} · render`,
@@ -14447,7 +15363,7 @@ async function generatePictureResult({ sourceAsset, prompt, miniProject } = {}) 
     parentGalleryItemIds: state.projectUi.imageSelectedGalleryItemIds,
     status: "ready",
     approvalStatus: "pending",
-    metadata: { generated: true, stage: "picture-studio" },
+    metadata: { ...promptTrace, generated: true, stage: "picture-studio" },
   });
   if (miniProject) addMiniProjectResult(miniProject, item.id);
   return item;
@@ -14466,7 +15382,11 @@ async function applyPictureFeedback(galleryItemId, feedbackText) {
   markDependentsOutdated(state.project, oldItem.id);
   const sourceAsset = safeArray(oldItem.parentAssetIds).map(getAssetById).find(Boolean) || getProjectImageAssets()[0];
   const miniProject = getActiveMiniProject("picture") || createPictureMiniProject("Render con cambios");
-  const prompt = `Original prompt:\n${oldItem.prompt || ""}\n\nUser feedback:\n${feedbackText}\n\nApply the feedback while preserving the strict architectural identity.\n${STRICT_ARCHITECTURAL_FIDELITY_PROMPT}`;
+  const prompt = buildPicturePrompt({
+    sourceAsset,
+    galleryRefs: [oldItem].filter(Boolean),
+    userPrompt: `Previous approved output: ${oldItem.name || oldItem.id}. User feedback: ${feedbackText}`,
+  });
   const newItem = await generatePictureResult({ sourceAsset, prompt, miniProject });
   newItem.parentGalleryItemIds = [oldItem.id];
   newItem.version = Number(oldItem.version || 1) + 1;
@@ -16134,19 +17054,38 @@ async function handleImageGenerateFromAssets() {
       job.status = "processing";
       state.generation.stage = `Generando ${asset.name} · v${job.variationIndex}...`;
       renderAll();
-      const finalPrompt = [
-        buildPicturePrompt({ sourceAsset: asset, galleryRefs: state.projectUi.imageSelectedGalleryItemIds.map(getGalleryItemById).filter(Boolean), userPrompt: prompt }),
-        `Reference asset: ${asset.name}. Variation ${job.variationIndex}.`,
-      ].join("\n");
+      const finalPrompt = buildPicturePrompt({
+        sourceAsset: asset,
+        galleryRefs: state.projectUi.imageSelectedGalleryItemIds.map(getGalleryItemById).filter(Boolean),
+        userPrompt: `${prompt}\nReference asset: ${asset.name}. Variation ${job.variationIndex}.`,
+      });
       const output = state.server.aiReady
         ? await requestAiRender(sourceImage, {
           prompt: finalPrompt,
           size: pickImageSize(sourceImage),
           images: [sourceImage.url],
           profile: getRenderRequestProfile(),
+          contractName: "imageRender",
         }).catch(() => null)
         : null;
       const fallback = output || await buildLocalRenderFallback(sourceImage);
+      const promptTrace = createPromptTrace({
+        module: "pictureStudio",
+        provider: fallback.provider || fallback.source || "local",
+        model: fallback.model || inferPromptModel(fallback.provider || fallback.source || "local"),
+        prompt: finalPrompt,
+        sourceAssetIds: [asset.id],
+        visualInventory: buildVisualInventoryFromAnalysis(asset?.analysis || asset?.metadata?.analysis || null),
+        userOptions: {
+          ...state.settings,
+          ...state.projectUi,
+          variationIndex: job.variationIndex,
+          changeRequest: prompt,
+        },
+        userFeedback: prompt,
+        stage: { renderJobId: job.jobId, variationIndex: job.variationIndex },
+        contractName: "imageRender",
+      });
       const generated = upsertProjectAsset({
         type: "image",
         name: `${asset.name} · variacion ${job.variationIndex}`,
@@ -16157,7 +17096,7 @@ async function handleImageGenerateFromAssets() {
         miniProjectId: pictureMiniProject.id,
         parentAssetIds: [asset.id],
         parentGalleryItemIds: state.projectUi.imageSelectedGalleryItemIds,
-        metadata: { generated: true, sourceAssetId: asset.id, renderJobId: job.jobId, stage: "image-studio" },
+        metadata: { ...promptTrace, generated: true, sourceAssetId: asset.id, renderJobId: job.jobId, stage: "image-studio" },
       });
       addMiniProjectResult(pictureMiniProject, generated.id);
       job.status = "completed";
@@ -16203,8 +17142,24 @@ async function generateConversationImage(prompt) {
     const pictureMiniProject = getActiveMiniProject("picture") || createPictureMiniProject("Imagen desde conversacion");
     const finalPrompt = buildPicturePrompt({ sourceAsset, galleryRefs: state.projectUi.imageSelectedGalleryItemIds.map(getGalleryItemById).filter(Boolean), userPrompt: prompt });
     const output = state.server.aiReady
-      ? await requestAiRender(main, { prompt: finalPrompt, size: pickImageSize(main), profile: getRenderRequestProfile() })
+      ? await requestAiRender(main, { prompt: finalPrompt, size: pickImageSize(main), profile: getRenderRequestProfile(), contractName: "imageRender" })
       : await buildLocalRenderFallback(main);
+    const promptTrace = createPromptTrace({
+      module: "pictureStudio",
+      provider: output.provider || output.source || "local",
+      model: output.model || inferPromptModel(output.provider || output.source || "local"),
+      prompt: finalPrompt,
+      sourceAssetIds: [sourceAsset?.id || main.id].filter(Boolean),
+      visualInventory: buildVisualInventoryFromAnalysis(sourceAsset?.analysis || sourceAsset?.metadata?.analysis || main?.analysis || null),
+      userOptions: {
+        ...state.settings,
+        ...state.projectUi,
+        changeRequest: prompt,
+      },
+      userFeedback: prompt,
+      stage: { source: "conversation" },
+      contractName: "imageRender",
+    });
     const asset = upsertProjectAsset({
       type: "image",
       name: `Imagen generada ${new Date().toLocaleTimeString("es-CR", { hour: "2-digit", minute: "2-digit" })}`,
@@ -16215,7 +17170,7 @@ async function generateConversationImage(prompt) {
       miniProjectId: pictureMiniProject.id,
       parentAssetIds: [sourceAsset?.id || main.id].filter(Boolean),
       parentGalleryItemIds: state.projectUi.imageSelectedGalleryItemIds,
-      metadata: { generated: true, sourceAssetId: sourceAsset?.id || main.id, stage: "conversation-image" },
+      metadata: { ...promptTrace, generated: true, sourceAssetId: sourceAsset?.id || main.id, stage: "conversation-image" },
     });
     addMiniProjectResult(pictureMiniProject, asset.id);
     state.projectUi.imageSelectedGalleryItemIds = [asset.id];
@@ -16305,26 +17260,72 @@ async function handleVideoPlanAndImages() {
     job.internalImagePrompts = plan.imagePrompts;
     job.updatedAt = new Date().toISOString();
     const generatedIds = [];
+    const videoSettings = createVideoProductionSettings({
+      userPrompt: settings.prompt,
+      includeHumans: settings.includeHumans,
+      includeCars: settings.includeCars,
+      fidelityLevel: state.projectUi.videoFidelityLevel,
+      visualStyle: state.projectUi.videoVisualStyle || "",
+      imageProvider: state.projectUi.imageProvider,
+    });
+    const visualInventory = buildVisualInventoryFromAnalysis(selectedAssets[0]?.analysis || selectedAssets[0]?.metadata?.analysis || null);
     for (let index = 0; index < plan.imagePrompts.length; index += 1) {
       state.generation.stage = `Generando imagen base ${index + 1} de ${plan.imagePrompts.length}...`;
       renderAll();
+      const outputStage = getTemplateBaseImageOutputs(template)[index] || {
+        id: `legacy-stage-${index + 1}`,
+        stageNumber: index + 1,
+        stageName: `Imagen base ${index + 1}`,
+        stagePurpose: plan.imagePrompts[index],
+        stageDeltaInstructions: plan.imagePrompts[index],
+      };
+      const stagePrompt = buildVideoStagePrompt({
+        template,
+        stage: {
+          ...outputStage,
+          stageDeltaInstructions: `${outputStage.stageDeltaInstructions || outputStage.stagePurpose || ""}\nLEGACY PLAN PROMPT:\n${plan.imagePrompts[index]}`,
+        },
+        visualInventory,
+        userOptions: videoSettings,
+        sourceAssets: selectedAssets,
+        userFeedback: settings.prompt || "",
+      });
       const output = state.server.aiReady
         ? await requestAiRender(sourceImage, {
-          prompt: plan.imagePrompts[index],
+          prompt: stagePrompt,
           size: pickImageSize(sourceImage),
           images: [sourceImage.url],
           profile: { quality: "medium", inputFidelity: "high", outputCompression: 92, providerPreference: state.projectUi.imageProvider === "openai" ? "openai" : "auto-strict", strictFidelity: true },
+          contractName: "videoStage",
         }).catch(() => null)
         : null;
       const fallback = output || await buildLocalRenderFallback(sourceImage);
+      const promptTrace = createPromptTrace({
+        module: "videoStudio",
+        provider: fallback.provider || fallback.source || "local",
+        model: fallback.model || inferPromptModel(fallback.provider || fallback.source || "local"),
+        prompt: stagePrompt,
+        negativePrompt: buildBaseImageNegativePrompt(outputStage, videoSettings),
+        sourceAssetIds: selectedAssets.map((asset) => asset.id),
+        visualInventory,
+        userOptions: videoSettings,
+        userFeedback: settings.prompt || "",
+        stage: {
+          templateId: template.id,
+          stageId: outputStage.id,
+          stageName: outputStage.stageName,
+          stageNumber: outputStage.stageNumber,
+        },
+        contractName: "videoStage",
+      });
       const asset = upsertProjectAsset({
         type: "image",
         name: `${template.name} · imagen base ${index + 1}`,
         url: fallback.url,
         source: "generated",
         provider: fallback.source || "manual",
-        prompt: plan.imagePrompts[index],
-        metadata: { videoJobId: job.id, templateId: template.id, stage: "video-base-image" },
+        prompt: stagePrompt,
+        metadata: { ...promptTrace, generated: true, videoJobId: job.id, templateId: template.id, stage: "video-base-image" },
       });
       generatedIds.push(asset.id);
     }
@@ -16348,7 +17349,7 @@ async function handleVideoPlanAndImages() {
 
 async function handleGenerateApprovedVideo() {
   const job = state.project.videoJobs.find((item) => item.id === state.projectUi.activeVideoJobId) || state.project.videoJobs[0];
-  const approvedAssets = state.projectUi.videoApprovedAssetIds.map((id) => state.project.assets.find((asset) => asset.id === id)).filter(Boolean);
+  const approvedAssets = state.projectUi.videoApprovedAssetIds.map(findProjectMediaItem).filter(Boolean);
   if (!job || !approvedAssets.length) {
     toast("Primero aprueba al menos una imagen base.", "warn");
     return;
@@ -16362,6 +17363,50 @@ async function handleGenerateApprovedVideo() {
   }
   job.status = "sending_to_luma";
   job.approvedImageAssetIds = approvedAssets.map((asset) => asset.id);
+  const template = getVideoTemplates().find((tpl) => tpl.id === job.templateId) || getSelectedVideoTemplate();
+  const primaryApproved = approvedAssets[0];
+  const lumaStage = {
+    id: "legacy-approved-video",
+    stageName: "Approved base image",
+    clipMotion: { cameraMove: state.projectUi.videoCameraMotion || template?.defaultCameraMotion || "slow stable cinematic push-in" },
+  };
+  const lumaPromptContext = buildPromptContext({
+    project: state.project,
+    module: "lumaClip",
+    targetOutput: "clip",
+    primaryAssetId: primaryApproved.id,
+    selectedAssetIds: [primaryApproved.id],
+    userOptions: {
+      ...job,
+      cameraMotion: state.projectUi.videoCameraMotion,
+    },
+    userFeedback: job.prompt || state.projectUi.videoPrompt || "",
+    stage: { videoJobId: job.id, stageName: lumaStage.stageName },
+  });
+  lumaPromptContext.visualInventory = primaryApproved.metadata?.visualInventory || buildVisualInventoryFromAnalysis(primaryApproved.analysis || primaryApproved.metadata?.analysis || null);
+  const lumaPrompt = buildLumaClipPrompt({
+    template,
+    stage: lumaStage,
+    baseImage: { id: primaryApproved.id, assetId: primaryApproved.id, stageName: lumaStage.stageName },
+    promptContext: lumaPromptContext,
+    durationSeconds: job.durationSeconds || 5,
+  });
+  job.lumaPrompt = lumaPrompt;
+  job.metadata = {
+    ...(job.metadata || {}),
+    promptTrace: createPromptTrace({
+      module: "lumaClip",
+      provider: isLumaReady(state.server) ? "luma" : "mock",
+      model: isLumaReady(state.server) ? "luma" : "mock",
+      prompt: lumaPrompt,
+      sourceAssetIds: [primaryApproved.id],
+      visualInventory: lumaPromptContext.visualInventory,
+      userOptions: { ...job, cameraMotion: state.projectUi.videoCameraMotion },
+      userFeedback: job.prompt || state.projectUi.videoPrompt || "",
+      stage: { videoJobId: job.id, stageName: lumaStage.stageName },
+      contractName: "lumaClip",
+    }),
+  };
   renderAll();
   try {
     const response = await apiRequest("/api/video/luma/image-to-video", {
@@ -16372,7 +17417,8 @@ async function handleGenerateApprovedVideo() {
         videoJobId: job.id,
         approvedImageAssetIds: approvedAssets.map((asset) => asset.id),
         images: approvedAssets.map((asset) => asset.url),
-        lumaPrompt: job.lumaPrompt || job.prompt,
+        lumaPrompt,
+        prompt: lumaPrompt,
         durationSeconds: job.durationSeconds,
         aspectRatio: job.aspectRatio,
         cameraMotion: state.projectUi.videoCameraMotion,
@@ -16390,8 +17436,8 @@ async function handleGenerateApprovedVideo() {
         url: payload.videoUrl,
         source: "generated",
         provider: payload.provider || (state.server.mockAi ? "manual" : "luma"),
-        prompt: job.lumaPrompt,
-        metadata: { videoJobId: job.id, lumaGenerationId: job.lumaGenerationId },
+        prompt: lumaPrompt,
+        metadata: { ...(job.metadata?.promptTrace || {}), generated: true, videoJobId: job.id, lumaGenerationId: job.lumaGenerationId, stage: "video-clip" },
       });
       job.outputVideoAssetId = asset.id;
       addProjectMessage({ role: "assistant", type: "video_result", content: "Video completado y guardado como asset del proyecto.", assetIds: [asset.id], jobId: job.id });
@@ -16430,10 +17476,10 @@ function pollLumaStatus(videoJobId, generationId) {
           source: "generated",
           provider: "luma",
           prompt: job.lumaPrompt,
-          metadata: { videoJobId: job.id, lumaGenerationId: generationId },
+          metadata: { ...(job.metadata?.promptTrace || {}), generated: true, videoJobId: job.id, lumaGenerationId: generationId, stage: "video-clip" },
         });
         job.outputVideoAssetId = asset.id;
-        addProjectMessage({ role: "assistant", type: "video_result", content: "Video completado. Duracion y preview disponibles en Assets.", assetIds: [asset.id], jobId: job.id });
+        addProjectMessage({ role: "assistant", type: "video_result", content: "Video completado. Duracion y preview disponibles en Gallery.", assetIds: [asset.id], jobId: job.id });
       } else if (attempts < 8) {
         window.setTimeout(tick, 5000);
       }
@@ -16868,99 +17914,95 @@ function buildVideoStagePrompt({
   userFeedback = "",
   sourceAssets = [],
 } = {}) {
-  const inventory = visualInventory || {};
-  const allowed = normalizeStageList(stage?.allowedChanges || stage?.mayAdd);
-  const mayRemove = normalizeStageList(stage?.mayRemove);
-  const forbidden = normalizeStageList(stage?.forbiddenChanges || stage?.mustNotShow);
-  const mustShow = normalizeStageList(stage?.mustShow);
-  const mustKeep = [
-    ...normalizeStageList(stage?.mustKeep),
-    ...normalizeStageList(inventory.mustKeep),
+  const resolvedStage = template?.id === "progressive-decoration" ? enrichProgressiveDecorationStage(stage || {}) : (stage || {});
+  const inventory = visualInventory || buildVisualInventoryFromAnalysis(projectAnalysis);
+  const allowed = [
+    ...normalizeStageList(resolvedStage.mayAdd),
+    ...normalizeStageList(resolvedStage.allowedChanges),
   ];
-  const previousLocks = safeArray(previousApprovedStages)
-    .map((item, index) => `Previous approved stage ${index + 1}: ${item.stageName || item.title || item.id}. Preserve its approved objects and composition.`)
-    .join("\n");
-  const stageDelta = stage?.stageDeltaInstructions || stage?.editInstructions || stage?.basePrompt || stage?.description || "";
-  const progressiveRules = template?.id === "progressive-decoration" ? getProgressiveDecorationStageRules(stage) : "";
+  const forbidden = [
+    ...normalizeStageList(template?.forbiddenChanges),
+    ...normalizeStageList(resolvedStage.mustNotShow),
+    ...normalizeStageList(resolvedStage.forbiddenChanges),
+  ];
+  const mustKeep = [
+    ...normalizeStageList(resolvedStage.mustKeep),
+    ...normalizeStageList(inventory.mustKeep),
+    "geometry",
+    "camera",
+    "architecture",
+    "visible text",
+  ];
+  const stageDelta =
+    resolvedStage.stageDeltaInstructions ||
+    resolvedStage.editInstructions ||
+    resolvedStage.basePrompt ||
+    resolvedStage.stagePurpose ||
+    resolvedStage.description ||
+    "";
 
-  return `
+  const prompt = `
 ROLE:
-You are an architectural visualization editor creating ONE controlled image for a video production stage.
-
-PROJECT CONTEXT:
-${projectAnalysis?.summary || inventory.sourceSummary || "Use the provided project inputs as the source of truth."}
+You are an architectural visualization editor creating ONE controlled base image for a video workflow stage.
 
 TEMPLATE:
-${template?.name || template?.label || "Video template"}
+${template?.name || template?.label || template?.id || "Video template"}
+Purpose: ${template?.purpose || template?.description || ""}
 
 CURRENT STAGE:
-${stage?.stageNumber || stage?.index || ""} - ${stage?.stageName || stage?.title || "Stage"}
+${resolvedStage.stageNumber || resolvedStage.index || ""} - ${resolvedStage.stageName || resolvedStage.title || resolvedStage.id || "Stage"}
 
 STAGE OBJECTIVE:
-${stage?.stagePurpose || stage?.description || stageDelta}
+${resolvedStage.stagePurpose || resolvedStage.description || stageDelta}
 
 MANDATORY STAGE DELTA:
 ${stageDelta}
-Apply ONLY this stage delta. Do not jump to the final result early.
-${progressiveRules}
+Apply only this stage delta. This image must be visibly different from the previous stage, but must not jump to the final result early.
 
-VISUAL INVENTORY:
-Architecture: ${inventoryListText(inventory.architecture) || "preserve detected architecture"}
-Large objects: ${inventoryListText(inventory.largeObjects) || "preserve or add only if this stage allows it"}
-Medium objects: ${inventoryListText(inventory.mediumObjects) || "preserve or add only if this stage allows it"}
-Small objects: ${inventoryListText(inventory.smallObjects) || "preserve or add only if this stage allows it"}
-Furniture: ${inventoryListText(inventory.furniture) || "preserve furniture unless this stage explicitly removes or adds it"}
-Texts/signage: ${inventoryListText(inventory.visibleText) || "preserve any visible text exactly if present"}
-Materials: ${inventoryListText(inventory.materials) || "preserve material intent"}
-Colors: ${inventoryListText(inventory.colors) || "preserve color identity unless requested"}
+${buildVisualInventoryLock(inventory)}
 
-ARCHITECTURE LOCK:
-Do not change walls, windows, doors, ceiling, floor, facade, columns, beams, room shape, openings, roofline, built-in elements or proportions.
+PREVIOUS APPROVED STAGE LOCK:
+${buildPreviousApprovedStageLock(previousApprovedStages)}
+
+GEOMETRY LOCK:
+Do not change walls, doors, windows, ceiling, floor, facade, columns, beams, roofline, built-in elements, room shape, scale or proportions.
 
 CAMERA LOCK:
-Preserve original camera position, lens feeling, perspective, crop and composition unless the selected video template explicitly requires a camera movement.
+Preserve camera continuity with the source and previous approved stages. Do not change crop, perspective, horizon or lens unless the template explicitly requires it.
 
 OBJECT LOCK:
-Do not move, morph, replace or delete objects from previous approved stages.
-${previousLocks}
+Do not move, replace, remove, resize, morph or restyle approved objects from previous stages.
 
 TEXT LOCK:
-Do not alter, invent, translate, distort or replace visible text or signage.
+Preserve visible text/signage exactly. Do not invent, translate, blur or distort text.
 
-MUST KEEP:
-${mustKeep.length ? mustKeep.join("\n") : "Architecture, camera, main object identity and visible text."}
+ALLOWED CHANGES:
+${allowed.length ? allowed.map((item) => `- ${item}`).join("\n") : "- Only the mandatory stage delta."}
 
-MAY REMOVE THIS STAGE:
-${mayRemove.length ? mayRemove.join("\n") : "Nothing unless the stage objective explicitly says so."}
+FORBIDDEN CHANGES:
+${forbidden.length ? forbidden.map((item) => `- ${item}`).join("\n") : "- No unrequested changes."}
 
-ALLOWED CHANGES THIS STAGE:
-${allowed.length ? allowed.join("\n") : "Only the stage objective."}
-
-REQUIRED ELEMENTS:
-${mustShow.length ? mustShow.join("\n") : "Only what the stage requires."}
-
-FORBIDDEN THIS STAGE:
-${forbidden.length ? forbidden.join("\n") : "No unrequested changes."}
+NO FINAL EARLY:
+Do not generate objects, decoration, lighting or final result elements that belong to later stages. This output must represent only the current stage.
 
 USER OPTIONS:
-Style: ${userOptions.visualStyle || userOptions.style || "architectural premium"}
-Humans: ${userOptions.includeHumans ? "allowed only if natural and requested" : "none"}
+Style: ${userOptions.representationStyle || userOptions.renderLanguage || userOptions.visualStyle || userOptions.style || "photographic"}
+Light: ${userOptions.lightScenario || "preserve or natural"}
+Time of day: ${userOptions.timeOfDay || "preserve"}
+People: ${userOptions.occupancy || (userOptions.includeHumans ? "allowed if secondary" : "none")}
 Cars: ${userOptions.includeCars ? "allowed only if natural and requested" : "none"}
-Quality: ${userOptions.quality || "high"}
-Fidelity: ${userOptions.fidelityLevel || "strict"}
+Feedback: ${userFeedback || "none"}
+Must keep: ${mustKeep.join(", ")}
+Source brief: ${safeArray(sourceAssets).map(buildSourceAssetPromptBrief).filter(Boolean).join(" ") || "Use the selected project source image exactly."}
 
-USER FEEDBACK:
-${userFeedback || "No additional feedback."}
-
-SOURCE BRIEF:
-${safeArray(sourceAssets).map(buildSourceAssetPromptBrief).filter(Boolean).join("\n") || "Use the selected project source image exactly."}
+OUTPUT REQUIREMENTS:
+Generate one image for this exact stage only. Preserve architectural fidelity. Keep continuity with previous approved stages.
 
 NEGATIVE PROMPT:
-${buildBaseImageNegativePrompt(stage, userOptions)}
-
-OUTPUT:
-Return one photorealistic or selected-style image for this exact stage only. No geometry changes. No camera drift. No object identity changes. No invented architecture. No invented rooms. No warped text. No final-stage result in early stages.
+${resolvedStage.negativePrompt || buildBaseImageNegativePrompt(resolvedStage, userOptions)}
 `;
+  assertPromptContract(prompt, "videoStage");
+  return prompt;
 }
 
 function buildStagePrompt({
@@ -16978,7 +18020,6 @@ function buildStagePrompt({
   feedback = "",
 } = {}) {
   const resolvedTemplate = template || getVideoTemplates().find((item) => item.id === templateId) || getSelectedVideoTemplate();
-  if (advancedPromptOverride) return `${advancedPromptOverride}\n\n${STRICT_ARCHITECTURAL_FIDELITY_PROMPT}`;
   const settings = createVideoProductionSettings({
     userPrompt,
     includeHumans,
@@ -16990,11 +18031,16 @@ function buildStagePrompt({
     .filter((item) => item.status === "approved" && item.templateOutputId !== stage?.id);
   return buildVideoStagePrompt({
     template: resolvedTemplate,
-    stage,
+    stage: advancedPromptOverride
+      ? {
+        ...(stage || {}),
+        stageDeltaInstructions: `${stage?.stageDeltaInstructions || stage?.description || ""}\nUSER ADVANCED OVERRIDE:\n${advancedPromptOverride}`,
+      }
+      : stage,
     visualInventory,
     userOptions: settings,
     previousApprovedStages,
-    userFeedback: feedback,
+    userFeedback: [feedback, advancedPromptOverride ? "Advanced override was applied inside MANDATORY STAGE DELTA." : ""].filter(Boolean).join("\n"),
     sourceAssets,
   });
 }
@@ -17016,31 +18062,30 @@ function buildBaseImagePrompt({ template, output, sourceAsset, settings, feedbac
 }
 
 function buildClipMotionPrompt({ template, stage, baseImage, visualInventory = null, sourceAsset, settings, feedback = "", userPrompt = "", includeHumans = false, includeCars = false }) {
-  const motionMap = {
-    low: "very slow, controlled camera movement, minimal parallax",
-    medium: "smooth cinematic movement with controlled parallax",
-    high: "more dynamic movement while keeping architecture stable and undistorted",
-  };
   const resolvedStage = stage || template?.baseImageOutputs?.find((output) => output.id === baseImage?.templateOutputId) || {};
-  const clipMotion = resolvedStage.clipMotion || {};
   const resolvedSettings = settings || createVideoProductionSettings({ userPrompt, includeHumans, includeCars });
-  return [
-    `Create a short cinematic image-to-video clip for stage: ${baseImage?.stageName || resolvedStage.stageName || "video stage"}.`,
-    `Camera movement: ${clipMotion.cameraMove || template?.defaultCameraMotion || state.projectUi.videoCameraMotion || "slow architectural reveal"}.`,
-    `Speed: ${clipMotion.speed || "slow"}.`,
-    `Transition in: ${clipMotion.transitionIn || "soft cut"}.`,
-    `Transition out: ${clipMotion.transitionOut || "cross dissolve"}.`,
-    template?.lumaPromptTemplate || template?.description || "",
-    `Motion intensity: ${motionMap[resolvedSettings.motionIntensity] || motionMap.medium}.`,
-    (resolvedSettings.userPrompt || userPrompt) ? `User additional prompt: ${resolvedSettings.userPrompt || userPrompt}.` : "",
-    feedback ? `Targeted clip feedback: ${feedback}. Regenerate only this clip and keep the source image/design intact.` : "",
-    safeArray(clipMotion.stabilityRules).join(" "),
-    visualInventory ? `Visual inventory summary: ${visualInventory.sourceSummary || ""}. Preserve: ${safeArray(visualInventory.mustKeep).join(", ")}.` : "",
-    buildSourceAssetPromptBrief(sourceAsset),
-    strictArchitecturalFidelityInstructions(resolvedSettings),
-    buildHumanCarRules(resolvedSettings.includeHumans, resolvedSettings.includeCars),
-    "Do not deform walls, columns, windows, doors, furniture, signage or material joints. Do not invent objects during motion.",
-  ].filter(Boolean).join("\n");
+  const promptContext = buildPromptContext({
+    project: state.project,
+    module: "lumaClip",
+    targetOutput: "clip",
+    primaryAssetId: sourceAsset?.id || baseImage?.assetId || null,
+    selectedAssetIds: [sourceAsset?.id || baseImage?.assetId].filter(Boolean),
+    userOptions: resolvedSettings,
+    userFeedback: feedback || resolvedSettings.userPrompt || userPrompt || "",
+    stage: {
+      baseImageId: baseImage?.id,
+      stageName: baseImage?.stageName || resolvedStage.stageName,
+      stageId: resolvedStage.id,
+    },
+  });
+  promptContext.visualInventory = visualInventory || buildVisualInventoryFromAnalysis(sourceAsset?.analysis || sourceAsset?.metadata?.analysis || null);
+  return buildLumaClipPrompt({
+    template,
+    stage: resolvedStage,
+    baseImage,
+    promptContext,
+    durationSeconds: baseImage?.durationSeconds || resolvedSettings.clipDurationSeconds || 5,
+  });
 }
 
 function normalizeClipDurationSeconds(settings, approvedCount) {
@@ -17055,6 +18100,9 @@ async function generateSingleBaseImage(production, baseItem, output, sourceAsset
   if (!sourceImage) throw new Error("Asset fuente sin imagen usable.");
   const template = getVideoTemplates().find((item) => item.id === production.templateId) || getSelectedVideoTemplate();
   const prompt = buildBaseImagePrompt({ template, output, sourceAsset, settings, feedback });
+  assertPromptContract(prompt, "videoStage");
+  const miniProject = getVideoMiniProjectForProduction(production, { create: false });
+  const visualInventory = miniProject?.metadata?.visualInventory || buildVisualInventoryFromAnalysis(sourceAsset?.analysis || sourceAsset?.metadata?.analysis || null);
   baseItem.prompt = prompt;
   baseItem.negativePrompt = buildBaseImageNegativePrompt(output, settings);
   baseItem.sourceAssetId = sourceAsset.id;
@@ -17075,9 +18123,28 @@ async function generateSingleBaseImage(production, baseItem, output, sourceAsset
         providerPreference: settings.imageProvider === "openai" ? "openai" : settings.imageProvider === "gemini" ? "gemini" : "auto-strict",
         strictFidelity: true,
       },
+      contractName: "videoStage",
     }).catch(() => null)
     : null;
   const fallback = outputRender || await buildLocalRenderFallback(sourceImage);
+  const promptTrace = createPromptTrace({
+    module: "videoStudio",
+    provider: fallback.provider || fallback.source || "local",
+    model: fallback.model || inferPromptModel(fallback.provider || fallback.source || "local"),
+    prompt,
+    negativePrompt: baseItem.negativePrompt,
+    sourceAssetIds: safeArray(production.sourceAssetIds),
+    visualInventory,
+    userOptions: settings,
+    userFeedback: feedback || "",
+    stage: {
+      templateId: production.templateId,
+      stageId: output.id,
+      stageName: output.stageName,
+      stageNumber: output.stageNumber,
+    },
+    contractName: "videoStage",
+  });
   const asset = upsertProjectAsset({
     id: baseItem.assetId || undefined,
     type: "base_image",
@@ -17090,6 +18157,7 @@ async function generateSingleBaseImage(production, baseItem, output, sourceAsset
     parentGalleryItemIds: [],
     miniProjectId: production.id,
     metadata: {
+      ...promptTrace,
       generated: true,
       lifecycle: "gallery_output",
       allowedUse: ["video-clip"],
@@ -17103,6 +18171,8 @@ async function generateSingleBaseImage(production, baseItem, output, sourceAsset
     },
   });
   baseItem.assetId = asset.id;
+  baseItem.metadata = promptTrace;
+  baseItem.visualInventory = visualInventory;
   baseItem.status = "ready";
   baseItem.updatedAt = new Date().toISOString();
   return baseItem;
@@ -17495,7 +18565,25 @@ async function generateSingleClip(production, clip, feedback = "") {
   const settings = createVideoProductionSettings(production.settings || {});
   const stage = getTemplateBaseImageOutputs(template).find((item) => item.id === baseImage.templateOutputId);
   const miniProject = getVideoMiniProjectForProduction(production, { create: false });
-  clip.motionPrompt = buildClipMotionPrompt({ template, stage, baseImage, sourceAsset, visualInventory: miniProject?.metadata?.visualInventory || null, settings, feedback });
+  const visualInventory = baseImage?.visualInventory || baseImage?.metadata?.visualInventory || miniProject?.metadata?.visualInventory || null;
+  clip.motionPrompt = buildClipMotionPrompt({ template, stage, baseImage: { ...baseImage, durationSeconds: clip.durationSeconds }, sourceAsset, visualInventory, settings, feedback });
+  assertPromptContract(clip.motionPrompt, "lumaClip");
+  clip.metadata = createPromptTrace({
+    module: "lumaClip",
+    provider: isLumaReady(state.server) ? "luma" : "mock",
+    model: isLumaReady(state.server) ? "luma" : "mock",
+    prompt: clip.motionPrompt,
+    sourceAssetIds: [baseImage.assetId || sourceAsset.id].filter(Boolean),
+    visualInventory,
+    userOptions: settings,
+    userFeedback: feedback || "",
+    stage: {
+      baseImageId: baseImage.id,
+      stageName: baseImage.stageName,
+      stageId: stage?.id || baseImage.templateOutputId,
+    },
+    contractName: "lumaClip",
+  });
   clip.status = "generating";
   clip.error = "";
   clip.updatedAt = new Date().toISOString();
@@ -17540,6 +18628,13 @@ async function generateSingleClip(production, clip, feedback = "") {
 }
 
 function upsertClipVideoAsset({ production, clip, template, sourceAsset, provider, generationId, videoUrl }) {
+  const promptTrace = {
+    ...(clip.metadata || {}),
+    provider: provider || clip.metadata?.provider || "luma",
+    model: inferPromptModel(provider || clip.metadata?.provider || "luma"),
+    prompt: clip.motionPrompt,
+    contractName: "lumaClip",
+  };
   const asset = upsertProjectAsset({
     id: getClipVideoAsset(clip) ? clip.videoAssetId : undefined,
     type: "clip",
@@ -17551,6 +18646,7 @@ function upsertClipVideoAsset({ production, clip, template, sourceAsset, provide
     parentGalleryItemIds: [clip.sourceImageAssetId].filter(Boolean),
     miniProjectId: production.id,
     metadata: {
+      ...promptTrace,
       generated: true,
       lifecycle: "gallery_output",
       allowedUse: ["final-video", "presentation"],
@@ -17816,6 +18912,17 @@ async function handleComposeFinalVideo() {
   production.status = "composing_final_video";
   production.currentStage = "final";
   renderAll();
+  const finalPrompt = buildFinalCompositionPrompt(production, approvedClips);
+  const finalTrace = createPromptTrace({
+    module: "videoComposer",
+    provider: "local",
+    model: "local-compositor",
+    prompt: finalPrompt,
+    sourceAssetIds: approvedClips.map((clip) => clip.videoAssetId).filter(Boolean),
+    userOptions: production.settings || {},
+    stage: { videoProductionId: production.id, stage: "final-video" },
+    contractName: "finalVideoComposition",
+  });
   const finalAsset = upsertProjectAsset({
     id: production.finalVideoAssetId || undefined,
     type: "video",
@@ -17823,12 +18930,14 @@ async function handleComposeFinalVideo() {
     url: "",
     source: "generated",
     provider: "local",
-    prompt: buildFinalCompositionPrompt(production, approvedClips),
+    prompt: finalPrompt,
     parentGalleryItemIds: approvedClips.map((clip) => clip.videoAssetId),
     status: "processing",
     approvalStatus: "pending",
     miniProjectId: production.id,
     metadata: {
+      ...finalTrace,
+      generated: true,
       videoProductionId: production.id,
       orderedClipAssetIds: approvedClips.map((clip) => clip.videoAssetId),
       compositionStatus: "processing",
@@ -19543,6 +20652,7 @@ function normalizeCreativeElement(element, index = 0) {
     name: element?.name || (type === "text" ? "Texto" : type === "image" ? "Imagen" : "Forma"),
     role: element?.role || element?.metadata?.role || "",
     type,
+    shapeType: element?.shapeType || element?.metadata?.shapeType || "",
     x: clamp(numberOr(element?.x, 80), 0, CREATIVE_EDITOR_SIZE.width),
     y: clamp(numberOr(element?.y, 80), 0, CREATIVE_EDITOR_SIZE.height),
     width: clamp(numberOr(element?.width, 220), 20, CREATIVE_EDITOR_SIZE.width),
@@ -19610,6 +20720,8 @@ function getCreativeEditorImages() {
       name: getProjectMediaDisplayName(item, `Imagen ${index + 1}`),
       src: getProjectMediaSrc(item),
       sourceType: getAssetById(item.id) ? "asset" : "gallery",
+      analysis: item.analysis || item.metadata?.analysis || null,
+      metadata: item.metadata || {},
     }))
     .filter((image) => image.src);
   const legacyImages = safeArray(state.images).map((image, index) => ({
@@ -19739,6 +20851,191 @@ function createSlideFromVariant(slideType, variantId, existingSlide = null) {
   }, 0);
   return preserveCompatibleLayerContent(existingSlide, slide);
 }
+
+const PRESENTATION_LAYOUT_LIBRARY = BROCHURE_SLIDE_TYPES;
+
+function normalizePresentationLayer(templateLayer) {
+  const layer = normalizeCreativeElement(templateLayer);
+  layer.text = layer.content || templateLayer?.text || "";
+  if (layer.type === "image") {
+    layer.slotInstanceId = layer.slotInstanceId || createId("slot");
+    layer.assetId = layer.assetId || layer.sourceAssetId || null;
+    layer.renderedAssetId = layer.renderedAssetId || null;
+    layer.renderMode = layer.renderMode || "original";
+    layer.renderSettings = layer.renderSettings || {};
+    layer.renderHistory = safeArray(layer.renderHistory);
+  }
+  return layer;
+}
+
+function createSlideFromLayout(slideType, variantId, existingSlide = null) {
+  const slide = createSlideFromVariant(slideType, variantId, existingSlide);
+  slide.slideType = slide.sectionId || slideType;
+  slide.layoutVariantId = slide.layout || variantId;
+  slide.layers = slide.elements;
+  return slide;
+}
+
+function createPresentationState(project) {
+  const firstSlide = createSlideFromLayout("cover", "cover-editorial-split");
+
+  return {
+    id: createId("presentation"),
+    title: project?.name || "Presentacion",
+    mode: "brochure",
+    aspectRatio: "16:9",
+    slides: [firstSlide],
+    selectedSlideId: firstSlide.id,
+    selectedLayerId: firstSlide.layers[0]?.id || null,
+    activeTab: "home",
+    clipboard: null,
+    settings: {},
+    exportHistory: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function getSelectedPresentation(project) {
+  if (!project.presentationState) {
+    project.presentationState = createPresentationState(project);
+  }
+  return project.presentationState;
+}
+
+function getSelectedSlide(presentation) {
+  return safeArray(presentation.slides).find((slide) => slide.id === presentation.selectedSlideId) || presentation.slides[0] || null;
+}
+
+function getSelectedLayer(presentation) {
+  const slide = getSelectedSlide(presentation);
+  const layers = safeArray(slide?.layers || slide?.elements);
+  return layers.find((layer) => layer.id === presentation.selectedLayerId) || null;
+}
+
+function addLayerToSlide(project, layerTemplate) {
+  const presentation = getSelectedPresentation(project);
+  const slide = getSelectedSlide(presentation);
+  if (!slide) return null;
+
+  slide.layers = slide.layers || slide.elements || [];
+  slide.elements = slide.elements || slide.layers;
+  const maxZ = Math.max(0, ...safeArray(slide.layers).map((layer) => Number(layer.zIndex) || 0));
+  const layer = normalizePresentationLayer({
+    ...layerTemplate,
+    zIndex: maxZ + 1,
+  });
+
+  slide.layers.push(layer);
+  if (slide.elements !== slide.layers) slide.elements.push(layer);
+  presentation.selectedLayerId = layer.id;
+  slide.updatedAt = new Date().toISOString();
+  presentation.updatedAt = new Date().toISOString();
+  scheduleProjectAutosave("presentation-layer");
+  renderAll();
+  return layer;
+}
+
+const INSERTABLE_OBJECTS = {
+  title: {
+    type: "text",
+    name: "Titulo",
+    role: "title",
+    x: 80,
+    y: 80,
+    width: 500,
+    height: 80,
+    text: "Nuevo titulo",
+    style: { fontFamily: "Fraunces", fontSize: 42, fontWeight: 700, color: "#161412" },
+  },
+  text: {
+    type: "text",
+    name: "Texto",
+    role: "body",
+    x: 80,
+    y: 180,
+    width: 420,
+    height: 120,
+    text: "Nuevo texto",
+    style: { fontFamily: "Inter", fontSize: 18, color: "#4B453D", lineHeight: 1.35 },
+  },
+  imageFrame: {
+    type: "image",
+    name: "Marco de imagen",
+    role: "image",
+    x: 560,
+    y: 100,
+    width: 420,
+    height: 260,
+    objectFit: "cover",
+    style: { radius: 20 },
+  },
+  rectangle: {
+    type: "shape",
+    name: "Rectangulo",
+    role: "shape",
+    shapeType: "rectangle",
+    x: 100,
+    y: 100,
+    width: 220,
+    height: 120,
+    style: { fill: "#F8F4EA", stroke: "#D7C7AA", strokeWidth: 1, radius: 18 },
+  },
+  circle: {
+    type: "shape",
+    name: "Circulo",
+    role: "shape",
+    shapeType: "circle",
+    x: 140,
+    y: 140,
+    width: 120,
+    height: 120,
+    style: { fill: "#B99A5B", stroke: "transparent", strokeWidth: 0, radius: 999 },
+  },
+  line: {
+    type: "shape",
+    name: "Linea",
+    role: "line",
+    shapeType: "line",
+    x: 100,
+    y: 300,
+    width: 320,
+    height: 2,
+    style: { fill: "#B99A5B", stroke: "#B99A5B", strokeWidth: 1, radius: 0 },
+  },
+  divider: {
+    type: "shape",
+    name: "Separador",
+    role: "divider",
+    shapeType: "divider",
+    x: 80,
+    y: 420,
+    width: 480,
+    height: 1,
+    style: { fill: "#D7C7AA", stroke: "transparent", strokeWidth: 0, radius: 0 },
+  },
+  pill: {
+    type: "shape",
+    name: "Pill / Tag",
+    role: "tag",
+    shapeType: "pill",
+    x: 80,
+    y: 80,
+    width: 140,
+    height: 34,
+    style: { fill: "#161412", stroke: "transparent", strokeWidth: 0, radius: 999 },
+  },
+  palette: {
+    type: "palette",
+    name: "Paleta",
+    role: "palette",
+    x: 80,
+    y: 480,
+    width: 300,
+    height: 42,
+    colors: ["#F8F4EA", "#161412", "#B99A5B", "#344B35", "#9C6448"],
+  },
+};
 
 function buildCreativeTemplateElements(templateId, seed = {}) {
   const images = safeArray(seed.images);
@@ -20189,18 +21486,29 @@ const CREATIVE_SLIDE_FUNCTION_OPTIONS = [
 
 function buildBrochurePhotoPrompt(element, slide) {
   const settings = element?.photoSettings || {};
-  const finish = settings.finish || "editorial";
-  const moodboardLayout = settings.moodboardLayout || "";
-  const slideRole = slide?.sectionId || slide?.layout || "brochure";
-  return [
-    `Render this selected brochure image instance for slide role: ${slideRole}.`,
-    `Finish: ${finish}.`,
-    moodboardLayout ? `Moodboard composition mode: ${moodboardLayout}.` : "",
-    settings.prompt ? `User edits for this specific image copy: ${settings.prompt}` : "Keep this image faithful and presentation-ready.",
-    "The rendered output must fit back into the same editable layer slot without changing the deck layout, crop intent, text, colors or neighboring layers.",
-    buildRenderDecisionManifest(),
-    STRICT_ARCHITECTURAL_FIDELITY_PROMPT,
-  ].filter(Boolean).join("\n");
+  const source = findCreativeImageSourceBySrc(element?.src || "");
+  const sourceId = source?.id || element?.sourceAssetId || element?.sourceGalleryItemId || "";
+  const promptContext = buildPromptContext({
+    project: state.project,
+    module: "brochureStudio",
+    targetOutput: "imageLayer",
+    primaryAssetId: sourceId || null,
+    selectedAssetIds: [sourceId].filter(Boolean),
+    userOptions: {
+      ...settings,
+      style: settings.style || settings.finish || "photographic",
+      light: settings.light || "natural",
+      changeRequest: settings.changeRequest || settings.prompt || "",
+    },
+    userFeedback: settings.changeRequest || settings.prompt || "",
+    slide: {
+      ...slide,
+      slideType: slide?.sectionId || slide?.layout || "brochure",
+    },
+    layer: element,
+  });
+  promptContext.visualInventory = buildVisualInventoryFromAnalysis(source?.analysis || source?.metadata?.analysis || null);
+  return buildBrochureImageLayerPrompt(promptContext);
 }
 
 function findCreativeImageSourceBySrc(src = "") {
@@ -20855,16 +22163,16 @@ class CreativeDeckEditor {
     if (action === "add-slide") return this.addSlide();
     if (action === "duplicate-slide") return this.duplicateSlide(id);
     if (action === "delete-slide") return this.deleteSlide(id);
-    if (action === "add-text") return this.addElement("text");
-    if (action === "add-body-text") return this.addElement("text", { name: "Texto descriptivo", y: 150, width: 340, height: 90, content: "Texto editable", style: { fontFamily: state.settings.bodyFont || "Manrope", fontSize: 18, fontWeight: "500", color: "#4B453D" } });
+    if (action === "add-text") return this.addElement(INSERTABLE_OBJECTS.title.type, INSERTABLE_OBJECTS.title);
+    if (action === "add-body-text") return this.addElement(INSERTABLE_OBJECTS.text.type, INSERTABLE_OBJECTS.text);
     if (action === "add-image") return this.addImage(getCreativeEditorImages()[0]?.src || "");
-    if (action === "add-image-frame") return this.addElement("image", { name: "Marco de imagen", x: 360, y: 120, width: 320, height: 210, src: "" });
-    if (action === "add-shape") return this.addElement("shape");
-    if (action === "add-circle") return this.addElement("shape", { name: "Circulo", width: 160, height: 160, style: { backgroundColor: "#D8C5A6", borderRadius: 999 } });
-    if (action === "add-line") return this.addElement("shape", { name: "Linea", height: 3, y: 250, style: { backgroundColor: "#B89A5E", borderRadius: 99 } });
-    if (action === "add-separator") return this.addElement("shape", { name: "Separador", width: 220, height: 2, y: 320, style: { backgroundColor: "#A39788", borderRadius: 99 } });
-    if (action === "add-pill") return this.addElement("shape", { name: "Pill / Tag", width: 140, height: 36, style: { backgroundColor: "#F4F1EA", borderRadius: 999 } });
-    if (action === "add-palette") return this.addElement("palette", { name: "Paleta", width: 260, height: 42, colors: getCreativeEditorPalette().slice(0, 5) });
+    if (action === "add-image-frame") return this.addElement(INSERTABLE_OBJECTS.imageFrame.type, INSERTABLE_OBJECTS.imageFrame);
+    if (action === "add-shape") return this.addElement(INSERTABLE_OBJECTS.rectangle.type, INSERTABLE_OBJECTS.rectangle);
+    if (action === "add-circle") return this.addElement(INSERTABLE_OBJECTS.circle.type, INSERTABLE_OBJECTS.circle);
+    if (action === "add-line") return this.addElement(INSERTABLE_OBJECTS.line.type, INSERTABLE_OBJECTS.line);
+    if (action === "add-separator") return this.addElement(INSERTABLE_OBJECTS.divider.type, INSERTABLE_OBJECTS.divider);
+    if (action === "add-pill") return this.addElement(INSERTABLE_OBJECTS.pill.type, INSERTABLE_OBJECTS.pill);
+    if (action === "add-palette") return this.addElement(INSERTABLE_OBJECTS.palette.type, { ...INSERTABLE_OBJECTS.palette, colors: getCreativeEditorPalette().slice(0, 5) });
     if (action === "delete-element") return this.deleteActiveElement();
     if (action === "duplicate-element") return this.duplicateActiveElement();
     if (action === "layer-up") return this.shiftLayer(1);
@@ -21266,6 +22574,8 @@ class CreativeDeckEditor {
       changeRequest: element.photoSettings?.changeRequest || element.photoSettings?.prompt || "",
       provider: element.photoSettings?.provider || state.projectUi.imageProvider || "auto",
     };
+    const prompt = buildBrochurePhotoPrompt({ ...element, photoSettings: { ...(element.photoSettings || {}), ...renderSettings } }, slide);
+    assertPromptContract(prompt, "brochureImageLayer");
     toast("Renderizando la foto seleccionada para esta diapositiva...", "info");
     try {
       const response = await apiRequest("/api/brochure/render-image-layer", {
@@ -21279,6 +22589,8 @@ class CreativeDeckEditor {
           slotInstanceId: element.slotInstanceId,
           sourceAssetId: source?.id || element.sourceAssetId || element.sourceGalleryItemId || "",
           sourceImageDataUrl,
+          prompt,
+          contractName: "brochureImageLayer",
           renderSettings,
           slideContext: {
             slideType: slide.sectionId,
@@ -21297,11 +22609,30 @@ class CreativeDeckEditor {
       if (!response.ok || !payload?.ok || !payload.renderedAsset) {
         throw new Error(payload?.message || "No se pudo renderizar la imagen seleccionada.");
       }
+      const promptTrace = createPromptTrace({
+        module: "brochureStudio",
+        provider: payload.renderedAsset.provider || payload.provider || "local",
+        model: payload.renderedAsset.metadata?.model || inferPromptModel(payload.renderedAsset.provider || payload.provider || "local"),
+        prompt,
+        sourceAssetIds: [source?.sourceType === "asset" ? source.id : element.sourceAssetId].filter(Boolean),
+        visualInventory: buildVisualInventoryFromAnalysis(source?.analysis || source?.metadata?.analysis || null),
+        userOptions: renderSettings,
+        userFeedback: renderSettings.changeRequest || "",
+        stage: {
+          presentationId: this.state.id || "creative-deck",
+          slideId: slide.id,
+          layerId: element.id,
+          slotInstanceId: element.slotInstanceId,
+        },
+        parentOutputId: element.renderedAssetId || null,
+        contractName: "brochureImageLayer",
+      });
       const galleryItem = addProjectGalleryItem(state.project, {
         ...payload.renderedAsset,
         parentAssetIds: source?.sourceType === "asset" && source.id ? [source.id] : [element.sourceAssetId].filter(Boolean),
         parentGalleryItemIds: source?.sourceType === "gallery" && source.id ? [source.id] : [element.sourceGalleryItemId].filter(Boolean),
         metadata: {
+          ...promptTrace,
           ...(payload.renderedAsset.metadata || {}),
           stage: "brochure-photo-instance",
           slideId: slide.id,
